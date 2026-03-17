@@ -21,6 +21,7 @@ const BROWSER_WASM: &[u8] = include_bytes!("../../web/btrm_browser_bg.wasm");
 const C2S_INPUT: u8 = 0x00;
 const C2S_RESIZE: u8 = 0x01;
 const C2S_SCROLL: u8 = 0x02;
+const C2S_ACK: u8 = 0x03;
 const C2S_CREATE: u8 = 0x10;
 const C2S_FOCUS: u8 = 0x11;
 const C2S_CLOSE: u8 = 0x12;
@@ -138,20 +139,19 @@ struct Pty {
     master_fd: libc::c_int,
     child_pid: libc::pid_t,
     parser: vt100::Parser,
-    prev_snapshot: Vec<u8>,
-    prev_mode: u16,
-    prev_cursor: (u16, u16),
     dirty: bool,
     reader_handle: tokio::task::JoinHandle<()>,
 }
 
 struct ClientState {
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>,
     focus: Option<u16>,
     size: Option<(u16, u16)>,
-    scroll_offset: usize, // 0 = live view, >0 = scrolled back N rows
-    scroll_snap: Vec<u8>, // prev snapshot for scrolled view (per-client)
-    needs_full: bool,     // force full update on next tick (view transition)
+    scroll_offset: usize,    // 0 = live view, >0 = scrolled back N rows
+    scroll_snap: Vec<u8>,    // prev snapshot for scrolled view (per-client)
+    last_sent_snap: Vec<u8>, // last snapshot successfully sent (for live diffs)
+    rtt_us: u64,             // EWMA of RTT in microseconds
+    last_send: Option<tokio::time::Instant>, // time of most recent send (for RTT measurement)
 }
 
 struct Session {
@@ -173,7 +173,7 @@ impl Session {
 
     fn send_to_all(&self, msg: &[u8]) {
         for c in self.clients.values() {
-            let _ = c.tx.send(msg.to_vec());
+            let _ = c.tx.try_send(msg.to_vec());
         }
     }
 
@@ -204,8 +204,14 @@ impl Session {
             return;
         }
         pty.parser.screen_mut().set_size(rows, cols);
-        pty.prev_snapshot.clear();
         pty.dirty = true;
+        // Invalidate per-client snapshots so next send is a full frame
+        for c in self.clients.values_mut() {
+            if c.focus == Some(pty_id) {
+                c.last_sent_snap.clear();
+                c.scroll_snap.clear();
+            }
+        }
         unsafe {
             let ws = libc::winsize {
                 ws_row: rows,
@@ -298,9 +304,6 @@ fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, state: AppState) -> Pty
         master_fd: master,
         child_pid: pid,
         parser: vt100::Parser::new(rows, cols, SCROLLBACK_ROWS),
-        prev_snapshot: Vec::new(),
-        prev_mode: 0,
-        prev_cursor: (0, 0),
         dirty: true,
         reader_handle,
     }
@@ -369,7 +372,7 @@ async fn pty_reader(fd: libc::c_int, pty_id: u16, state: AppState) {
         }
     };
 
-    let mut local_buf = Vec::with_capacity(65536);
+    let mut buf = [0u8; 16384];
 
     loop {
         let mut guard = match async_fd.readable().await {
@@ -377,35 +380,28 @@ async fn pty_reader(fd: libc::c_int, pty_id: u16, state: AppState) {
             Err(_) => break,
         };
 
-        local_buf.clear();
-        let mut eof = false;
-        loop {
-            let mut buf = [0u8; 65536];
-            let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
-            if n > 0 {
-                local_buf.extend_from_slice(&buf[..n as usize]);
-            } else if n == 0 {
-                eof = true;
-                break;
-            } else {
-                let err = std::io::Error::last_os_error();
-                if err.kind() == std::io::ErrorKind::WouldBlock {
-                    break;
-                }
-                eof = true;
-                break;
-            }
-        }
-
-        if !local_buf.is_empty() {
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+        let eof;
+        if n > 0 {
+            let data = &buf[..n as usize];
             let mut sess = state.1.lock().await;
             if let Some(pty) = sess.ptys.get_mut(&pty_id) {
-                pty.parser.process(&local_buf);
+                pty.parser.process(data);
                 pty.dirty = true;
-                respond_to_queries(fd, &local_buf, pty.parser.screen());
+                respond_to_queries(fd, data, pty.parser.screen());
             }
-        } else if !eof {
-            guard.clear_ready();
+            drop(sess);
+            tokio::task::yield_now().await;
+            continue;
+        } else if n == 0 {
+            eof = true;
+        } else {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::WouldBlock {
+                guard.clear_ready();
+                continue;
+            }
+            eof = true;
         }
 
         if eof {
@@ -431,7 +427,21 @@ async fn cleanup_pty(pty_id: u16, state: &AppState) {
     }
 }
 
-fn pack_mode(screen: &vt100::Screen) -> u16 {
+fn pty_lflag(fd: libc::c_int) -> (bool, bool) {
+    unsafe {
+        let mut termios: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(fd, &mut termios) == 0 {
+            (
+                termios.c_lflag & libc::ECHO != 0,
+                termios.c_lflag & libc::ICANON != 0,
+            )
+        } else {
+            (false, false)
+        }
+    }
+}
+
+fn pack_mode(screen: &vt100::Screen, echo: bool, icanon: bool) -> u16 {
     let mut m: u16 = 0;
     if !screen.hide_cursor() {
         m |= 1;
@@ -459,6 +469,12 @@ fn pack_mode(screen: &vt100::Screen) -> u16 {
         vt100::MouseProtocolEncoding::Sgr => 2,
     };
     m |= enc << 7;
+    if echo {
+        m |= 1 << 9;
+    }
+    if icanon {
+        m |= 1 << 10;
+    }
     m
 }
 
@@ -510,42 +526,26 @@ fn build_snapshot_msg(
     msg
 }
 
-/// Build live-view update. Returns None if nothing changed.
-fn build_update(pty: &mut Pty, id: u16) -> Option<Vec<u8>> {
+/// Snapshot current pty state for diffing.
+struct PtySnapshot {
+    snap: Vec<u8>,
+    cursor: (u16, u16),
+    mode: u16,
+    rows: u16,
+    cols: u16,
+}
+
+fn take_snapshot(pty: &Pty) -> PtySnapshot {
+    let (echo, icanon) = pty_lflag(pty.master_fd);
     let screen = pty.parser.screen();
     let (rows, cols) = screen.size();
-    let cur_snap = snapshot_screen(screen);
-    let cursor = screen.cursor_position();
-    let mode = pack_mode(screen);
-
-    let prev = &pty.prev_snapshot;
-    let full = prev.len() != cur_snap.len();
-    let total_cells = rows as usize * cols as usize;
-
-    // Check if anything changed
-    let mut any_dirty = false;
-    if full || cursor != pty.prev_cursor || mode != pty.prev_mode {
-        any_dirty = true;
-    } else {
-        for i in 0..total_cells {
-            let off = i * CELL_SIZE;
-            if cur_snap[off..off + CELL_SIZE] != prev[off..off + CELL_SIZE] {
-                any_dirty = true;
-                break;
-            }
-        }
+    PtySnapshot {
+        snap: snapshot_screen(screen),
+        cursor: screen.cursor_position(),
+        mode: pack_mode(screen, echo, icanon),
+        rows,
+        cols,
     }
-
-    if !any_dirty {
-        return None;
-    }
-
-    let msg = build_snapshot_msg(id, &cur_snap, &pty.prev_snapshot, rows, cols, cursor, mode);
-
-    pty.prev_cursor = cursor;
-    pty.prev_mode = mode;
-    pty.prev_snapshot = cur_snap;
-    Some(msg)
 }
 
 /// Build scrollback-view update for a client at the given offset.
@@ -605,23 +605,22 @@ async fn main() {
 }
 
 async fn tick(state: &AppState) {
+    let now = tokio::time::Instant::now();
     let mut sess = state.1.lock().await;
 
-    // Build live updates for dirty PTYs
-    let mut live_msgs: HashMap<u16, Vec<u8>> = HashMap::new();
+    // Snapshot dirty PTYs
+    let mut snapshots: HashMap<u16, PtySnapshot> = HashMap::new();
     let ids: Vec<u16> = sess.ptys.keys().copied().collect();
     for &id in &ids {
         let pty = sess.ptys.get_mut(&id).unwrap();
         if !pty.dirty {
             continue;
         }
-        if let Some(msg) = build_update(pty, id) {
-            live_msgs.insert(id, msg);
-        }
+        snapshots.insert(id, take_snapshot(pty));
         pty.dirty = false;
     }
 
-    // Collect client IDs and their state to avoid borrow issues
+    // Per-client delivery
     let client_ids: Vec<u64> = sess.clients.keys().copied().collect();
     for cid in client_ids {
         let (focus, scroll_offset) = {
@@ -630,28 +629,20 @@ async fn tick(state: &AppState) {
         };
         let Some(pid) = focus else { continue };
 
-        if scroll_offset == 0 {
-            // Live view
-            let needs_full = sess.clients.get(&cid).unwrap().needs_full;
-            if needs_full {
-                // Client transitioned from scrollback to live — send full snapshot
-                if let Some(pty) = sess.ptys.get(&pid) {
-                    let screen = pty.parser.screen();
-                    let snap = snapshot_screen(screen);
-                    let (rows, cols) = screen.size();
-                    let cursor = screen.cursor_position();
-                    let mode = pack_mode(screen);
-                    let msg = build_snapshot_msg(pid, &snap, &[], rows, cols, cursor, mode);
-                    let c = sess.clients.get_mut(&cid).unwrap();
-                    let _ = c.tx.send(msg);
-                    c.needs_full = false;
-                }
-            } else if let Some(msg) = live_msgs.get(&pid) {
-                let c = sess.clients.get(&cid).unwrap();
-                let _ = c.tx.send(msg.clone());
+        let sent = if scroll_offset == 0 {
+            // Live view: diff from this client's last-sent snapshot
+            let Some(cur) = snapshots.get(&pid) else { continue };
+            let prev = &sess.clients.get(&cid).unwrap().last_sent_snap;
+            let msg = build_snapshot_msg(pid, &cur.snap, prev, cur.rows, cur.cols, cur.cursor, cur.mode);
+            let c = sess.clients.get_mut(&cid).unwrap();
+            if c.tx.try_send(msg).is_ok() {
+                c.last_sent_snap = cur.snap.clone();
+                true
+            } else {
+                false
             }
         } else {
-            // Scrollback view: build per-client update
+            // Scrollback view: per-client diff
             let prev_snap = {
                 let c = sess.clients.get(&cid).unwrap();
                 c.scroll_snap.clone()
@@ -660,9 +651,19 @@ async fn tick(state: &AppState) {
                 let (msg, new_snap) =
                     build_scrollback_update(pty, pid, scroll_offset, &prev_snap);
                 let c = sess.clients.get_mut(&cid).unwrap();
-                let _ = c.tx.send(msg);
-                c.scroll_snap = new_snap;
+                if c.tx.try_send(msg).is_ok() {
+                    c.scroll_snap = new_snap;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
             }
+        };
+        if sent {
+            let c = sess.clients.get_mut(&cid).unwrap();
+            c.last_send = Some(now);
         }
     }
 }
@@ -728,7 +729,7 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
     eprintln!("client authenticated");
 
     let (mut tx, mut rx) = ws.split();
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (out_tx, mut out_rx) = mpsc::channel::<Vec<u8>>(2);
     let client_id;
 
     {
@@ -743,12 +744,14 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
                 size: None,
                 scroll_offset: 0,
                 scroll_snap: Vec::new(),
-                needs_full: false,
+                last_sent_snap: Vec::new(),
+                rtt_us: 0,
+                last_send: None,
             },
         );
         let list = sess.pty_list_msg();
         if let Some(c) = sess.clients.get(&client_id) {
-            let _ = c.tx.send(list);
+            let _ = c.tx.try_send(list);
         }
     }
 
@@ -770,6 +773,29 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
             continue;
         }
 
+        if data[0] == C2S_ACK {
+            let now = tokio::time::Instant::now();
+            let mut sess = state.1.lock().await;
+            if let Some(c) = sess.clients.get_mut(&client_id) {
+                // Measure RTT from last send
+                if let Some(sent_at) = c.last_send {
+                    let sample = now.duration_since(sent_at).as_micros() as u64;
+                    if c.rtt_us == 0 {
+                        c.rtt_us = sample;
+                    } else {
+                        c.rtt_us = (c.rtt_us * 7 + sample) / 8;
+                    }
+                }
+                // Mark focused pty dirty so tick generates the next frame
+                if let Some(pid) = c.focus {
+                    if let Some(pty) = sess.ptys.get_mut(&pid) {
+                        pty.dirty = true;
+                    }
+                }
+            }
+            continue;
+        }
+
         if data[0] == C2S_INPUT && data.len() >= 3 {
             let pid = u16::from_le_bytes([data[1], data[2]]);
             // Any input resets scroll to live view
@@ -779,7 +805,7 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
                     if c.scroll_offset > 0 {
                         c.scroll_offset = 0;
                         c.scroll_snap.clear();
-                        c.needs_full = true;
+                        c.last_sent_snap.clear();
                         if let Some(pty) = sess.ptys.get_mut(&pid) {
                             pty.dirty = true;
                         }
@@ -802,13 +828,11 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
                 if sess.ptys.contains_key(&pid) {
                     if let Some(c) = sess.clients.get_mut(&client_id) {
                         if c.scroll_offset != offset {
-                            let was_scrolled = c.scroll_offset > 0;
-                            let now_scrolled = offset > 0;
                             c.scroll_offset = offset;
                             c.scroll_snap.clear();
-                            // Force full update when transitioning between live and scrollback
-                            if was_scrolled != now_scrolled {
-                                c.needs_full = true;
+                            // Transitioning back to live: clear last_sent_snap for full diff
+                            if offset == 0 {
+                                c.last_sent_snap.clear();
                             }
                         }
                     }
@@ -864,9 +888,9 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
                         c.focus = Some(pid);
                         c.scroll_offset = 0;
                         c.scroll_snap.clear();
+                        c.last_sent_snap.clear();
                     }
                     if let Some(pty) = sess.ptys.get_mut(&pid) {
-                        pty.prev_snapshot.clear();
                         pty.dirty = true;
                     }
                     if let Some((r, c)) = sess.min_size_for_pty(pid) {

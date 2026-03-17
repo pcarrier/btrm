@@ -90,6 +90,11 @@ impl Terminal {
         }
     }
 
+    pub fn set_cell_size(&mut self, cell_width: f64, cell_height: f64) {
+        self.cell_width = cell_width;
+        self.cell_height = cell_height;
+    }
+
     // mode bits: 0=cursor_vis, 1=app_cursor, 2=app_keypad, 3=bracketed_paste, 4-6=mouse_mode, 7-8=mouse_enc
     pub fn mouse_mode(&self) -> u8 {
         ((self.mode >> 4) & 7) as u8
@@ -102,6 +107,20 @@ impl Terminal {
     }
     pub fn bracketed_paste(&self) -> bool {
         self.mode & 8 != 0
+    }
+    pub fn echo(&self) -> bool {
+        self.mode & (1 << 9) != 0
+    }
+    pub fn icanon(&self) -> bool {
+        self.mode & (1 << 10) != 0
+    }
+    #[wasm_bindgen(getter)]
+    pub fn cursor_row(&self) -> u16 {
+        self.cursor_row
+    }
+    #[wasm_bindgen(getter)]
+    pub fn cursor_col(&self) -> u16 {
+        self.cursor_col
     }
 
     /// Feed LZ4-compressed binary update.

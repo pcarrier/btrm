@@ -168,8 +168,6 @@ struct ClientState {
     scroll_offset: usize,    // 0 = live view, >0 = scrolled back N rows
     scroll_snap: Vec<u8>,    // prev snapshot for scrolled view (per-client)
     last_sent_snap: Vec<u8>, // last snapshot successfully sent (for live diffs)
-    rtt_us: u64,             // EWMA of RTT in microseconds
-    last_send: Option<tokio::time::Instant>, // time of most recent send (for RTT measurement)
 }
 
 struct Session {
@@ -623,7 +621,6 @@ async fn main() {
 }
 
 async fn tick(state: &AppState) {
-    let now = tokio::time::Instant::now();
     let mut sess = state.1.lock().await;
 
     // Send title updates
@@ -694,9 +691,10 @@ async fn tick(state: &AppState) {
                 false
             }
         };
-        if sent {
-            let c = sess.clients.get_mut(&cid).unwrap();
-            c.last_send = Some(now);
+        if !sent {
+            if let Some(pty) = sess.ptys.get_mut(&pid) {
+                pty.dirty = true;
+            }
         }
     }
 }
@@ -778,8 +776,6 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
                 scroll_offset: 0,
                 scroll_snap: Vec::new(),
                 last_sent_snap: Vec::new(),
-                rtt_us: 0,
-                last_send: None,
             },
         );
         let list = sess.pty_list_msg();
@@ -807,25 +803,6 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
         }
 
         if data[0] == C2S_ACK {
-            let now = tokio::time::Instant::now();
-            let mut sess = state.1.lock().await;
-            if let Some(c) = sess.clients.get_mut(&client_id) {
-                // Measure RTT from last send
-                if let Some(sent_at) = c.last_send {
-                    let sample = now.duration_since(sent_at).as_micros() as u64;
-                    if c.rtt_us == 0 {
-                        c.rtt_us = sample;
-                    } else {
-                        c.rtt_us = (c.rtt_us * 7 + sample) / 8;
-                    }
-                }
-                // Mark focused pty dirty so tick generates the next frame
-                if let Some(pid) = c.focus {
-                    if let Some(pty) = sess.ptys.get_mut(&pid) {
-                        pty.dirty = true;
-                    }
-                }
-            }
             continue;
         }
 

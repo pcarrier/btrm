@@ -397,7 +397,7 @@ async function main() {
             t.render(offCtx);
             const cw = cell.w * dpr, ch = cell.h * dpr;
             let predLen = 0;
-            if (predicted && (t.echo() || !t.icanon())) {
+            if (predicted && t.echo()) {
                 const cr = t.cursor_row, cc = t.cursor_col;
                 // Clear the original cursor and predicted area
                 const clearLen = Math.min(predicted.length + 1, cols - cc);
@@ -489,7 +489,7 @@ async function main() {
             sendKey(bytes);
             // Predictive input when echo is on
             const t = terminals[focusedPty];
-            if (t && (t.echo() || !t.icanon())) {
+            if (t && t.echo()) {
                 if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                     if (!predicted) {
                         predictedFromRow = t.cursor_row;
@@ -644,9 +644,6 @@ function connect(pass) {
                     }
                 }
                 needsRender = true;
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(new Uint8Array([C2S_ACK]));
-                }
                 break;
             }
             case S2C_CREATED: {

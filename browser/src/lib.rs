@@ -1,5 +1,7 @@
 use wasm_bindgen::prelude::*;
-use web_sys::CanvasRenderingContext2d;
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use std::collections::HashMap;
 
 const CELL_SIZE: usize = 12;
 
@@ -62,6 +64,56 @@ fn color_css(color_type: u8, r: u8, g: u8, b: u8, default: &str, dim: bool) -> S
     }
 }
 
+fn font_str(bold: bool, italic: bool, cell_height: u32) -> String {
+    let mut f = String::new();
+    if bold {
+        f.push_str("bold ");
+    }
+    if italic {
+        f.push_str("italic ");
+    }
+    f.push_str(&format!("{cell_height}px ui-monospace, monospace"));
+    f
+}
+
+/// Pre-render a single glyph (text + optional underline) onto a transparent canvas.
+/// The canvas has size (width × height) matching the cell dimensions.
+fn create_glyph(
+    content: &str,
+    fg_color: &str,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    width: u32,
+    height: u32,
+) -> HtmlCanvasElement {
+    let window = web_sys::window().unwrap_throw();
+    let document = window.document().unwrap_throw();
+    let canvas = document
+        .create_element("canvas")
+        .unwrap_throw()
+        .unchecked_into::<HtmlCanvasElement>();
+    canvas.set_width(width);
+    canvas.set_height(height);
+    let ctx = canvas
+        .get_context("2d")
+        .unwrap_throw()
+        .unwrap_throw()
+        .unchecked_into::<CanvasRenderingContext2d>();
+    ctx.set_font(&font_str(bold, italic, height));
+    ctx.set_text_baseline("bottom");
+    ctx.set_fill_style_str(fg_color);
+    let _ = ctx.fill_text(content, 0.0, height as f64);
+    if underline {
+        ctx.set_stroke_style_str(fg_color);
+        ctx.begin_path();
+        ctx.move_to(0.0, height as f64 - 1.0);
+        ctx.line_to(width as f64, height as f64 - 1.0);
+        ctx.stroke();
+    }
+    canvas
+}
+
 #[wasm_bindgen]
 pub struct Terminal {
     rows: u16,
@@ -74,6 +126,8 @@ pub struct Terminal {
     mode: u16,
     dirty: Vec<bool>,
     all_dirty: bool,
+    /// Glyph cache: key encodes (fg_color, style_bits, content); value is a pre-rendered canvas.
+    glyph_cache: HashMap<String, HtmlCanvasElement>,
 }
 
 #[wasm_bindgen]
@@ -92,6 +146,7 @@ impl Terminal {
             mode: 0,
             dirty: vec![true; total],
             all_dirty: true,
+            glyph_cache: HashMap::new(),
         }
     }
 
@@ -100,6 +155,7 @@ impl Terminal {
         self.cell_height = cell_height;
         self.all_dirty = true;
         self.dirty.fill(true);
+        self.glyph_cache.clear();
     }
 
     // mode bits: 0=cursor_vis, 1=app_cursor, 2=app_keypad, 3=bracketed_paste, 4-6=mouse_mode, 7-8=mouse_enc
@@ -156,6 +212,7 @@ impl Terminal {
             self.cells = vec![0u8; total * CELL_SIZE];
             self.dirty = vec![true; total];
             self.all_dirty = true;
+            self.glyph_cache.clear();
         }
 
         let total_cells = self.rows as usize * self.cols as usize;
@@ -356,10 +413,6 @@ impl Terminal {
         let cols = self.cols as usize;
         let total = self.rows as usize * cols;
 
-        let normal_font = format!("{}px ui-monospace, monospace", ch as u32);
-        ctx.set_font(&normal_font);
-        ctx.set_text_baseline("bottom");
-
         let do_all = self.all_dirty;
         if do_all {
             ctx.set_fill_style_str("#000");
@@ -438,39 +491,34 @@ impl Terminal {
             }
 
             if content_len > 0 {
-                let content =
-                    std::str::from_utf8(&self.cells[idx + 8..idx + 8 + content_len])
-                        .unwrap_or("");
+                // Copy content out first to release the borrow on self.cells
+                // before we mutably borrow self.glyph_cache.
+                let content = {
+                    let bytes = &self.cells[idx + 8..idx + 8 + content_len];
+                    std::str::from_utf8(bytes).unwrap_or("").to_owned()
+                };
+
                 if !content.is_empty() && content != " " {
-                    ctx.save();
-                    ctx.begin_path();
-                    ctx.rect(x, y, cell_w, ch);
-                    ctx.clip();
+                    // Cache key: fg_color + NUL + style_bits + NUL + content
+                    // style_bits: bit0=bold, bit1=italic, bit2=underline, bit3=wide
+                    let style_bits = (bold as u8)
+                        | ((italic as u8) << 1)
+                        | ((underline as u8) << 2)
+                        | ((wide as u8) << 3);
+                    let mut key = fg_color.clone();
+                    key.push('\x00');
+                    key.push(style_bits as char);
+                    key.push('\x00');
+                    key.push_str(&content);
 
-                    if bold || italic {
-                        let mut font = String::new();
-                        if bold {
-                            font.push_str("bold ");
-                        }
-                        if italic {
-                            font.push_str("italic ");
-                        }
-                        font.push_str(&normal_font);
-                        ctx.set_font(&font);
-                    }
+                    let glyph_w = cell_w as u32;
+                    let glyph_h = ch as u32;
+                    let fg = fg_color.clone();
 
-                    ctx.set_fill_style_str(&fg_color);
-                    let _ = ctx.fill_text(content, x, y + ch);
-
-                    if underline {
-                        ctx.set_stroke_style_str(&fg_color);
-                        ctx.begin_path();
-                        ctx.move_to(x, y + ch - 1.0);
-                        ctx.line_to(x + cell_w, y + ch - 1.0);
-                        ctx.stroke();
-                    }
-
-                    ctx.restore();
+                    let glyph = self.glyph_cache.entry(key).or_insert_with(|| {
+                        create_glyph(&content, &fg, bold, italic, underline, glyph_w, glyph_h)
+                    });
+                    let _ = ctx.draw_image_with_html_canvas_element(glyph, x, y);
                 }
             }
         }

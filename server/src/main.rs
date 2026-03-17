@@ -1,5 +1,5 @@
 use lz4_flex::compress_prepend_size;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::CString;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -181,32 +181,31 @@ struct ClientState {
     last_sent_snap: Vec<u8>,
     /// Frames currently in flight (sent, not yet ACKed).
     unacked: u8,
-    /// EWMA RTT estimate in milliseconds. Seed at 20 ms (window=2).
+    /// EWMA RTT estimate in milliseconds.
     rtt_ms: f32,
-    /// Timestamp of the oldest unACKed frame, used to sample RTT.
-    oldest_unacked: Option<std::time::Instant>,
+    /// Send timestamp of each in-flight frame, oldest first.
+    send_times: VecDeque<Instant>,
+    /// Diagnostics: frames sent since last log.
+    frames_sent: u32,
+    /// Diagnostics: ACKs received since last log.
+    acks_recv: u32,
+    /// Diagnostics: last log time.
+    last_log: Instant,
 }
 
-/// Frames to keep in flight so the client can render at the target fps for
-/// its RTT. Target fps scales linearly from 250 fps at ≤10 ms RTT down to
-/// 60 fps at ≥1000 ms RTT; window = ceil(RTT / frame_interval).
+/// Frames to keep in flight: enough to sustain 250 fps at the current RTT.
 fn rtt_window(rtt_ms: f32) -> u8 {
-    const MIN_RTT: f32 = 10.0;
-    const MAX_RTT: f32 = 1000.0;
-    const MAX_FPS: f32 = 250.0;
-    const MIN_FPS: f32 = 60.0;
-
-    let rtt = rtt_ms.clamp(MIN_RTT, MAX_RTT);
-    let t = (rtt - MIN_RTT) / (MAX_RTT - MIN_RTT);
-    let target_fps = MIN_FPS + (MAX_FPS - MIN_FPS) * t;
-    let frame_ms = 1000.0 / target_fps;
-    ((rtt / frame_ms).ceil() as u8).max(1)
+    ((rtt_ms * 250.0 / 1000.0).ceil() as u8).max(1)
 }
 
 struct Session {
     ptys: HashMap<u16, Pty>,
     next_pty_id: u16,
     next_client_id: u64,
+    /// Diagnostics: how many times tick() was called this second.
+    tick_fires: u32,
+    /// Diagnostics: how many ticks found the focused PTY dirty (snapshot taken).
+    tick_snaps: u32,
     clients: HashMap<u64, ClientState>,
 }
 
@@ -217,6 +216,8 @@ impl Session {
             next_pty_id: 1,
             next_client_id: 1,
             clients: HashMap::new(),
+            tick_fires: 0,
+            tick_snaps: 0,
         }
     }
 
@@ -656,6 +657,7 @@ async fn main() {
 
 async fn tick(state: &AppState) {
     let mut sess = state.1.lock().await;
+    sess.tick_fires += 1;
 
     let ids: Vec<u16> = sess.ptys.keys().copied().collect();
     for &id in &ids {
@@ -680,6 +682,7 @@ async fn tick(state: &AppState) {
         }
         snapshots.insert(id, take_snapshot(pty));
         pty.dirty = false;
+        sess.tick_snaps += 1;
     }
 
     let client_ids: Vec<u64> = sess.clients.keys().copied().collect();
@@ -706,10 +709,9 @@ async fn tick(state: &AppState) {
             let c = sess.clients.get_mut(&cid).unwrap();
             if c.tx.try_send(msg).is_ok() {
                 c.last_sent_snap = cur.snap.clone();
-                if c.oldest_unacked.is_none() {
-                    c.oldest_unacked = Some(Instant::now());
-                }
+                c.send_times.push_back(Instant::now());
                 c.unacked += 1;
+                c.frames_sent += 1;
                 true
             } else {
                 false
@@ -725,9 +727,7 @@ async fn tick(state: &AppState) {
                 let c = sess.clients.get_mut(&cid).unwrap();
                 if c.tx.try_send(msg).is_ok() {
                     c.scroll_snap = new_snap;
-                    if c.oldest_unacked.is_none() {
-                        c.oldest_unacked = Some(Instant::now());
-                    }
+                    c.send_times.push_back(Instant::now());
                     c.unacked += 1;
                     true
                 } else {
@@ -766,8 +766,11 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 scroll_snap: Vec::new(),
                 last_sent_snap: Vec::new(),
                 unacked: 0,
-                rtt_ms: 20.0,
-                oldest_unacked: None,
+                rtt_ms: 200.0,
+                send_times: VecDeque::new(),
+                frames_sent: 0,
+                acks_recv: 0,
+                last_log: Instant::now(),
             },
         );
         let list = sess.pty_list_msg();
@@ -806,12 +809,20 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             let mut sess = state.1.lock().await;
             if let Some(c) = sess.clients.get_mut(&client_id) {
                 c.unacked = c.unacked.saturating_sub(1);
-                // Sample RTT when the oldest in-flight frame is acknowledged.
-                if c.unacked == 0 {
-                    if let Some(t) = c.oldest_unacked.take() {
-                        let sample_ms = t.elapsed().as_secs_f32() * 1000.0;
-                        c.rtt_ms = c.rtt_ms * 0.875 + sample_ms * 0.125;
-                    }
+                c.acks_recv += 1;
+                // Sample RTT from every ACK, not just when the window drains.
+                if let Some(t) = c.send_times.pop_front() {
+                    let sample_ms = t.elapsed().as_secs_f32() * 1000.0;
+                    c.rtt_ms = c.rtt_ms * 0.875 + sample_ms * 0.125;
+                }
+                // Periodic diagnostics
+                let do_log = c.last_log.elapsed().as_secs_f32() >= 1.0;
+                let (frames_sent, acks_recv, rtt_ms, unacked) =
+                    (c.frames_sent, c.acks_recv, c.rtt_ms, c.unacked);
+                if do_log {
+                    c.frames_sent = 0;
+                    c.acks_recv = 0;
+                    c.last_log = Instant::now();
                 }
                 if c.unacked < rtt_window(c.rtt_ms) {
                     if let Some(pid) = c.focus {
@@ -819,6 +830,14 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                             pty.dirty = true;
                         }
                     }
+                }
+                if do_log {
+                    eprintln!(
+                        "client {client_id}: sent={frames_sent} acks={acks_recv} rtt={rtt_ms:.0}ms window={} unacked={unacked} | tick_fires={} tick_snaps={}",
+                        rtt_window(rtt_ms), sess.tick_fires, sess.tick_snaps,
+                    );
+                    sess.tick_fires = 0;
+                    sess.tick_snaps = 0;
                 }
             }
             continue;
@@ -913,7 +932,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                         c.scroll_snap.clear();
                         c.last_sent_snap.clear();
                         c.unacked = 0;
-                        c.oldest_unacked = None;
+                        c.send_times.clear();
                     }
                     if let Some(pty) = sess.ptys.get_mut(&pid) {
                         pty.dirty = true;

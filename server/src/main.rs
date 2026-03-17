@@ -735,6 +735,17 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
         let list = sess.pty_list_msg();
         if let Some(c) = sess.clients.get(&client_id) {
             let _ = c.tx.try_send(list);
+            for (&id, pty) in &sess.ptys {
+                let title = &pty.parser.callbacks().title;
+                if !title.is_empty() {
+                    let title_bytes = title.as_bytes();
+                    let mut msg = Vec::with_capacity(3 + title_bytes.len());
+                    msg.push(S2C_TITLE);
+                    msg.extend_from_slice(&id.to_le_bytes());
+                    msg.extend_from_slice(title_bytes);
+                    let _ = c.tx.try_send(msg);
+                }
+            }
         }
     }
 

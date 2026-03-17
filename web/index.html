@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>btrm</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, monospace; }
+#tabs {
+    height: 28px; background: #111; border-bottom: 1px solid #333;
+    overflow-x: auto; white-space: nowrap; user-select: none;
+    line-height: 28px;
+}
+#tabs .tab {
+    display: inline-block; padding: 0 6px 0 12px; color: #888; font: 12px/28px ui-monospace, monospace;
+    cursor: pointer; border-right: 1px solid #222; height: 28px;
+}
+#tabs .tab.active { background: #222; color: #ccc; }
+#tabs .tab:hover { background: #1a1a1a; }
+#tabs .tab .close {
+    display: inline-block; margin-left: 6px; color: #555; font-size: 14px;
+    vertical-align: middle; cursor: pointer; padding: 0 4px;
+}
+#tabs .tab .close:hover { color: #f66; }
+#tabs .newtab {
+    display: inline-block; padding: 0 10px; color: #555; cursor: pointer;
+    font: 14px/28px ui-monospace, monospace; height: 28px;
+}
+#tabs .newtab:hover { color: #ccc; }
+canvas { display: block; outline: none; cursor: text; image-rendering: pixelated; }
+#input-sink {
+    position: fixed; top: -9999px; left: -9999px;
+    width: 1px; height: 1px; opacity: 0;
+    font: 16px ui-monospace, monospace; border: none; resize: none;
+    white-space: pre; overflow: hidden;
+}
+#hud {
+    position: fixed; top: 0; right: 0;
+    color: #444; font: 10px/1 ui-monospace, monospace;
+    padding: 2px 6px; pointer-events: none; z-index: 2;
+}
+#auth {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #ccc; font: 14px/1 ui-monospace, monospace; text-align: center;
+}
+#auth input {
+    background: #222; color: #ccc; border: 1px solid #555;
+    font: 14px/1 ui-monospace, monospace; padding: 4px 8px; margin-top: 8px; outline: none;
+}
+#status {
+    position: fixed; bottom: 4px; left: 4px;
+    color: #444; font: 10px/1 ui-monospace, monospace; pointer-events: none; z-index: 2;
+}
+.selection-overlay {
+    position: fixed; background: rgba(100,150,255,0.3); pointer-events: none; z-index: 1;
+}
+#help-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+    z-index: 10; justify-content: center; align-items: center;
+}
+#help-overlay.visible { display: flex; }
+#help-box {
+    background: #1a1a1a; border: 1px solid #444; border-radius: 6px;
+    padding: 20px 28px; color: #ccc; font: 13px/2 ui-monospace, monospace;
+    max-width: 420px;
+}
+#help-box h2 { font-size: 14px; margin: 0 0 10px; color: #fff; }
+#help-box kbd {
+    background: #333; border: 1px solid #555; border-radius: 3px;
+    padding: 1px 5px; font-size: 12px; color: #eee;
+}
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="auth">passphrase<br><input type="password" id="pass" autofocus></div>
+<div id="status"></div>
+<div id="tabs" style="display:none"></div>
+<canvas id="term" tabindex="0" style="display:none"></canvas>
+<textarea id="input-sink" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+<div id="help-overlay"><div id="help-box">
+<h2>Shortcuts</h2>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> &mdash; New tab<br>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> &mdash; Close tab<br>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>{</kbd> &mdash; Previous tab<br>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>}</kbd> &mdash; Next tab<br>
+<kbd>Shift</kbd>+<kbd>PageUp</kbd>/<kbd>PageDown</kbd> &mdash; Scroll back/forward<br>
+<kbd>Ctrl</kbd>+<kbd>?</kbd> &mdash; Toggle this help
+</div></div>
+<script type="module">
+const _base = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
+const { default: init, Terminal } = await import(_base + 'btrm_browser.js');
+
+const FONT = 'ui-monospace, monospace';
+const C2S_INPUT = 0x00, C2S_RESIZE = 0x01, C2S_SCROLL = 0x02, C2S_CREATE = 0x10, C2S_FOCUS = 0x11, C2S_CLOSE = 0x12;
+const S2C_UPDATE = 0x00, S2C_CREATED = 0x01, S2C_CLOSED = 0x02, S2C_LIST = 0x03;
+
+const hud = document.getElementById('hud');
+const authEl = document.getElementById('auth');
+const passInput = document.getElementById('pass');
+const statusEl = document.getElementById('status');
+const tabsEl = document.getElementById('tabs');
+const canvas = document.getElementById('term');
+const ctx = canvas.getContext('2d');
+const offscreen = document.createElement('canvas');
+const offCtx = offscreen.getContext('2d');
+const inputSink = document.getElementById('input-sink');
+
+let ws, cell, cols, rows;
+let terminals = {};
+let focusedPty = null;
+let ptyIds = [];
+let frames = 0, lastFpsTime = performance.now(), fps = 0;
+let bytesIn = 0, kbps = 0;
+let needsRender = false;
+let savedPass = null;
+let reconnectTimer = null;
+let reconnectDelay = 500;
+let scrollOffset = 0;
+
+// Selection state
+let selecting = false;
+let selStart = null;
+let selEnd = null;
+let selOverlays = [];
+
+function measureCell() {
+    const s = document.createElement('span');
+    s.style.cssText = `font: 16px ${FONT}; position: absolute; visibility: hidden; white-space: pre;`;
+    s.textContent = 'M';
+    document.body.appendChild(s);
+    const r = s.getBoundingClientRect();
+    document.body.removeChild(s);
+    return { w: Math.ceil(r.width), h: Math.ceil(r.height) };
+}
+
+function computeSize() {
+    const tabH = tabsEl.style.display === 'none' ? 0 : 28;
+    cols = Math.floor(window.innerWidth / cell.w);
+    rows = Math.floor((window.innerHeight - tabH) / cell.h);
+    if (cols < 1) cols = 1;
+    if (rows < 1) rows = 1;
+}
+
+function updateTabs() {
+    tabsEl.innerHTML = '';
+    for (const id of ptyIds) {
+        const t = document.createElement('span');
+        t.className = 'tab' + (id === focusedPty ? ' active' : '');
+        const label = document.createTextNode(`#${id}`);
+        t.appendChild(label);
+        const close = document.createElement('span');
+        close.className = 'close';
+        close.textContent = '\u00d7';
+        close.onclick = (e) => { e.stopPropagation(); closePty(id); };
+        t.appendChild(close);
+        t.onclick = () => focusPty(id);
+        t.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closePty(id); } };
+        tabsEl.appendChild(t);
+    }
+    const newBtn = document.createElement('span');
+    newBtn.className = 'newtab';
+    newBtn.textContent = '+';
+    newBtn.onclick = createPty;
+    tabsEl.appendChild(newBtn);
+}
+
+function focusPty(id) {
+    focusedPty = id;
+    scrollOffset = 0;
+    updateTabs();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const msg = new Uint8Array(3);
+        msg[0] = C2S_FOCUS;
+        msg[1] = id & 0xff;
+        msg[2] = (id >> 8) & 0xff;
+        ws.send(msg);
+    }
+    if (terminals[id]) {
+        resizeCanvasBacking();
+        terminals[id].render(offCtx);
+        ctx.drawImage(offscreen, 0, 0);
+    }
+}
+
+function createPty() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    computeSize();
+    const msg = new Uint8Array(5);
+    msg[0] = C2S_CREATE;
+    msg[1] = rows & 0xff;
+    msg[2] = (rows >> 8) & 0xff;
+    msg[3] = cols & 0xff;
+    msg[4] = (cols >> 8) & 0xff;
+    ws.send(msg);
+}
+
+function closePty(id) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const msg = new Uint8Array(3);
+    msg[0] = C2S_CLOSE;
+    msg[1] = id & 0xff;
+    msg[2] = (id >> 8) & 0xff;
+    ws.send(msg);
+}
+
+function sendResizeForPty(ptyId) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const msg = new Uint8Array(7);
+    msg[0] = C2S_RESIZE;
+    msg[1] = ptyId & 0xff;
+    msg[2] = (ptyId >> 8) & 0xff;
+    msg[3] = rows & 0xff;
+    msg[4] = (rows >> 8) & 0xff;
+    msg[5] = cols & 0xff;
+    msg[6] = (cols >> 8) & 0xff;
+    ws.send(msg);
+}
+
+function sendScrollForPty(ptyId, offset) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const msg = new Uint8Array(7);
+    msg[0] = C2S_SCROLL;
+    msg[1] = ptyId & 0xff;
+    msg[2] = (ptyId >> 8) & 0xff;
+    msg[3] = offset & 0xff;
+    msg[4] = (offset >> 8) & 0xff;
+    msg[5] = (offset >> 16) & 0xff;
+    msg[6] = (offset >> 24) & 0xff;
+    ws.send(msg);
+}
+
+function scroll(delta) {
+    if (focusedPty === null) return;
+    scrollOffset = Math.max(0, scrollOffset + delta);
+    sendScrollForPty(focusedPty, scrollOffset);
+    updateHud();
+}
+
+let resizeTimer = null;
+function sendResize() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        computeSize();
+        // Don't resize canvas backing store here — it clears the content.
+        // Just use CSS to size the element; the backing store resizes
+        // when the server sends an update at the new dimensions.
+        canvas.style.width = (cols * cell.w) + 'px';
+        canvas.style.height = (rows * cell.h) + 'px';
+        for (const id of ptyIds) sendResizeForPty(id);
+        updateHud();
+    }, 50);
+}
+
+function resizeCanvasBacking() {
+    const w = cols * cell.w;
+    const h = rows * cell.h;
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        offscreen.width = w;
+        offscreen.height = h;
+    }
+}
+
+function updateHud() {
+    let text = `${cols}\u00d7${rows}  ${fps} fps  ${kbps} kB/s`;
+    if (scrollOffset > 0) text += `  [scroll -${scrollOffset}]`;
+    hud.textContent = text;
+}
+
+function mouseToCell(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        row: Math.min(Math.max(Math.floor((e.clientY - rect.top) / cell.h), 0), rows - 1),
+        col: Math.min(Math.max(Math.floor((e.clientX - rect.left) / cell.w), 0), cols - 1),
+    };
+}
+
+// Terminal mouse event encoding
+function sendMouseEvent(type, e, button) {
+    const t = focusedPty !== null ? terminals[focusedPty] : null;
+    if (!t || t.mouse_mode() === 0) return false;
+
+    const pos = mouseToCell(e);
+    const enc = t.mouse_encoding();
+
+    if (enc === 2) {
+        // SGR encoding: \x1b[<button;col+1;row+1M or m
+        const suffix = type === 'up' ? 'm' : 'M';
+        const seq = `\x1b[<${button};${pos.col + 1};${pos.row + 1}${suffix}`;
+        sendKey(new TextEncoder().encode(seq));
+    } else {
+        // Default encoding: \x1b[M btn+32 col+33 row+33
+        if (type === 'up') button = 3; // release
+        const seq = new Uint8Array([
+            0x1b, 0x5b, 0x4d,
+            button + 32,
+            pos.col + 33,
+            pos.row + 33,
+        ]);
+        sendKey(seq);
+    }
+    return true;
+}
+
+function clearSelection() {
+    for (const el of selOverlays) el.remove();
+    selOverlays = [];
+    selStart = selEnd = null;
+}
+
+function drawSelection() {
+    for (const el of selOverlays) el.remove();
+    selOverlays = [];
+    if (!selStart || !selEnd) return;
+
+    let sr = selStart.row, sc = selStart.col;
+    let er = selEnd.row, ec = selEnd.col;
+    if (sr > er || (sr === er && sc > ec)) {
+        [sr, sc, er, ec] = [er, ec, sr, sc];
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    for (let r = sr; r <= er; r++) {
+        const c0 = r === sr ? sc : 0;
+        const c1 = r === er ? ec : cols - 1;
+        const el = document.createElement('div');
+        el.className = 'selection-overlay';
+        el.style.left = (rect.left + c0 * cell.w) + 'px';
+        el.style.top = (rect.top + r * cell.h) + 'px';
+        el.style.width = ((c1 - c0 + 1) * cell.w) + 'px';
+        el.style.height = cell.h + 'px';
+        document.body.appendChild(el);
+        selOverlays.push(el);
+    }
+}
+
+function copySelection() {
+    if (!selStart || !selEnd || focusedPty === null || !terminals[focusedPty]) return;
+    let sr = selStart.row, sc = selStart.col;
+    let er = selEnd.row, ec = selEnd.col;
+    if (sr > er || (sr === er && sc > ec)) {
+        [sr, sc, er, ec] = [er, ec, sr, sc];
+    }
+    const t = terminals[focusedPty];
+    const text = t.get_text(sr, sc, er, ec);
+    const html = t.get_html(sr, sc, er, ec);
+    if (text) {
+        navigator.clipboard.write([new ClipboardItem({
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+            'text/html': new Blob([html], { type: 'text/html' }),
+        })]);
+    }
+}
+
+async function main() {
+    await init();
+    cell = measureCell();
+    computeSize();
+
+    setInterval(() => {
+        const now = performance.now();
+        const dt = (now - lastFpsTime) / 1000;
+        fps = Math.round(frames / dt);
+        kbps = Math.round(bytesIn / dt / 1024);
+        frames = 0;
+        bytesIn = 0;
+        lastFpsTime = now;
+        updateHud();
+    }, 1000);
+
+    function renderLoop() {
+        if (needsRender && focusedPty !== null && terminals[focusedPty]) {
+            resizeCanvasBacking();
+            terminals[focusedPty].render(offCtx);
+            ctx.drawImage(offscreen, 0, 0);
+            frames++;
+            needsRender = false;
+        }
+        requestAnimationFrame(renderLoop);
+    }
+    requestAnimationFrame(renderLoop);
+
+    passInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        savedPass = passInput.value;
+        connect(savedPass);
+        passInput.value = '';
+    });
+
+    window.addEventListener('resize', sendResize);
+
+    const helpOverlay = document.getElementById('help-overlay');
+    function toggleHelp() { helpOverlay.classList.toggle('visible'); }
+    helpOverlay.addEventListener('click', (e) => { if (e.target === helpOverlay) toggleHelp(); });
+
+    // Keyboard
+    inputSink.addEventListener('keydown', (e) => {
+        // Ctrl+Shift+/ (Ctrl+?)
+        if (e.ctrlKey && e.shiftKey && (e.key === '?' || e.code === 'Slash')) {
+            e.preventDefault();
+            toggleHelp();
+            return;
+        }
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (e.isComposing) return;
+
+        // Tab management
+        if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+            if (e.key === 'T') { e.preventDefault(); createPty(); return; }
+            if (e.key === 'W') { e.preventDefault(); if (focusedPty !== null) closePty(focusedPty); return; }
+            if ((e.key === '{' || e.code === 'BracketLeft') && ptyIds.length > 1 && focusedPty !== null) {
+                e.preventDefault();
+                focusPty(ptyIds[(ptyIds.indexOf(focusedPty) - 1 + ptyIds.length) % ptyIds.length]);
+                return;
+            }
+            if ((e.key === '}' || e.code === 'BracketRight') && ptyIds.length > 1 && focusedPty !== null) {
+                e.preventDefault();
+                focusPty(ptyIds[(ptyIds.indexOf(focusedPty) + 1) % ptyIds.length]);
+                return;
+            }
+        }
+
+        // Scrollback: Shift+PageUp/Down
+        if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if (e.key === 'PageUp') { e.preventDefault(); scroll(rows); return; }
+            if (e.key === 'PageDown') { e.preventDefault(); scroll(-rows); return; }
+        }
+
+        if (focusedPty === null) return;
+        if (e.key === 'Dead') return;
+
+        // Any real input resets scroll to live
+        if (scrollOffset > 0) {
+            scrollOffset = 0;
+            sendScrollForPty(focusedPty, 0);
+        }
+
+        const bytes = keyToBytes(e);
+        if (bytes) {
+            e.preventDefault();
+            sendKey(bytes);
+        }
+    });
+
+    inputSink.addEventListener('compositionend', (e) => {
+        if (e.data && focusedPty !== null) sendKey(new TextEncoder().encode(e.data));
+        inputSink.value = '';
+    });
+
+    inputSink.addEventListener('input', (e) => {
+        if (e.isComposing) return;
+        if (inputSink.value && focusedPty !== null) sendKey(new TextEncoder().encode(inputSink.value));
+        inputSink.value = '';
+    });
+
+    // Mouse: forward to PTY if mouse mode is active, otherwise do selection
+    canvas.addEventListener('mousedown', (e) => {
+        if (!e.shiftKey && sendMouseEvent('down', e, e.button)) {
+            e.preventDefault();
+            return;
+        }
+        if (e.button === 0) {
+            clearSelection();
+            selecting = true;
+            selStart = mouseToCell(e);
+            selEnd = selStart;
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (!e.shiftKey) {
+            const t = focusedPty !== null ? terminals[focusedPty] : null;
+            if (t && (t.mouse_mode() === 3 || t.mouse_mode() === 4)) {
+                const button = e.buttons & 1 ? 0 : e.buttons & 2 ? 2 : e.buttons & 4 ? 1 : 0;
+                if (e.buttons || t.mouse_mode() === 4) {
+                    sendMouseEvent('move', e, button + 32);
+                    return;
+                }
+            }
+        }
+        if (selecting) {
+            selEnd = mouseToCell(e);
+            drawSelection();
+        }
+    });
+
+    window.addEventListener('mouseup', (e) => {
+        if (!e.shiftKey && sendMouseEvent('up', e, e.button)) {
+            e.preventDefault();
+            return;
+        }
+        if (!selecting) return;
+        selecting = false;
+        selEnd = mouseToCell(e);
+        drawSelection();
+        if (selStart && selEnd && (selStart.row !== selEnd.row || selStart.col !== selEnd.col)) {
+            copySelection();
+        }
+        clearSelection();
+        inputSink.focus();
+    });
+
+    // Scroll wheel: scrollback when no mouse mode, forward to pty otherwise
+    canvas.addEventListener('wheel', (e) => {
+        const t = focusedPty !== null ? terminals[focusedPty] : null;
+        if (t && t.mouse_mode() > 0) {
+            e.preventDefault();
+            const button = e.deltaY < 0 ? 64 : 65;
+            sendMouseEvent('down', e, button);
+        } else {
+            e.preventDefault();
+            const lines = Math.round(-e.deltaY / 20) || (e.deltaY > 0 ? -3 : 3);
+            scroll(lines);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('contextmenu', (e) => {
+        const t = focusedPty !== null ? terminals[focusedPty] : null;
+        if (t && t.mouse_mode() > 0) e.preventDefault();
+    });
+
+    canvas.addEventListener('click', () => inputSink.focus());
+}
+
+function connect(pass) {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    statusEl.textContent = 'connecting\u2026';
+    const wsURL = (location.protocol === 'https:' ? 'wss:' : 'ws:') +
+        '//' + location.host + location.pathname;
+    ws = new WebSocket(wsURL);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+        statusEl.textContent = 'authenticating\u2026';
+        ws.send(pass);
+    };
+
+    ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+            if (e.data === 'ok') {
+                authEl.style.display = 'none';
+                tabsEl.style.display = '';
+                canvas.style.display = 'block';
+                statusEl.textContent = '';
+                reconnectDelay = 500;
+                computeSize();
+                resizeCanvasBacking();
+                updateTabs();
+                inputSink.focus();
+            } else {
+                statusEl.textContent = 'auth failed';
+                savedPass = null;
+            }
+            return;
+        }
+
+        const data = new Uint8Array(e.data);
+        if (data.length === 0) return;
+        bytesIn += data.length;
+
+        switch (data[0]) {
+            case S2C_UPDATE: {
+                if (data.length < 3) break;
+                const ptyId = data[1] | (data[2] << 8);
+                const payload = data.slice(3);
+                if (!terminals[ptyId]) {
+                    terminals[ptyId] = new Terminal(rows, cols, cell.w, cell.h);
+                }
+                terminals[ptyId].feed_compressed(payload);
+                needsRender = true;
+                break;
+            }
+            case S2C_CREATED: {
+                if (data.length < 3) break;
+                const id = data[1] | (data[2] << 8);
+                if (!ptyIds.includes(id)) ptyIds.push(id);
+                if (!terminals[id]) terminals[id] = new Terminal(rows, cols, cell.w, cell.h);
+                focusedPty = id;
+                updateTabs();
+                break;
+            }
+            case S2C_CLOSED: {
+                if (data.length < 3) break;
+                const id = data[1] | (data[2] << 8);
+                ptyIds = ptyIds.filter(x => x !== id);
+                if (terminals[id]) { terminals[id].free(); delete terminals[id]; }
+                if (focusedPty === id) {
+                    focusedPty = ptyIds.length > 0 ? ptyIds[ptyIds.length - 1] : null;
+                    if (focusedPty !== null) {
+                        focusPty(focusedPty);
+                    } else {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        createPty();
+                    }
+                }
+                updateTabs();
+                break;
+            }
+            case S2C_LIST: {
+                if (data.length < 3) break;
+                const count = data[1] | (data[2] << 8);
+                ptyIds = [];
+                for (let i = 0; i < count; i++) {
+                    const off = 3 + i * 2;
+                    if (off + 1 < data.length) ptyIds.push(data[off] | (data[off + 1] << 8));
+                }
+                updateTabs();
+                if (ptyIds.length > 0 && focusedPty === null) focusPty(ptyIds[0]);
+                if (ptyIds.length === 0) createPty();
+                for (const id of ptyIds) sendResizeForPty(id);
+                break;
+            }
+        }
+    };
+
+    ws.onerror = () => {};
+
+    ws.onclose = () => {
+        statusEl.textContent = 'disconnected';
+        if (savedPass) {
+            reconnectTimer = setTimeout(() => {
+                statusEl.textContent = 'reconnecting\u2026';
+                connect(savedPass);
+            }, reconnectDelay);
+            reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+        }
+    };
+}
+
+function sendKey(data) {
+    if (focusedPty === null) return;
+    const msg = new Uint8Array(3 + data.length);
+    msg[0] = C2S_INPUT;
+    msg[1] = focusedPty & 0xff;
+    msg[2] = (focusedPty >> 8) & 0xff;
+    msg.set(data, 3);
+    ws.send(msg);
+}
+
+function keyToBytes(e) {
+    const enc = new TextEncoder();
+    const t = focusedPty !== null ? terminals[focusedPty] : null;
+    const appCursor = t && t.app_cursor();
+
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+        const code = e.key.toLowerCase().charCodeAt(0);
+        if (code >= 97 && code <= 122) return new Uint8Array([code - 96]);
+        if (e.key === '[') return new Uint8Array([0x1b]);
+        if (e.key === '\\') return new Uint8Array([0x1c]);
+        if (e.key === ']') return new Uint8Array([0x1d]);
+    }
+
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+        if (e.key === '?') return new Uint8Array([0x7f]);
+        if (e.key === ' ' || e.key === '@') return new Uint8Array([0x00]);
+    }
+
+    // Arrow keys with modifier support
+    // Modifier param: 1 + (shift?1:0) + (alt?2:0) + (ctrl?4:0) + (meta?8:0)
+    const arrows = { ArrowUp: 'A', ArrowDown: 'B', ArrowRight: 'C', ArrowLeft: 'D' };
+    if (arrows[e.key]) {
+        const mod = (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0) + (e.metaKey ? 8 : 0);
+        if (mod) {
+            return enc.encode(`\x1b[1;${mod + 1}${arrows[e.key]}`);
+        }
+        const prefix = appCursor ? '\x1bO' : '\x1b[';
+        return enc.encode(prefix + arrows[e.key]);
+    }
+
+    const mod = (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0) + (e.metaKey ? 8 : 0);
+
+    // Keys using CSI code ~ format: \x1b[code;modifer~
+    const tilde = { PageUp: '5', PageDown: '6', Delete: '3', Insert: '2' };
+    if (tilde[e.key]) {
+        if (mod) return enc.encode(`\x1b[${tilde[e.key]};${mod + 1}~`);
+        return enc.encode(`\x1b[${tilde[e.key]}~`);
+    }
+
+    // Home/End: \x1b[1;modH or \x1b[H
+    const he = { Home: 'H', End: 'F' };
+    if (he[e.key]) {
+        if (mod) return enc.encode(`\x1b[1;${mod + 1}${he[e.key]}`);
+        return enc.encode(`\x1b[${he[e.key]}`);
+    }
+
+    // F1-F4: SS3 format, with modifiers use CSI
+    const f14 = { F1: 'P', F2: 'Q', F3: 'R', F4: 'S' };
+    if (f14[e.key]) {
+        if (mod) return enc.encode(`\x1b[1;${mod + 1}${f14[e.key]}`);
+        return enc.encode(`\x1bO${f14[e.key]}`);
+    }
+
+    // F5-F12: tilde format
+    const fkeys = { F5: '15', F6: '17', F7: '18', F8: '19', F9: '20', F10: '21', F11: '23', F12: '24' };
+    if (fkeys[e.key]) {
+        if (mod) return enc.encode(`\x1b[${fkeys[e.key]};${mod + 1}~`);
+        return enc.encode(`\x1b[${fkeys[e.key]}~`);
+    }
+
+    const simple = { Enter: '\r', Backspace: '\x7f', Tab: '\t', Escape: '\x1b' };
+    if (simple[e.key]) return enc.encode(simple[e.key]);
+
+    if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1) {
+        const code = e.key.charCodeAt(0);
+        if (code >= 0x20 && code <= 0x7e) return enc.encode('\x1b' + e.key);
+        return enc.encode(e.key);
+    }
+
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        return enc.encode(e.key);
+    }
+
+    return null;
+}
+
+main().catch(console.error);
+</script>
+</body>
+</html>

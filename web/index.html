@@ -636,6 +636,7 @@ function connect(pass) {
                     terminals[ptyId] = new Terminal(rows, cols, cell.w * dpr, cell.h * dpr);
                 }
                 terminals[ptyId].feed_compressed(payload);
+                ws.send(new Uint8Array([C2S_ACK]));
                 if (ptyId === focusedPty && predicted) {
                     const t = terminals[ptyId];
                     const cr = t.cursor_row, cc = t.cursor_col;

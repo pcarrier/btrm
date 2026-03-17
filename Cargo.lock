@@ -92,6 +92,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "blit-demo"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "vt100",
+]
+
+[[package]]
 name = "blit-gateway"
 version = "0.1.0"
 dependencies = [

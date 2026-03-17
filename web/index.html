@@ -175,6 +175,7 @@ function updateTabs() {
 function focusPty(id) {
     focusedPty = id;
     scrollOffset = 0;
+    predicted = '';
     updateTabs();
     const title = ptyTitles[id];
     document.title = title ? `${title} — blit` : 'blit';
@@ -185,12 +186,15 @@ function focusPty(id) {
         msg[2] = (id >> 8) & 0xff;
         ws.send(msg);
     }
+    resizeCanvasBacking();
     if (terminals[id]) {
-        resizeCanvasBacking();
         terminals[id].render(offCtx);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(offscreen, 0, 0);
+    } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+    inputSink.focus();
 }
 
 function createPty() {
@@ -651,8 +655,7 @@ function connect(pass) {
                 const id = data[1] | (data[2] << 8);
                 if (!ptyIds.includes(id)) ptyIds.push(id);
                 if (!terminals[id]) terminals[id] = new Terminal(rows, cols, cell.w * dpr, cell.h * dpr);
-                focusedPty = id;
-                updateTabs();
+                focusPty(id);
                 break;
             }
             case S2C_CLOSED: {

@@ -15,8 +15,8 @@ use tokio::sync::{mpsc, Mutex};
 type PtyFds = Arc<std::sync::RwLock<HashMap<u16, RawFd>>>;
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
-const BROWSER_JS: &[u8] = include_bytes!("../../web/btrm_browser.js");
-const BROWSER_WASM: &[u8] = include_bytes!("../../web/btrm_browser_bg.wasm");
+const BROWSER_JS: &[u8] = include_bytes!("../../web/blit_browser.js");
+const BROWSER_WASM: &[u8] = include_bytes!("../../web/blit_browser_bg.wasm");
 
 const C2S_INPUT: u8 = 0x00;
 const C2S_RESIZE: u8 = 0x01;
@@ -30,6 +30,7 @@ const S2C_UPDATE: u8 = 0x00;
 const S2C_CREATED: u8 = 0x01;
 const S2C_CLOSED: u8 = 0x02;
 const S2C_LIST: u8 = 0x03;
+const S2C_TITLE: u8 = 0x04;
 
 // Cell: 12 bytes
 // [0]    flags: fg_type(2) | bg_type(2) | bold(1) | dim(1) | italic(1) | underline(1)
@@ -42,6 +43,23 @@ const CELL_SIZE: usize = 12;
 // ~10MB of scrollback at 80 cols ≈ 10_000_000 / (80 * 12) ≈ 10416 rows
 // Use a generous fixed row count; vt100 crate manages memory internally.
 const SCROLLBACK_ROWS: usize = 100_000;
+
+#[derive(Default)]
+struct TitleCallbacks {
+    title: String,
+    title_dirty: bool,
+}
+
+impl vt100::Callbacks for TitleCallbacks {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        self.title = String::from_utf8_lossy(title).into_owned();
+        self.title_dirty = true;
+    }
+    fn set_window_icon_name(&mut self, _: &mut vt100::Screen, name: &[u8]) {
+        self.title = String::from_utf8_lossy(name).into_owned();
+        self.title_dirty = true;
+    }
+}
 
 struct Config {
     passphrase: String,
@@ -138,7 +156,7 @@ fn snapshot_screen(screen: &vt100::Screen) -> Vec<u8> {
 struct Pty {
     master_fd: libc::c_int,
     child_pid: libc::pid_t,
-    parser: vt100::Parser,
+    parser: vt100::Parser<TitleCallbacks>,
     dirty: bool,
     reader_handle: tokio::task::JoinHandle<()>,
 }
@@ -303,7 +321,7 @@ fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, state: AppState) -> Pty
     Pty {
         master_fd: master,
         child_pid: pid,
-        parser: vt100::Parser::new(rows, cols, SCROLLBACK_ROWS),
+        parser: vt100::Parser::new_with_callbacks(rows, cols, SCROLLBACK_ROWS, TitleCallbacks::default()),
         dirty: true,
         reader_handle,
     }
@@ -573,12 +591,12 @@ fn build_scrollback_update(
 
 #[tokio::main]
 async fn main() {
-    let passphrase = std::env::var("BTRM_PASS").unwrap_or_else(|_| {
-        eprintln!("BTRM_PASS environment variable required");
+    let passphrase = std::env::var("BLIT_PASS").unwrap_or_else(|_| {
+        eprintln!("BLIT_PASS environment variable required");
         std::process::exit(1);
     });
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let addr = std::env::var("BTRM_ADDR").unwrap_or_else(|_| "0.0.0.0:3264".into());
+    let addr = std::env::var("BLIT_ADDR").unwrap_or_else(|_| "0.0.0.0:3264".into());
 
     let state: AppState = Arc::new((
         Config { passphrase, shell },
@@ -608,9 +626,24 @@ async fn tick(state: &AppState) {
     let now = tokio::time::Instant::now();
     let mut sess = state.1.lock().await;
 
+    // Send title updates
+    let ids: Vec<u16> = sess.ptys.keys().copied().collect();
+    for &id in &ids {
+        let pty = sess.ptys.get_mut(&id).unwrap();
+        if pty.parser.callbacks().title_dirty {
+            let title = pty.parser.callbacks().title.clone();
+            pty.parser.callbacks_mut().title_dirty = false;
+            let title_bytes = title.as_bytes();
+            let mut msg = Vec::with_capacity(3 + title_bytes.len());
+            msg.push(S2C_TITLE);
+            msg.extend_from_slice(&id.to_le_bytes());
+            msg.extend_from_slice(title_bytes);
+            sess.send_to_all(&msg);
+        }
+    }
+
     // Snapshot dirty PTYs
     let mut snapshots: HashMap<u16, PtySnapshot> = HashMap::new();
-    let ids: Vec<u16> = sess.ptys.keys().copied().collect();
     for &id in &ids {
         let pty = sess.ptys.get_mut(&id).unwrap();
         if !pty.dirty {
@@ -673,14 +706,14 @@ async fn root_handler(
     request: axum::extract::Request,
 ) -> Response {
     let path = request.uri().path();
-    if path.ends_with("/btrm_browser.js") {
+    if path.ends_with("/blit_browser.js") {
         return (
             [(axum::http::header::CONTENT_TYPE, "application/javascript")],
             BROWSER_JS,
         )
             .into_response();
     }
-    if path.ends_with("/btrm_browser_bg.wasm") {
+    if path.ends_with("/blit_browser_bg.wasm") {
         return (
             [(axum::http::header::CONTENT_TYPE, "application/wasm")],
             BROWSER_WASM,

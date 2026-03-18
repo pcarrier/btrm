@@ -92,6 +92,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "blit-cli"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "lz4_flex",
+ "tokio",
+]
+
+[[package]]
 name = "blit-demo"
 version = "0.1.0"
 dependencies = [

@@ -3,6 +3,14 @@ use std::time::{Duration, Instant};
 
 const GLYPHS: &[u8] = b"@#$%&*+=<>^~!?|/\\[]{}()0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
+fn env_u64(name: &str, default: u64, min: u64, max: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|v| v.clamp(min, max))
+        .unwrap_or(default)
+}
+
 fn get_term_size() -> (u16, u16) {
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
@@ -33,6 +41,16 @@ impl Rng {
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         self.0
+    }
+
+    #[inline(always)]
+    fn next_f32(&mut self) -> f32 {
+        (self.next() as f64 / u64::MAX as f64) as f32
+    }
+
+    #[inline(always)]
+    fn range_f32(&mut self, min: f32, max: f32) -> f32 {
+        min + self.next_f32() * (max - min)
     }
 }
 
@@ -99,11 +117,84 @@ impl Drop for RawMode {
     }
 }
 
-/// Expanding ring emitted from a click.
+/// Short-lived click pulse that emits extra particles.
 struct Burst {
     col: u16, // 1-indexed
     row: u16,
     age: u8,
+}
+
+fn stamp_particle(
+    seq_buf: &mut Vec<u8>,
+    rng: &mut Rng,
+    col: f32,
+    row: f32,
+    hue: u16,
+    cols: u16,
+    rows: u16,
+    spread_x: f32,
+    spread_y: f32,
+) {
+    let stamp_col = (col + rng.range_f32(-spread_x, spread_x)).round() as i32;
+    let stamp_row = (row + rng.range_f32(-spread_y, spread_y)).round() as i32;
+    if !(1..=cols as i32).contains(&stamp_col) || !(1..=rows as i32).contains(&stamp_row) {
+        return;
+    }
+    let glyph = GLYPHS[(rng.next() % GLYPHS.len() as u64) as usize];
+    let sat = (190.0 + rng.range_f32(0.0, 65.0)).round() as u8;
+    let val = (155.0 + rng.range_f32(0.0, 100.0)).round() as u8;
+    let (r, g, b) = hsv_to_rgb(hue, sat, val);
+    let glyph = glyph as char;
+    write!(
+        seq_buf,
+        "\x1b[{stamp_row};{stamp_col}H\x1b[38;2;{r};{g};{b}m{glyph}"
+    )
+    .unwrap();
+}
+
+fn stamp_splash(
+    seq_buf: &mut Vec<u8>,
+    rng: &mut Rng,
+    col: f32,
+    row: f32,
+    hue: u16,
+    cols: u16,
+    rows: u16,
+    count: usize,
+    radius_x: f32,
+    radius_y: f32,
+    direction: Option<(f32, f32)>,
+) {
+    if count == 0 {
+        return;
+    }
+
+    let (base_angle, spread) = match direction {
+        Some((dx, dy)) if dx.abs() + dy.abs() > 0.1 => {
+            (dy.atan2(dx) + std::f32::consts::PI, 0.9)
+        }
+        _ => (0.0, std::f32::consts::PI),
+    };
+
+    for i in 0..count {
+        let angle = if spread >= std::f32::consts::PI {
+            rng.range_f32(0.0, std::f32::consts::TAU)
+        } else {
+            base_angle + rng.range_f32(-spread, spread)
+        };
+        let distance = rng.range_f32(0.25, 1.0);
+        stamp_particle(
+            seq_buf,
+            rng,
+            col + angle.cos() * radius_x * distance,
+            row + angle.sin() * radius_y * distance,
+            (hue + (i as u16 * 7)) % 360,
+            cols,
+            rows,
+            0.55,
+            0.4,
+        );
+    }
 }
 
 fn main() -> io::Result<()> {
@@ -122,13 +213,15 @@ fn main() -> io::Result<()> {
     let _raw = RawMode::enter();
     let _cleanup = Cleanup; // dropped before _raw
 
-    let frame_interval = Duration::from_nanos(5_000_000);   // 200 Hz
+    let target_fps = env_u64("BLIT_DEMO_FPS", 120, 1, 1_000);
+    let frame_interval = Duration::from_nanos(1_000_000_000 / target_fps);
     let title_interval = Duration::from_nanos(100_000_000); //  10 Hz
 
     let mut rng = Rng::new();
     let mut frame: u64 = 0;
     let mut last_title = Instant::now();
     let start = Instant::now();
+    let mut next_frame_at = start + frame_interval;
 
     let mut seq_buf = Vec::with_capacity(64 * 1024);
     let mut stdin_buf = [0u8; 4096];
@@ -136,7 +229,10 @@ fn main() -> io::Result<()> {
     // Mouse position (1-indexed); start centered
     let mut mouse_col: u16 = cols / 2 + 1;
     let mut mouse_row: u16 = rows / 2 + 1;
+    let mut last_mouse_col = mouse_col;
+    let mut last_mouse_row = mouse_row;
     let mut bursts: Vec<Burst> = Vec::new();
+    let mut work_scale = 0.35f32;
 
     loop {
         let frame_start = Instant::now();
@@ -175,57 +271,107 @@ fn main() -> io::Result<()> {
 
         seq_buf.clear();
         let hue_base = (frame * 7 % 360) as u16;
+        let drift_col = mouse_col as f32 - last_mouse_col as f32;
+        let drift_row = mouse_row as f32 - last_mouse_row as f32;
+        let motion = drift_col.abs() + drift_row.abs();
 
-        // Background scatter; 1/3 of glyphs cluster around the mouse
-        let bg_count = ((cols as u64 * rows as u64) / 10).clamp(50, 400);
-        for i in 0..bg_count {
-            let (col, row) = if rng.next() % 3 == 0 {
-                let dx = (rng.next() % 21) as i32 - 10;
-                let dy = (rng.next() % 11) as i32 - 5;
-                (
-                    (mouse_col as i32 + dx).clamp(1, cols as i32) as u16,
-                    (mouse_row as i32 + dy).clamp(1, rows as i32) as u16,
-                )
-            } else {
-                (
-                    (rng.next() % cols as u64 + 1) as u16,
-                    (rng.next() % rows as u64 + 1) as u16,
-                )
-            };
-            let glyph = GLYPHS[(rng.next() % GLYPHS.len() as u64) as usize] as char;
-            let hue = (hue_base + (i * 13 % 360) as u16) % 360;
-            let (r, g, b) = hsv_to_rgb(hue, 255, 255);
-            write!(seq_buf, "\x1b[{row};{col}H\x1b[38;2;{r};{g};{b}m{glyph}").unwrap();
+        // Stamp fresh particles behind the cursor and let the terminal keep the trail.
+        let emit_count =
+            ((4.0 + work_scale * 5.0 + motion * 0.9).round() as usize).clamp(4, 14);
+        let tail_col = mouse_col as f32 - drift_col * 0.8;
+        let tail_row = mouse_row as f32 - drift_row * 0.5;
+        for i in 0..emit_count {
+            let along_col = rng.range_f32(0.0, 0.7);
+            let along_row = rng.range_f32(0.0, 0.5);
+            stamp_particle(
+                &mut seq_buf,
+                &mut rng,
+                tail_col + drift_col * along_col,
+                tail_row + drift_row * along_row,
+                (hue_base + (i as u16 * 9)) % 360,
+                cols,
+                rows,
+                1.1 + motion * 0.08,
+                0.7 + motion * 0.05,
+            );
         }
+        let splash_count =
+            ((motion * 1.3 + work_scale * 2.0).round() as usize).clamp(0, 8);
+        stamp_splash(
+            &mut seq_buf,
+            &mut rng,
+            tail_col,
+            tail_row,
+            (hue_base + 60) % 360,
+            cols,
+            rows,
+            splash_count,
+            2.2 + motion * 0.35,
+            1.0 + motion * 0.18,
+            Some((drift_col, drift_row)),
+        );
 
-        // Expanding ring burst on click
+        // Clicks add a short spark pulse without replacing the cursor trail.
         for burst in &mut bursts {
-            let r_col = (burst.age as f32 * 2.5 + 1.0) as i32;
-            let r_row = (burst.age as f32 * 1.2 + 1.0) as i32;
-            let steps = (20 + burst.age as usize * 3).min(80);
-            let hue = (hue_base + burst.age as u16 * 20) % 360;
-            let (br, bg, bb) = hsv_to_rgb(hue, 255, 255);
-            for step in 0..steps {
-                let angle = step as f32 * std::f32::consts::TAU / steps as f32;
-                let c = (burst.col as i32 + (angle.cos() * r_col as f32) as i32)
-                    .clamp(1, cols as i32) as u16;
-                let r = (burst.row as i32 + (angle.sin() * r_row as f32) as i32)
-                    .clamp(1, rows as i32) as u16;
-                let glyph = GLYPHS[(rng.next() % GLYPHS.len() as u64) as usize] as char;
-                write!(seq_buf, "\x1b[{r};{c}H\x1b[38;2;{br};{bg};{bb}m{glyph}").unwrap();
+            let burst_emit =
+                (((12_i32 - burst.age as i32 * 2).max(0) as f32) * work_scale.max(0.45)).round()
+                    as usize;
+            let burst_emit = burst_emit.clamp(0, 12);
+            stamp_splash(
+                &mut seq_buf,
+                &mut rng,
+                burst.col as f32,
+                burst.row as f32,
+                (hue_base + 120 + burst.age as u16 * 17) % 360,
+                cols,
+                rows,
+                burst_emit,
+                1.2 + burst.age as f32 * 1.0,
+                0.8 + burst.age as f32 * 0.45,
+                None,
+            );
+            for i in 0..(burst_emit / 2).max(3) {
+                stamp_particle(
+                    &mut seq_buf,
+                    &mut rng,
+                    burst.col as f32,
+                    burst.row as f32,
+                    (hue_base + 180 + (i as u16 * 13) + burst.age as u16 * 19) % 360,
+                    cols,
+                    rows,
+                    1.0 + burst.age as f32 * 0.18,
+                    0.7 + burst.age as f32 * 0.1,
+                );
             }
             burst.age += 1;
         }
-        bursts.retain(|b| b.age < 20);
+        bursts.retain(|b| b.age < 6);
+
+        let (cursor_r, cursor_g, cursor_b) = hsv_to_rgb((hue_base + 180) % 360, 200, 255);
+        write!(
+            seq_buf,
+            "\x1b[{mouse_row};{mouse_col}H\x1b[38;2;{cursor_r};{cursor_g};{cursor_b}m@"
+        )
+        .unwrap();
 
         parser.process(&seq_buf);
         let diff = parser.screen().contents_diff(&prev);
         out.write_all(&diff)?;
 
+        last_mouse_col = mouse_col;
+        last_mouse_row = mouse_row;
+
         if last_title.elapsed() >= title_interval {
             let elapsed = start.elapsed().as_secs_f64();
             let fps = frame as f64 / elapsed.max(0.001);
-            write!(out, "\x1b]0;blit-demo | frame {} | {:.0} fps\x07", frame, fps)?;
+            write!(
+                out,
+                "\x1b]0;blit-demo | frame {} | {:.0} fps | load {:.0}% | particles {}\x07",
+                frame,
+                fps,
+                work_scale * 100.0,
+                emit_count,
+            )?;
             last_title = Instant::now();
         }
 
@@ -233,16 +379,36 @@ fn main() -> io::Result<()> {
         frame += 1;
 
         let elapsed = frame_start.elapsed();
-        if elapsed < frame_interval {
-            std::thread::sleep(frame_interval - elapsed);
+        let elapsed_ratio = elapsed.as_secs_f32() / frame_interval.as_secs_f32().max(1.0e-6);
+        if elapsed_ratio > 1.05 {
+            work_scale = (work_scale * 0.88).max(0.12);
+        } else if elapsed_ratio < 0.70 {
+            work_scale = (work_scale * 1.04).min(1.0);
+        }
+        let now = Instant::now();
+        if now < next_frame_at {
+            let remaining = next_frame_at - now;
+            if remaining > Duration::from_millis(2) {
+                std::thread::sleep(remaining - Duration::from_millis(1));
+            }
+            while Instant::now() < next_frame_at {
+                std::hint::spin_loop();
+            }
+        }
+        next_frame_at += frame_interval;
+        if Instant::now() > next_frame_at + frame_interval {
+            next_frame_at = Instant::now() + frame_interval;
         }
     }
+
+    write!(out, "\x1b[?1003l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[2J\x1b[H")?;
+    out.flush()?;
 
     Ok(())
 }
 
 /// Parse stdin bytes. Returns true if the app should quit.
-/// Updates mouse position and pushes bursts on click.
+/// Updates mouse position and pushes click pulses.
 fn parse_input(
     buf: &[u8],
     mouse_col: &mut u16,

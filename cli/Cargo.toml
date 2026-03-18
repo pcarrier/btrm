@@ -1,0 +1,13 @@
+[package]
+name = "blit-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "blit"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-encode"] }
+libc = "0.2"

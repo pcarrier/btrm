@@ -178,6 +178,30 @@ impl Terminal {
             Ok(d) => d,
             Err(_) => return,
         };
+        self.apply_payload(&payload);
+    }
+
+    pub fn feed_compressed_batch(&mut self, batch: &[u8]) {
+        let mut off = 0usize;
+        while off + 4 <= batch.len() {
+            let len = u32::from_le_bytes([
+                batch[off],
+                batch[off + 1],
+                batch[off + 2],
+                batch[off + 3],
+            ]) as usize;
+            off += 4;
+            if off + len > batch.len() {
+                break;
+            }
+            if let Ok(payload) = lz4_flex::decompress_size_prepended(&batch[off..off + len]) {
+                self.apply_payload(&payload);
+            }
+            off += len;
+        }
+    }
+
+    fn apply_payload(&mut self, payload: &[u8]) {
         if payload.len() < 10 { return; }
 
         let new_rows = u16::from_le_bytes([payload[0], payload[1]]);
@@ -419,8 +443,8 @@ impl Terminal {
             }
 
             if content_len > 0 {
-                let content = std::str::from_utf8(&self.cells[idx + 8..idx + 8 + content_len])
-                    .unwrap_or("");
+                let content_bytes = &self.cells[idx + 8..idx + 8 + content_len];
+                let content = std::str::from_utf8(content_bytes).unwrap_or("");
                 if !content.is_empty() && content != " " {
                     // Set font and fill BEFORE save() so tracking stays valid after restore().
                     if bold != current_font_bold || italic != current_font_italic {
@@ -439,7 +463,7 @@ impl Terminal {
                         fill_known = true;
                     }
 
-                    // Clip to cell so text doesn't bleed into neighbors.
+                    // Clip to the cell so glyph overhang does not leave trails in neighbors.
                     // save/restore reverts the clip; fill+font state is unchanged.
                     ctx.save();
                     ctx.begin_path();

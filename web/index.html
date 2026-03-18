@@ -92,7 +92,7 @@ const _base = location.pathname.endsWith('/') ? location.pathname : location.pat
 const { default: init, Terminal } = await import(_base + 'blit_browser.js');
 
 const FONT = 'ui-monospace, monospace';
-const C2S_INPUT = 0x00, C2S_RESIZE = 0x01, C2S_SCROLL = 0x02, C2S_ACK = 0x03, C2S_DISPLAY_RATE = 0x04, C2S_CREATE = 0x10, C2S_FOCUS = 0x11, C2S_CLOSE = 0x12;
+const C2S_INPUT = 0x00, C2S_RESIZE = 0x01, C2S_SCROLL = 0x02, C2S_ACK = 0x03, C2S_DISPLAY_RATE = 0x04, C2S_CLIENT_METRICS = 0x05, C2S_CREATE = 0x10, C2S_FOCUS = 0x11, C2S_CLOSE = 0x12;
 const S2C_UPDATE = 0x00, S2C_CREATED = 0x01, S2C_CLOSED = 0x02, S2C_LIST = 0x03, S2C_TITLE = 0x04;
 
 const hud = document.getElementById('hud');
@@ -118,14 +118,28 @@ let savedPass = null;
 let reconnectTimer = null;
 let reconnectDelay = 500;
 let scrollOffset = 0;
-// Frames queued from onmessage, to be fed+ACKed in rAF (ties server rate to display rate)
-let pendingFrames = [];
+// Updates are applied on receipt so transport is not paced by rAF.
 const ACK_MSG = new Uint8Array([C2S_ACK]);
+let pendingApplyBatches = new Map();
+const TARGET_PLAYOUT_BACKLOG = 2;
+const MAX_ACK_AHEAD_FRAMES = 4;
+let ackAheadFrames = 0;
+let deferredAckFrames = 0;
+let applyMsEwma = 0;
+let lastMetricsSentAt = 0;
+let lastMetricsBacklog = -1;
+let lastMetricsAckAhead = -1;
+let lastMetricsApplyMs = -1;
+const displayFpsParam = new URLSearchParams(location.search).get('fps');
+const displayFpsTarget = (() => {
+    const fps = Number(displayFpsParam);
+    return Number.isFinite(fps) && fps >= 10 && fps <= 1000 ? Math.round(fps) : 120;
+})();
 
-// Display rate tracking: measured rAF fps, reported to server so the flow
-// control window stays sized for the actual renderer, not a hardcoded rate.
+// Keep measuring achieved rAF for diagnostics, but advertise a target floor so
+// transient slowdown on the main thread does not collapse the sender window.
 let rafPrevTime = 0;
-let rafFpsEwma = 60;
+let rafFpsEwma = displayFpsTarget;
 let lastReportedFps = 0;
 
 // Predictive input
@@ -138,6 +152,109 @@ let selecting = false;
 let selStart = null;
 let selEnd = null;
 let selOverlays = [];
+
+function notePredictionAdvance() {
+    if (predicted && focusedPty !== null && terminals[focusedPty]) {
+        const t = terminals[focusedPty];
+        const cr = t.cursor_row, cc = t.cursor_col;
+        if (cr === predictedFromRow && cc > predictedFromCol) {
+            predicted = predicted.slice(cc - predictedFromCol);
+            predictedFromCol = cc;
+        } else if (cr !== predictedFromRow) {
+            predicted = '';
+        }
+    }
+}
+
+function sendAckFrames(count) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    for (let i = 0; i < count; i++) {
+        ws.send(ACK_MSG);
+    }
+}
+
+function pendingApplyFrameCount() {
+    let total = 0;
+    for (const queue of pendingApplyBatches.values()) total += queue.length;
+    return total;
+}
+
+function sendClientMetrics(force = false) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (!force && now - lastMetricsSentAt < 200) return;
+    const backlog = Math.min(65535, pendingApplyFrameCount() + ackAheadFrames + deferredAckFrames);
+    const ackAhead = Math.min(65535, ackAheadFrames);
+    const applyMs = Math.min(65535, Math.round(applyMsEwma * 10));
+    if (!force && backlog === lastMetricsBacklog && ackAhead === lastMetricsAckAhead
+        && applyMs === lastMetricsApplyMs) {
+        return;
+    }
+    lastMetricsSentAt = now;
+    lastMetricsBacklog = backlog;
+    lastMetricsAckAhead = ackAhead;
+    lastMetricsApplyMs = applyMs;
+    ws.send(new Uint8Array([
+        C2S_CLIENT_METRICS,
+        backlog & 0xff, (backlog >> 8) & 0xff,
+        ackAhead & 0xff, (ackAhead >> 8) & 0xff,
+        applyMs & 0xff, (applyMs >> 8) & 0xff,
+    ]));
+}
+
+function releaseAppliedFrames(appliedFrames) {
+    if (appliedFrames <= 0) return;
+    const consumedAhead = Math.min(ackAheadFrames, appliedFrames);
+    ackAheadFrames -= consumedAhead;
+    const freedAckSlots = appliedFrames - consumedAhead;
+    const releaseDeferred = Math.min(deferredAckFrames, freedAckSlots);
+    if (releaseDeferred > 0) {
+        deferredAckFrames -= releaseDeferred;
+        sendAckFrames(releaseDeferred);
+    }
+}
+
+function applyQueuedUpdatesForFrame() {
+    const ptyId = focusedPty !== null && pendingApplyBatches.has(focusedPty)
+        ? focusedPty
+        : pendingApplyBatches.keys().next().value;
+    if (ptyId === undefined) return 0;
+    const queue = pendingApplyBatches.get(ptyId);
+    if (!queue || queue.length === 0) return 0;
+    const applyStart = performance.now();
+    const applyCount = Math.min(
+        queue.length,
+        Math.max(1, queue.length - TARGET_PLAYOUT_BACKLOG),
+    );
+    if (!terminals[ptyId]) {
+        terminals[ptyId] = new Terminal(rows, cols, cell.w * dpr, cell.h * dpr);
+    }
+    let total = 0;
+    for (let i = 0; i < applyCount; i++) total += 4 + queue[i].length;
+    const batch = new Uint8Array(total);
+    let off = 0;
+    for (let i = 0; i < applyCount; i++) {
+        const payload = queue[i];
+        const len = payload.length;
+        batch[off] = len & 0xff;
+        batch[off + 1] = (len >> 8) & 0xff;
+        batch[off + 2] = (len >> 16) & 0xff;
+        batch[off + 3] = (len >> 24) & 0xff;
+        off += 4;
+        batch.set(payload, off);
+        off += len;
+    }
+    terminals[ptyId].feed_compressed_batch(batch);
+    queue.splice(0, applyCount);
+    if (queue.length === 0) pendingApplyBatches.delete(ptyId);
+    releaseAppliedFrames(applyCount);
+    const applyMs = performance.now() - applyStart;
+    applyMsEwma = applyMsEwma > 0 ? applyMsEwma * 0.8 + applyMs * 0.2 : applyMs;
+    notePredictionAdvance();
+    needsRender = true;
+    sendClientMetrics();
+    return applyCount;
+}
 
 function measureCell() {
     const s = document.createElement('span');
@@ -410,44 +527,20 @@ async function main() {
             if (dt > 0 && dt < 500) {
                 rafFpsEwma = rafFpsEwma * 0.8 + (1000 / dt) * 0.2;
                 const rounded = Math.round(rafFpsEwma / 5) * 5; // quantize to nearest 5
-                if (rounded !== lastReportedFps && ws && ws.readyState === WebSocket.OPEN) {
-                    lastReportedFps = rounded;
-                    const fps = Math.max(10, Math.min(1000, rounded));
+                const advertised = Math.max(
+                    displayFpsTarget,
+                    Math.max(10, Math.min(1000, rounded)),
+                );
+                if (advertised !== lastReportedFps && ws && ws.readyState === WebSocket.OPEN) {
+                    lastReportedFps = advertised;
+                    const fps = advertised;
                     ws.send(new Uint8Array([C2S_DISPLAY_RATE, fps & 0xff, (fps >> 8) & 0xff]));
                 }
             }
         }
         rafPrevTime = now;
 
-        // Decode all frames queued since the last rAF in one batch.
-        // ACKs are sent immediately in onmessage so RTT = pure network latency.
-        if (pendingFrames.length > 0) {
-            const toProcess = pendingFrames;
-            pendingFrames = [];
-            for (const { ptyId, payload } of toProcess) {
-                if (!terminals[ptyId]) {
-                    terminals[ptyId] = new Terminal(rows, cols, cell.w * dpr, cell.h * dpr);
-                }
-                terminals[ptyId].feed_compressed(payload);
-                // ACK after each frame is decoded: server's window now tracks
-                // frames-rendered rather than frames-received.  If rAF is slow
-                // (heavy canvas work), ACKs slow down, the server backs off, and
-                // pendingFrames stays bounded at ~window×(rAF_jitter/RTT) ≈ 1.
-                if (ws && ws.readyState === WebSocket.OPEN) ws.send(ACK_MSG);
-            }
-            // Update predictive echo confirmation after all frames applied
-            if (predicted && focusedPty !== null && terminals[focusedPty]) {
-                const t = terminals[focusedPty];
-                const cr = t.cursor_row, cc = t.cursor_col;
-                if (cr === predictedFromRow && cc > predictedFromCol) {
-                    predicted = predicted.slice(cc - predictedFromCol);
-                    predictedFromCol = cc;
-                } else if (cr !== predictedFromRow) {
-                    predicted = '';
-                }
-            }
-            needsRender = true;
-        }
+        applyQueuedUpdatesForFrame();
 
         if (needsRender && focusedPty !== null && terminals[focusedPty]) {
             const t = terminals[focusedPty];
@@ -566,8 +659,19 @@ async function main() {
     });
 
     inputSink.addEventListener('input', (e) => {
-        if (e.isComposing) return;
-        if (inputSink.value && focusedPty !== null) sendKey(new TextEncoder().encode(inputSink.value));
+        if (e.isComposing) {
+            // Android fires deleteContentBackward with isComposing=true during IME.
+            if (e.inputType === 'deleteContentBackward' && !inputSink.value && focusedPty !== null)
+                sendKey(new Uint8Array([0x7f]));
+            return;
+        }
+        // Android Enter inserts \n into the textarea instead of firing keydown Enter.
+        // Android Backspace fires deleteContentBackward with an empty textarea value.
+        if (e.inputType === 'deleteContentBackward' && !inputSink.value) {
+            if (focusedPty !== null) sendKey(new Uint8Array([0x7f]));
+        } else if (inputSink.value && focusedPty !== null) {
+            sendKey(new TextEncoder().encode(inputSink.value.replace(/\n/g, '\r')));
+        }
         inputSink.value = '';
     });
 
@@ -680,10 +784,19 @@ function connect(pass) {
             case S2C_UPDATE: {
                 if (data.length < 3) break;
                 const ptyId = data[1] | (data[2] << 8);
-                pendingFrames.push({ ptyId, payload: data.subarray(3) });
-                // ACK sent in rAF after feed_compressed, not here.
-                // This ties the server's send rate to the actual render rate
-                // rather than the network receive rate, bounding display lag.
+                let queue = pendingApplyBatches.get(ptyId);
+                if (!queue) {
+                    queue = [];
+                    pendingApplyBatches.set(ptyId, queue);
+                }
+                queue.push(data.subarray(3));
+                if (ackAheadFrames < MAX_ACK_AHEAD_FRAMES) {
+                    sendAckFrames(1);
+                    ackAheadFrames += 1;
+                } else {
+                    deferredAckFrames += 1;
+                }
+                sendClientMetrics();
                 break;
             }
             case S2C_CREATED: {
@@ -758,7 +871,14 @@ function connect(pass) {
         predictedFromRow = 0;
         scrollOffset = 0;
         needsRender = false;
-        pendingFrames = [];
+        pendingApplyBatches = new Map();
+        ackAheadFrames = 0;
+        deferredAckFrames = 0;
+        applyMsEwma = 0;
+        lastMetricsSentAt = 0;
+        lastMetricsBacklog = -1;
+        lastMetricsAckAhead = -1;
+        lastMetricsApplyMs = -1;
         if (savedPass) {
             reconnectTimer = setTimeout(() => {
                 statusEl.textContent = 'reconnecting\u2026';

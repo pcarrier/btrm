@@ -15,12 +15,8 @@
 
         version = "0.1.4";
 
-        muslTarget = if pkgs.stdenv.hostPlatform.isAarch64
-          then "aarch64-unknown-linux-musl"
-          else "x86_64-unknown-linux-musl";
-
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          targets = [ "wasm32-unknown-unknown" muslTarget ];
+          targets = [ "wasm32-unknown-unknown" ];
         };
 
         rustPlatform = pkgs.makeRustPlatform {
@@ -143,26 +139,22 @@
         };
 
         # Static musl builds for .deb packages (Linux only).
-        # We cross-compile to musl using CARGO_BUILD_TARGET and point the linker
-        # at musl's CC so the result is fully static (no glibc, no Nix store refs).
-        cargoLinkerEnv = let
-          targetUpper = builtins.replaceStrings ["-"] ["_"]
-            (pkgs.lib.toUpper muslTarget);
-        in {
-          "CARGO_TARGET_${targetUpper}_LINKER" = "${pkgs.pkgsMusl.stdenv.cc}/bin/cc";
-          CC = "${pkgs.pkgsMusl.stdenv.cc}/bin/cc";
+        # pkgsStatic provides a full musl toolchain so the C linker produces
+        # truly static binaries with no Nix store references.
+        rustToolchainStatic = pkgs.pkgsStatic.rust-bin.stable.latest.default;
+
+        rustPlatformStatic = pkgs.pkgsStatic.makeRustPlatform {
+          cargo = rustToolchainStatic;
+          rustc = rustToolchainStatic;
         };
 
-        mkStaticBin = { pname, cargoPkg, extraArgs ? {} }: rustPlatform.buildRustPackage ({
+        mkStaticBin = { pname, cargoPkg, extraArgs ? {} }: rustPlatformStatic.buildRustPackage ({
           inherit pname version;
           src = ./.;
           cargoBuildFlags = [ "-p" cargoPkg ];
           cargoLock.lockFile = ./Cargo.lock;
           doCheck = false;
-          CARGO_BUILD_TARGET = muslTarget;
-          CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
-          nativeBuildInputs = [ pkgs.pkgsMusl.stdenv.cc ];
-        } // cargoLinkerEnv // extraArgs);
+        } // extraArgs);
 
         blit-server-static = mkStaticBin {
           pname = "blit-server";

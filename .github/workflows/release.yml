@@ -47,7 +47,7 @@ jobs:
           for bin in tmp/usr/bin/*; do
             echo "=== $bin ==="
             file "$bin"
-            file "$bin" | grep -q "statically linked" || { echo "FATAL: $bin is not static!"; exit 1; }
+            file "$bin" | grep -qE "static(ally|-pie) linked" || { echo "FATAL: $bin is not static!"; exit 1; }
           done
           rm -rf tmp
 

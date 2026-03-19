@@ -861,9 +861,7 @@ fn build_scrollback_update(
     msg.map(|m| (m, snap))
 }
 
-#[tokio::main]
-async fn main() {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+fn bind_socket() -> UnixListener {
     let sock_path = std::env::var("BLIT_SOCK").unwrap_or_else(|_| {
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             format!("{dir}/blit.sock")
@@ -871,9 +869,16 @@ async fn main() {
             "/tmp/blit.sock".into()
         }
     });
-
     let _ = std::fs::remove_file(&sock_path);
+    let listener = UnixListener::bind(&sock_path).unwrap();
+    std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    eprintln!("listening on {sock_path}");
+    listener
+}
 
+#[tokio::main]
+async fn main() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let state: AppState = Arc::new((
         Config { shell },
         Mutex::new(Session::new()),
@@ -904,9 +909,21 @@ async fn main() {
         }
     });
 
-    let listener = UnixListener::bind(&sock_path).unwrap();
-    std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o700)).unwrap();
-    eprintln!("listening on {sock_path}");
+    // systemd socket activation: if LISTEN_FDS is set and LISTEN_PID matches,
+    // use fd 3 as a pre-bound Unix socket instead of binding our own.
+    let listener = if let (Ok(fds), Ok(pid)) = (std::env::var("LISTEN_FDS"), std::env::var("LISTEN_PID")) {
+        if pid.parse::<u32>().ok() == Some(std::process::id()) && fds.trim() == "1" {
+            use std::os::unix::io::FromRawFd;
+            let std_listener = unsafe { std::os::unix::net::UnixListener::from_raw_fd(3) };
+            std_listener.set_nonblocking(true).unwrap();
+            eprintln!("using systemd socket (fd 3)");
+            UnixListener::from_std(std_listener).unwrap()
+        } else {
+            bind_socket()
+        }
+    } else {
+        bind_socket()
+    };
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();

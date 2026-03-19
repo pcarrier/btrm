@@ -52,7 +52,7 @@ curl -fsSL https://indent-com.github.io/blit/blit.gpg | sudo gpg --dearmor -o /u
 echo "deb [signed-by=/usr/share/keyrings/blit.gpg] https://indent-com.github.io/blit stable main" \
   | sudo tee /etc/apt/sources.list.d/blit.list
 sudo apt update
-sudo apt install blit-server blit-gateway blit-cli
+sudo apt install blit-server blit-gateway blit
 ```
 
 Packages are built for amd64 and arm64.
@@ -83,7 +83,7 @@ BLIT_PASS=secret blit-gateway
 # Open http://localhost:3264 in a browser
 
 # Or connect from a terminal
-blit-cli
+blit
 ```
 
 ### blit-server
@@ -100,6 +100,8 @@ blit-server
 | `BLIT_SOCK` | `$XDG_RUNTIME_DIR/blit.sock` | Unix socket path |
 
 Falls back to `/tmp/blit.sock` if `XDG_RUNTIME_DIR` is unset.
+
+Supports systemd socket activation: if `LISTEN_FDS=1` is set, uses fd 3 as a pre-bound Unix socket instead of binding its own. Set `TasksMax=infinity` in the service unit if spawning many PTYs.
 
 ### blit-gateway
 
@@ -120,11 +122,11 @@ BLIT_PASS=secret blit-gateway
 Terminal client. Connects to the server and renders in your terminal using ANSI sequences.
 
 ```bash
-blit-cli                          # Unix socket (default)
-blit-cli --socket /path/to.sock   # Explicit socket path
-blit-cli --tcp host:3264          # TCP connection
-blit-cli --ssh user@host          # SSH tunnel
-blit-cli ssh -p 2222 user@host    # SSH with extra args
+blit                              # Unix socket (default)
+blit --socket /path/to.sock       # Explicit socket path
+blit --tcp host:3264              # TCP connection
+blit --ssh user@host              # SSH tunnel
+blit ssh -p 2222 user@host        # SSH with extra args
 ```
 
 | Variable | Default | Description |
@@ -258,7 +260,7 @@ The SoA layout groups byte 0 of all dirty cells, then byte 1, etc. — better co
 
 ### Flow control
 
-Clients send `C2S_ACK` after consuming frames. The server queues up to 32 frames per client and pauses when unacknowledged frames exceed the window. Clients report metrics (backlog, ack-ahead count, apply time) so the server can adapt its send rate. This keeps high-RTT links saturated without overwhelming slow clients.
+Clients send `C2S_ACK` after consuming frames. The server maintains a congestion window per client based on RTT estimates and display refresh rate, pacing sends to keep high-RTT links saturated without overwhelming slow clients. Clients report metrics (backlog, ack-ahead count, apply time) so the server can adapt its send rate.
 
 ## Development
 

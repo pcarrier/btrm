@@ -476,20 +476,20 @@ fn nudge_delivery(state: &AppState) {
     state.3.notify_one();
 }
 
-fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, argv: Option<&[&str]>, state: AppState) -> Pty {
+fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, argv: Option<&[&str]>, state: AppState) -> Option<Pty> {
     let mut master: libc::c_int = 0;
     let mut slave: libc::c_int = 0;
     unsafe {
-        assert!(
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut()
-            ) == 0,
-            "openpty failed"
-        );
+        if libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut()
+        ) != 0 {
+            eprintln!("openpty failed for pty {id}");
+            return None;
+        }
         let ws = libc::winsize {
             ws_row: rows,
             ws_col: cols,
@@ -500,7 +500,11 @@ fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, argv: Option<&[&str]>, 
     }
 
     let pid = unsafe { libc::fork() };
-    assert!(pid >= 0, "fork failed");
+    if pid < 0 {
+        eprintln!("fork failed for pty {id}");
+        unsafe { libc::close(master); libc::close(slave); }
+        return None;
+    }
 
     if pid == 0 {
         unsafe {
@@ -554,7 +558,7 @@ fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, argv: Option<&[&str]>, 
     let reader_handle = tokio::spawn(pty_reader(master, id, state));
 
     let lflag_cache = pty_lflag(master);
-    Pty {
+    Some(Pty {
         master_fd: master,
         child_pid: pid,
         parser: vt100::Parser::new_with_callbacks(
@@ -567,7 +571,7 @@ fn spawn_pty(shell: &str, rows: u16, cols: u16, id: u16, argv: Option<&[&str]>, 
         reader_handle,
         lflag_cache,
         lflag_last: Instant::now(),
-    }
+    })
 }
 
 fn respond_to_queries(fd: libc::c_int, data: &[u8], screen: &vt100::Screen) {
@@ -1306,18 +1310,19 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 };
                 let id = sess.next_pty_id;
                 sess.next_pty_id += 1;
-                let pty = spawn_pty(&config.shell, rows, cols, id, argv.as_deref(), state.clone());
-                sess.ptys.insert(id, pty);
-                if let Some(c) = sess.clients.get_mut(&client_id) {
-                    c.focus = Some(id);
-                    c.scroll_offset = 0;
-                    c.scroll_snap.clear();
-                    reset_inflight(c);
+                if let Some(pty) = spawn_pty(&config.shell, rows, cols, id, argv.as_deref(), state.clone()) {
+                    sess.ptys.insert(id, pty);
+                    if let Some(c) = sess.clients.get_mut(&client_id) {
+                        c.focus = Some(id);
+                        c.scroll_offset = 0;
+                        c.scroll_snap.clear();
+                        reset_inflight(c);
+                    }
+                    let mut msg = vec![S2C_CREATED];
+                    msg.extend_from_slice(&id.to_le_bytes());
+                    sess.send_to_all(&msg);
+                    need_nudge = true;
                 }
-                let mut msg = vec![S2C_CREATED];
-                msg.extend_from_slice(&id.to_le_bytes());
-                sess.send_to_all(&msg);
-                need_nudge = true;
             }
             C2S_FOCUS if data.len() >= 3 => {
                 let pid = u16::from_le_bytes([data[1], data[2]]);

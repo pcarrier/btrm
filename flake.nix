@@ -13,7 +13,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.1.3";
+        version = "0.1.4";
 
         muslTarget = if pkgs.stdenv.hostPlatform.isAarch64
           then "aarch64-unknown-linux-musl"

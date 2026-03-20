@@ -16,7 +16,7 @@
         version = "0.1.4";
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          targets = [ "wasm32-unknown-unknown" ];
+          targets = [ "wasm32-unknown-unknown" "x86_64-unknown-linux-musl" ];
         };
 
         rustPlatform = pkgs.makeRustPlatform {
@@ -232,11 +232,15 @@ CTRL
             pkgs.wasm-pack
             pkgs.wasm-bindgen-cli
             pkgs.binaryen
+            pkgs.pkgsStatic.stdenv.cc
+            pkgs.process-compose
+            pkgs.cargo-watch
           ];
 
           shellHook = ''
             echo "blit dev shell"
-            echo "  build browser wasm: cd browser && wasm-pack build --target web --release --out-dir ../web"
+            echo "  dev:                dev  (server + gateway, auto-reload on source change)"
+            echo "  build:              build"
             echo "  run server:         cargo run -p blit-server"
             echo "  run gateway:        BLIT_PASS=secret cargo run -p blit-gateway  # http://localhost:3264"
             echo "  run cli:            cargo run -p blit-cli"

@@ -1,0 +1,27 @@
+version: "0.5"
+
+processes:
+  server:
+    command: cargo watch -w server/src -x "run -p blit-server"
+    availability:
+      restart: on_failure
+      max_restarts: 0
+
+  gateway:
+    command: cargo watch -w gateway/src -x "run -p blit-gateway"
+    environment:
+      - BLIT_PASS=${BLIT_PASS:-dev}
+    depends_on:
+      server:
+        condition: process_started
+    availability:
+      restart: on_failure
+      max_restarts: 0
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 3264
+        path: /
+      initial_delay_seconds: 2
+      period_seconds: 2
+      failure_threshold: 10

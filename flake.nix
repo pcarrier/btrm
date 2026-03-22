@@ -7,6 +7,112 @@
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils }:
     {
+      darwinModules.default = self.darwinModules.blit;
+      darwinModules.blit = { config, lib, pkgs, ... }:
+        let
+          cfg = config.services.blit;
+          inherit (lib) mkEnableOption mkOption types mkIf;
+        in {
+          options.services.blit = {
+            enable = mkEnableOption "blit terminal multiplexer";
+
+            package = mkOption {
+              type = types.package;
+              default = self.packages.${pkgs.system}.blit-server;
+              defaultText = "self.packages.\${system}.blit-server";
+              description = "The blit-server package to use.";
+            };
+
+            shell = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "/run/current-system/sw/bin/fish";
+              description = "Shell to spawn for new PTYs. Defaults to the user's login shell.";
+            };
+
+            scrollback = mkOption {
+              type = types.int;
+              default = 10000;
+              description = "Scrollback buffer size in rows per PTY.";
+            };
+
+            socketPath = mkOption {
+              type = types.str;
+              default = "/tmp/blit.sock";
+              description = "Unix socket path for blit-server.";
+            };
+
+            gateways = mkOption {
+              type = types.attrsOf (types.submodule {
+                options = {
+                  port = mkOption {
+                    type = types.port;
+                    default = 3264;
+                    description = "Port to listen on.";
+                  };
+                  addr = mkOption {
+                    type = types.str;
+                    default = "127.0.0.1";
+                    description = "Address to bind to.";
+                  };
+                  passFile = mkOption {
+                    type = types.path;
+                    description = "File containing BLIT_PASS=<passphrase>.";
+                  };
+                  package = mkOption {
+                    type = types.package;
+                    default = self.packages.${pkgs.system}.blit-gateway;
+                    defaultText = "self.packages.\${system}.blit-gateway";
+                    description = "The blit-gateway package to use.";
+                  };
+                };
+              });
+              default = {};
+              description = "Named blit-gateway instances.";
+            };
+          };
+
+          config = mkIf cfg.enable {
+            launchd.user.agents = {
+              blit = {
+                serviceConfig = {
+                  Label = "com.blit.server";
+                  ProgramArguments = [ "${cfg.package}/bin/blit-server" ];
+                  EnvironmentVariables = {
+                    BLIT_SOCK = cfg.socketPath;
+                    BLIT_SCROLLBACK = toString cfg.scrollback;
+                  } // lib.optionalAttrs (cfg.shell != null) {
+                    SHELL = cfg.shell;
+                  };
+                  RunAtLoad = true;
+                  KeepAlive = true;
+                  StandardOutPath = "/tmp/blit-server.log";
+                  StandardErrorPath = "/tmp/blit-server.log";
+                };
+              };
+            } // builtins.listToAttrs (lib.mapAttrsToList (name: gw: {
+              name = "blit-gateway-${name}";
+              value = {
+                serviceConfig = {
+                  Label = "com.blit.gateway.${name}";
+                  ProgramArguments = [
+                    "/bin/sh" "-c"
+                    ''. ${gw.passFile} && exec ${gw.package}/bin/blit-gateway''
+                  ];
+                  EnvironmentVariables = {
+                    BLIT_SOCK = cfg.socketPath;
+                    BLIT_ADDR = "${gw.addr}:${toString gw.port}";
+                  };
+                  RunAtLoad = true;
+                  KeepAlive = true;
+                  StandardOutPath = "/tmp/blit-gateway-${name}.log";
+                  StandardErrorPath = "/tmp/blit-gateway-${name}.log";
+                };
+              };
+            }) cfg.gateways);
+          };
+        };
+
       nixosModules.default = self.nixosModules.blit;
       nixosModules.blit = { config, lib, pkgs, ... }:
         let

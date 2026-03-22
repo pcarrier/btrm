@@ -172,6 +172,32 @@ blit alice@myhost    # opens browser, SSH forwards to /run/blit/alice.sock
 
 The `blit-server-deb` package ships these unit files in `/lib/systemd/system/`.
 
+**macOS (nix-darwin):**
+
+```nix
+# flake.nix
+{
+  inputs.blit.url = "github:indent-com/blit";
+}
+
+# darwin-configuration.nix
+{ inputs, ... }: {
+  imports = [ inputs.blit.darwinModules.blit ];
+
+  services.blit = {
+    enable = true;
+    # shell = "/run/current-system/sw/bin/fish";  # optional
+    # socketPath = "/tmp/blit.sock";              # default
+    gateways.default = {
+      port = 3264;
+      passFile = "/path/to/blit-pass-env";  # file containing BLIT_PASS=...
+    };
+  };
+}
+```
+
+This creates launchd user agents for `blit-server` (with `KeepAlive`) and each gateway. Logs go to `/tmp/blit-server.log` and `/tmp/blit-gateway-*.log`.
+
 ### `blit-gateway`
 
 The gateway serves the browser UI and proxies WebSocket traffic to the server's Unix socket. Use it for always-on deployments where the gateway must run independently of the CLI — for example, behind a reverse proxy or as a systemd service. For local and SSH use, the `blit` CLI embeds equivalent gateway functionality and is simpler to run.

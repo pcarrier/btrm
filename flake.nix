@@ -287,6 +287,9 @@ PKGJSON
             cp ${browserWasm}/blit_browser.d.ts "$tmp"/
             cp ${browserWasm}/blit_browser_bg.wasm "$tmp"/
             cp ${browserWasm}/blit_browser_bg.wasm.d.ts "$tmp"/ 2>/dev/null || true
+            if [ -d "${browserWasm}/snippets" ]; then
+              cp -r ${browserWasm}/snippets "$tmp"/snippets
+            fi
             chmod -R u+w "$tmp"
 
             cat > "$tmp/package.json" <<'PKGJSON'
@@ -297,7 +300,7 @@ PKGJSON
   "description": "Low-latency terminal streaming — browser WASM renderer",
   "main": "blit_browser.js",
   "types": "blit_browser.d.ts",
-  "files": ["blit_browser_bg.wasm","blit_browser.js","blit_browser.d.ts","blit_browser_bg.wasm.d.ts"],
+  "files": ["blit_browser_bg.wasm","blit_browser.js","blit_browser.d.ts","blit_browser_bg.wasm.d.ts","snippets"],
   "sideEffects": ["./snippets/*"],
   "keywords": ["terminal","tty","wasm","streaming","webgl"],
   "license": "MIT",

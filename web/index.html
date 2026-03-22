@@ -1195,6 +1195,7 @@ let reconnectDelay = 500;
 let scrollOffset = 0;
 let subscribedPtys = new Set();
 let fontFamily = preferredFont();
+let fontSize = 13;
 let pendingFocusedCreates = 0;
 let exposeSearchRequestId = 0;
 let exposeSearchResults = null;
@@ -1813,7 +1814,7 @@ function applyQueuedUpdates(budgetMs = Infinity) {
 
 function measureCell() {
     const s = document.createElement('span');
-    s.style.cssText = `font: 13px ${fontFamily}; position: absolute; visibility: hidden; white-space: pre;`;
+    s.style.cssText = `font: ${fontSize}px ${fontFamily}; position: absolute; visibility: hidden; white-space: pre;`;
     s.textContent = 'M';
     document.body.appendChild(s);
     const r = s.getBoundingClientRect();
@@ -2441,6 +2442,11 @@ function scroll(delta) {
     updateHud();
 }
 
+function setFontSize(size) {
+    fontSize = Math.max(6, Math.min(32, size));
+    sendResize({ flush: true });
+}
+
 function commitResize() {
     if (terminalResizeTimer) {
         clearTimeout(terminalResizeTimer);
@@ -3039,6 +3045,9 @@ async function main() {
     const touchBar = document.getElementById('touch-bar');
     {
         const keys = [
+            { label: 'A\u2261', action: 'expose' },
+            { label: 'A\u2212', action: 'zoom-out' },
+            { label: 'A+', action: 'zoom-in' },
             { label: 'Esc', send: '\x1b' },
             { label: 'Tab', send: '\t' },
             { label: 'Ctrl', toggle: 'ctrl' },
@@ -3063,6 +3072,13 @@ async function main() {
             if (k.toggle === 'alt') altBtn.el = btn;
             btn.addEventListener('pointerdown', (e) => {
                 e.preventDefault(); // don't steal focus from inputSink
+                if (k.action === 'expose') {
+                    if (exposeOpen) closeExpose();
+                    else openExpose();
+                    return;
+                }
+                if (k.action === 'zoom-in') { setFontSize(fontSize + 1); return; }
+                if (k.action === 'zoom-out') { setFontSize(fontSize - 1); return; }
                 if (k.toggle === 'ctrl') {
                     touchCtrl = !touchCtrl;
                     btn.classList.toggle('active', touchCtrl);

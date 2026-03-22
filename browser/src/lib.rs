@@ -436,18 +436,19 @@ impl GlyphAtlas {
             render_width as f64 + (Self::PADDING * 2) as f64,
             render_height as f64 + (Self::PADDING * 2) as f64,
         );
+        let center_x = slot.src_x + render_width as f64 / 2.0;
         let (draw_font, draw_x, draw_y) = if key.wide {
             let scale = 0.85;
             let scaled_h = cell_height * scale;
             let font_size = scaled_h.round().max(1.0) as u32;
             let scaled_font = format!("{}px {}", font_size, &font[font.find("px ").map(|i| i + 3).unwrap_or(0)..]);
-            let pad_x = (render_width as f64 - render_width as f64 * scale) / 2.0;
             let pad_y = (cell_height - scaled_h) / 2.0;
-            (scaled_font, slot.src_x + pad_x, slot.src_y + pad_y + scaled_h)
+            (scaled_font, center_x, slot.src_y + pad_y + scaled_h)
         } else {
-            (font, slot.src_x, slot.src_y + cell_height)
+            (font, center_x, slot.src_y + cell_height)
         };
         ctx.set_font(&draw_font);
+        ctx.set_text_align("center");
         // Render in white — the GL shader tints per-vertex.
         ctx.set_fill_style_str("#fff");
         ctx.save();
@@ -463,6 +464,7 @@ impl GlyphAtlas {
             ctx.stroke();
         }
         ctx.restore();
+        ctx.set_text_align("start");
         self.slots.insert(key, slot);
         self.version = self.version.wrapping_add(1);
         Some(slot)
@@ -651,6 +653,11 @@ impl Terminal {
     }
     pub fn cursor_visible(&self) -> bool {
         self.inner.mode() & 1 != 0
+    }
+    /// DECSCUSR cursor style: 0=default, 1=blinking block, 2=steady block,
+    /// 3=blinking underline, 4=steady underline, 5=blinking bar, 6=steady bar.
+    pub fn cursor_style(&self) -> u16 {
+        (self.inner.mode() >> 12) & 7
     }
     pub fn last_render_full(&self) -> bool {
         self.last_render.full
@@ -1041,7 +1048,11 @@ impl Terminal {
             let (fg, bg) = if inverse {
                 (
                     self.palette.resolve(bg_type, cell[5], cell[6], cell[7], false, dim),
-                    self.palette.resolve(fg_type, cell[2], cell[3], cell[4], true, false),
+                    {
+                        let mut c = self.palette.resolve(fg_type, cell[2], cell[3], cell[4], true, false);
+                        c.is_default = false; // inverted bg must always be drawn
+                        c
+                    },
                 )
             } else {
                 (

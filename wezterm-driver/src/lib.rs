@@ -90,6 +90,7 @@ impl Default for EscapeParseState {
 struct CsiState {
     private: bool,
     bang: bool,
+    space: bool,
     params: [u16; 8],
     len: usize,
     current: Option<u16>,
@@ -117,6 +118,7 @@ struct ModeTracker {
     alt_screen: bool,
     mouse_mode: u16,
     mouse_encoding: u16,
+    cursor_style: u16,
     parse_state: EscapeParseState,
 }
 
@@ -179,6 +181,10 @@ impl ModeTracker {
                             csi.bang = true;
                             self.parse_state = EscapeParseState::Csi(csi);
                         }
+                        b' ' => {
+                            csi.space = true;
+                            self.parse_state = EscapeParseState::Csi(csi);
+                        }
                         0x40..=0x7e => {
                             csi.push_current();
                             self.handle_csi(csi, byte);
@@ -197,16 +203,25 @@ impl ModeTracker {
         self.alt_screen = false;
         self.mouse_mode = 0;
         self.mouse_encoding = 0;
+        self.cursor_style = 0;
     }
 
     fn soft_reset(&mut self) {
         self.app_cursor = false;
         self.app_keypad = false;
+        self.cursor_style = 0;
     }
 
     fn handle_csi(&mut self, csi: CsiState, final_byte: u8) {
         if csi.bang && final_byte == b'p' {
             self.soft_reset();
+            return;
+        }
+
+        // DECSCUSR: CSI Ps SP q
+        if csi.space && final_byte == b'q' {
+            let style = csi.params().first().copied().unwrap_or(0);
+            self.cursor_style = if style <= 6 { style } else { 0 };
             return;
         }
 
@@ -285,6 +300,7 @@ impl ModeTracker {
         if self.alt_screen {
             mode |= 1 << 11;
         }
+        mode |= (self.cursor_style & 7) << 12;
         mode
     }
 }

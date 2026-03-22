@@ -141,7 +141,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.2.2";
+        version = "0.2.3";
 
         weztermHash = "sha256-V6WvkNZryYofarsyfcmsuvtpNJ/c3O+DmOKNvoYPbmA=";
         finlUnicodeHash = "sha256-38S6XH4hldbkb6NP+s7lXa/NR49PI0w3KYqd+jPHND0=";
@@ -187,7 +187,7 @@
         '';
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          targets = [ "wasm32-unknown-unknown" "x86_64-unknown-linux-musl" ];
+          targets = [ "wasm32-unknown-unknown" "x86_64-unknown-linux-musl" "aarch64-unknown-linux-musl" ];
           extensions = [ "llvm-tools" ];
         };
 
@@ -379,13 +379,18 @@ PKGJSON
         };
 
         # Static musl builds for .deb packages (Linux only).
-        # pkgsStatic provides a full musl stdenv; using rust-bin toolchain from
-        # the overlay ensures consistency with the rest of the flake.
-        rustToolchainStatic = pkgs.pkgsStatic.rust-bin.stable.latest.default;
-
+        # pkgsStatic.makeRustPlatform handles the musl cross-compilation plumbing.
+        # We supply the host (glibc) rustToolchain so cargo itself runs fine.
+        # pkgsStatic.rust-bin as of 1.94.0 ships a musl-compiled cargo that
+        # fails auto-patchelf due to a libgcc_s.so.1 dependency.
+        # Build-script SIGSEGV fix: in the pkgsStatic env, CC is the musl compiler,
+        # so without intervention cargo compiles build-scripts as musl binaries that
+        # crash on the glibc build host.  CC_x86_64_unknown_linux_gnu overrides
+        # the CC used for the build-host triple, giving build-scripts the glibc
+        # compiler they need to run.
         rustPlatformStatic = pkgs.pkgsStatic.makeRustPlatform {
-          cargo = rustToolchainStatic;
-          rustc = rustToolchainStatic;
+          cargo = rustToolchain;
+          rustc = rustToolchain;
         };
 
         mkStaticBin = { pname, cargoPkg, extraArgs ? {} }: rustPlatformStatic.buildRustPackage ({
@@ -395,6 +400,14 @@ PKGJSON
           cargoLock = cargoLockConfig;
           preBuild = patchWeztermTerminfo;
           doCheck = false;
+          # pkgsStatic's CC wrapper setup hook sets NIX_CFLAGS_LINK=" -static",
+          # which causes the glibc CC to link build scripts with -static.
+          # Statically-linked glibc binaries SIGSEGV (NSS/TLS resolver init).
+          # We clear it in postUnpack (after all setup hooks have run) so
+          # build scripts link dynamically against glibc and run correctly.
+          # The musl target is still fully static: pkgsStatic's cargo setup
+          # hook writes -Ctarget-feature=+crt-static into .cargo/config.toml.
+          postUnpack = "export NIX_CFLAGS_LINK=''";
         } // extraArgs);
 
         blit-server-static = mkStaticBin {

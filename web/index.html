@@ -388,6 +388,29 @@ canvas { display: block; outline: none; }
     background: var(--ui-kbd-bg); border: 1px solid var(--ui-kbd-border); border-radius: 3px;
     padding: 1px 5px; font-size: 12px; color: var(--ui-kbd-text);
 }
+#palette-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+    z-index: 10; justify-content: center; align-items: center;
+}
+#palette-overlay.visible { display: flex; }
+#palette-box {
+    background: var(--ui-help-bg); border: 1px solid var(--ui-help-border); border-radius: 6px;
+    padding: 16px 20px; min-width: 220px;
+}
+#palette-box h2 { font-size: 14px; margin: 0 0 10px; color: var(--ui-help-title); font-family: var(--terminal-font); }
+.palette-item {
+    display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px;
+    cursor: pointer; font: 13px/1 var(--terminal-font); color: var(--ui-help-text);
+    border: none; background: none; width: 100%; text-align: left;
+}
+.palette-item:hover, .palette-item:focus { background: var(--ui-kbd-bg); outline: none; }
+.palette-item.active { color: var(--ui-help-title); font-weight: bold; }
+.palette-swatch {
+    display: inline-flex; gap: 2px; flex-shrink: 0;
+}
+.palette-swatch span {
+    width: 10px; height: 10px; border-radius: 2px;
+}
 </style>
 </head>
 <body>
@@ -419,7 +442,13 @@ Type <kbd>&gt;</kbd><em>command</em> in Expose and press <kbd>Enter</kbd> &mdash
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> &mdash; Toggle backlog<br>
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>{</kbd>/<kbd>}</kbd> &mdash; Previous/next PTY<br>
 <kbd>Shift</kbd>+<kbd>PageUp</kbd>/<kbd>PageDown</kbd> &mdash; Scroll back/forward<br>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &mdash; Palette picker<br>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> &mdash; Toggle HUD (size/fps/kbps)<br>
 <kbd>Ctrl</kbd>+<kbd>?</kbd> &mdash; Toggle this help
+</div></div>
+<div id="palette-overlay"><div id="palette-box">
+<h2>Palette</h2>
+<div id="palette-list"></div>
 </div></div>
 <script type="module">
 const _base = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
@@ -755,13 +784,28 @@ void main() {
         drawColoredTriangles(data);
     }
 
-    function renderCursor(cursorVisible, cursorCol, cursorRow, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1) {
+    function renderCursor(cursorVisible, cursorCol, cursorRow, cursorStyle = 0, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1) {
         if (!cursorVisible) return;
-        const x1 = offsetX + cursorCol * cell.pw * scaleX;
-        const y1 = offsetY + cursorRow * cell.ph * scaleY;
-        const x2 = x1 + cell.pw * scaleX;
-        const y2 = y1 + cell.ph * scaleY;
-        drawSolidRect(x1, y1, x2, y2, 0.8, 0.8, 0.8, 0.5);
+        // DECSCUSR: 0=default(blink block), 1=blink block, 2=steady block,
+        // 3=blink underline, 4=steady underline, 5=blink bar, 6=steady bar
+        const blinks = cursorStyle === 0 || cursorStyle === 1 || cursorStyle === 3 || cursorStyle === 5;
+        if (blinks && !cursorBlinkOn) return;
+        const cw = cell.pw * scaleX;
+        const ch = cell.ph * scaleY;
+        const x1 = offsetX + cursorCol * cw;
+        const y1 = offsetY + cursorRow * ch;
+        if (cursorStyle === 3 || cursorStyle === 4) {
+            // Underline: bottom ~2px
+            const h = Math.max(1, Math.round(ch * 0.12));
+            drawSolidRect(x1, y1 + ch - h, x1 + cw, y1 + ch, 0.8, 0.8, 0.8, 0.8);
+        } else if (cursorStyle === 5 || cursorStyle === 6) {
+            // Bar: left ~2px
+            const w = Math.max(1, Math.round(cw * 0.12));
+            drawSolidRect(x1, y1, x1 + w, y1 + ch, 0.8, 0.8, 0.8, 0.8);
+        } else {
+            // Block (0, 1, 2)
+            drawSolidRect(x1, y1, x1 + cw, y1 + ch, 0.8, 0.8, 0.8, 0.5);
+        }
     }
 
     function renderGlyphs(glyphOps, atlasCanvas, atlasVersion, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1) {
@@ -854,6 +898,7 @@ void main() {
             cursorVisible,
             cursorCol,
             cursorRow,
+            cursorStyle = 0,
         } = view;
         const placement = resolveViewPlacement(view);
         if (clear) {
@@ -870,14 +915,14 @@ void main() {
         }
         renderRectangles(bgOps, placement.offsetX, placement.offsetY, placement.scaleX, placement.scaleY);
         renderGlyphs(glyphOps, atlasCanvas, atlasVersion, placement.offsetX, placement.offsetY, placement.scaleX, placement.scaleY);
-        renderCursor(cursorVisible, cursorCol, cursorRow, placement.offsetX, placement.offsetY, placement.scaleX, placement.scaleY);
+        renderCursor(cursorVisible, cursorCol, cursorRow, cursorStyle, placement.offsetX, placement.offsetY, placement.scaleX, placement.scaleY);
     }
 
     return {
         supported: true,
         hide,
         resize,
-        render(bgOps, glyphOps, atlasCanvas, atlasVersion, cursorVisible, cursorCol, cursorRow, full) {
+        render(bgOps, glyphOps, atlasCanvas, atlasVersion, cursorVisible, cursorCol, cursorRow, cursorStyle, full) {
             show();
             gl.viewport(0, 0, canvasEl.width, canvasEl.height);
             renderView({
@@ -888,6 +933,7 @@ void main() {
                 cursorVisible,
                 cursorCol,
                 cursorRow,
+                cursorStyle,
                 x: 0,
                 y: 0,
                 width: canvasEl.width,
@@ -1053,6 +1099,23 @@ function applyPalette(palette, { persist = true } = {}) {
 }
 
 let ws, cell, cols, rows, dpr;
+let cursorBlinkOn = true;
+let cursorBlinkTimer = null;
+function startCursorBlink() {
+    if (cursorBlinkTimer) return;
+    cursorBlinkOn = true;
+    cursorBlinkTimer = setInterval(() => {
+        cursorBlinkOn = !cursorBlinkOn;
+        if (focusedPty !== null) dirtyTerminals.add(focusedPty);
+        requestLeadRender();
+    }, 530);
+}
+function resetCursorBlink() {
+    cursorBlinkOn = true;
+    if (cursorBlinkTimer) { clearInterval(cursorBlinkTimer); cursorBlinkTimer = null; }
+    startCursorBlink();
+}
+startCursorBlink();
 let terminals = {};
 let surfaceCanvases = {};
 let surfaceRenderers = {};
@@ -1066,6 +1129,7 @@ let exposeQuery = '';
 let exposeSelectedPty = null;
 let frames = 0, lastFpsTime = performance.now(), fps = 0;
 let bytesIn = 0, kbps = 0;
+let hudVisible = false;
 let leadNeedsRender = false;
 let previewNeedsRender = false;
 let leadCanvasPrimed = false;
@@ -2037,6 +2101,7 @@ function rasterizeTerminal(ptyId) {
         t.cursor_visible(),
         t.cursor_col,
         t.cursor_row,
+        t.cursor_style(),
         full,
     );
     dirtyTerminals.delete(ptyId);
@@ -2150,6 +2215,7 @@ function renderPreviews() {
                 cursorVisible: terminal.cursor_visible(),
                 cursorCol: terminal.cursor_col,
                 cursorRow: terminal.cursor_row,
+                cursorStyle: terminal.cursor_style(),
             });
         }
         previewCompositeRenderer.renderViews(views);
@@ -2231,6 +2297,7 @@ function focusPty(id, { scrollOffsetOverride = null } = {}) {
             sendScrollForPty(id, scrollOffset);
         }
     }
+    followPty(id);
     resizeCanvasBacking();
     requestLeadRender();
     requestPreviewRender(null, true);
@@ -2376,8 +2443,10 @@ function resizeCanvasBacking() {
 }
 
 function updateHud() {
-    let text = `${cols}\u00d7${rows}  ${fps} fps  ${kbps} kB/s`;
-    if (scrollOffset > 0) text += `  [scroll -${scrollOffset}]`;
+    if (!hudVisible && scrollOffset <= 0) { hud.textContent = ''; return; }
+    let text = '';
+    if (hudVisible) text = `${cols}\u00d7${rows}  ${fps} fps  ${kbps} kB/s`;
+    if (scrollOffset > 0) text += `${text ? '  ' : ''}[scroll -${scrollOffset}]`;
     hud.textContent = text;
 }
 
@@ -2546,6 +2615,7 @@ async function main() {
 
     passInput.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter') return;
+        e.preventDefault();
         const pass = passInput.value;
         if (!pass) return;
         passInput.disabled = true;
@@ -2627,6 +2697,57 @@ async function main() {
     function toggleHelp() { helpOverlay.classList.toggle('visible'); }
     helpOverlay.addEventListener('click', (e) => { if (e.target === helpOverlay) toggleHelp(); });
 
+    const paletteOverlay = document.getElementById('palette-overlay');
+    const paletteList = document.getElementById('palette-list');
+    function rgbHex(c) { return '#' + c.map(v => v.toString(16).padStart(2, '0')).join(''); }
+    function buildPaletteMenu() {
+        paletteList.innerHTML = '';
+        for (const p of PALETTES) {
+            const btn = document.createElement('button');
+            btn.className = 'palette-item' + (p === currentPalette ? ' active' : '');
+            const swatch = document.createElement('span');
+            swatch.className = 'palette-swatch';
+            const colors = [p.bg, p.fg, ...p.ansi.slice(0, 8)];
+            for (const c of colors) {
+                const s = document.createElement('span');
+                s.style.background = rgbHex(c);
+                swatch.appendChild(s);
+            }
+            btn.appendChild(swatch);
+            btn.appendChild(document.createTextNode(p.name));
+            btn.addEventListener('click', () => {
+                applyPalette(p);
+                closePaletteMenu();
+            });
+            paletteList.appendChild(btn);
+        }
+    }
+    function openPaletteMenu() {
+        buildPaletteMenu();
+        paletteOverlay.classList.add('visible');
+        const active = paletteList.querySelector('.active');
+        if (active) active.focus();
+    }
+    function closePaletteMenu() {
+        paletteOverlay.classList.remove('visible');
+        inputSink.focus();
+    }
+    function togglePaletteMenu() {
+        if (paletteOverlay.classList.contains('visible')) closePaletteMenu();
+        else openPaletteMenu();
+    }
+    paletteOverlay.addEventListener('click', (e) => { if (e.target === paletteOverlay) closePaletteMenu(); });
+    paletteOverlay.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); closePaletteMenu(); return; }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const items = [...paletteList.querySelectorAll('.palette-item')];
+            const idx = items.indexOf(document.activeElement);
+            const next = e.key === 'ArrowDown' ? (idx + 1) % items.length : (idx - 1 + items.length) % items.length;
+            items[next].focus();
+        }
+    });
+
     // Keyboard
     inputSink.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
@@ -2660,6 +2781,8 @@ async function main() {
 
         // PTY management
         if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+            if (e.key === 'H') { e.preventDefault(); hudVisible = !hudVisible; updateHud(); return; }
+            if (e.key === 'P') { e.preventDefault(); togglePaletteMenu(); return; }
             if (e.key === 'W') { e.preventDefault(); if (focusedPty !== null) closePty(focusedPty); return; }
             if (e.key === 'B') {
                 e.preventDefault();
@@ -3130,6 +3253,7 @@ function connect(pass, { source = 'prompt' } = {}) {
 
 function sendKey(data) {
     if (focusedPty === null) return;
+    resetCursorBlink();
     const msg = new Uint8Array(3 + data.length);
     msg[0] = C2S_INPUT;
     msg[1] = focusedPty & 0xff;

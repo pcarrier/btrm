@@ -138,6 +138,8 @@ interface GlRenderer {
     cursorVisible: boolean,
     cursorCol: number,
     cursorRow: number,
+    cursorStyle: number,
+    cursorBlinkOn: boolean,
     cell: CellMetrics,
     bgColor: [number, number, number],
   ): void;
@@ -310,14 +312,24 @@ function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
     cursorVisible: boolean,
     cursorCol: number,
     cursorRow: number,
+    cursorStyle: number,
+    cursorBlinkOn: boolean,
     cell: CellMetrics,
   ): void {
     if (!cursorVisible) return;
+    const blinks = cursorStyle === 0 || cursorStyle === 1 || cursorStyle === 3 || cursorStyle === 5;
+    if (blinks && !cursorBlinkOn) return;
     const x1 = cursorCol * cell.pw;
     const y1 = cursorRow * cell.ph;
-    const x2 = x1 + cell.pw;
-    const y2 = y1 + cell.ph;
-    drawSolidRect(x1, y1, x2, y2, 0.8, 0.8, 0.8, 0.5);
+    if (cursorStyle === 3 || cursorStyle === 4) {
+      const h = Math.max(1, Math.round(cell.ph * 0.12));
+      drawSolidRect(x1, y1 + cell.ph - h, x1 + cell.pw, y1 + cell.ph, 0.8, 0.8, 0.8, 0.8);
+    } else if (cursorStyle === 5 || cursorStyle === 6) {
+      const w = Math.max(1, Math.round(cell.pw * 0.12));
+      drawSolidRect(x1, y1, x1 + w, y1 + cell.ph, 0.8, 0.8, 0.8, 0.8);
+    } else {
+      drawSolidRect(x1, y1, x1 + cell.pw, y1 + cell.ph, 0.8, 0.8, 0.8, 0.5);
+    }
   }
 
   function renderGlyphs(
@@ -407,6 +419,8 @@ function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
       cursorVisible: boolean,
       cursorCol: number,
       cursorRow: number,
+      cursorStyle: number,
+      cursorBlinkOn: boolean,
       cell: CellMetrics,
       bgColor: [number, number, number],
     ) {
@@ -417,7 +431,7 @@ function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
       if (atlasCanvas) {
         renderGlyphs(glyphOps, atlasCanvas, atlasVersion, cell);
       }
-      renderCursor(cursorVisible, cursorCol, cursorRow, cell);
+      renderCursor(cursorVisible, cursorCol, cursorRow, cursorStyle, cursorBlinkOn, cell);
     },
     dispose() {
       gl!.deleteBuffer(rectBuffer);
@@ -604,6 +618,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     const ackAheadRef = useRef(0);
     const subscribedRef = useRef(false);
     const scrollOffsetRef = useRef(0);
+    const cursorBlinkOnRef = useRef(true);
+    const cursorBlinkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const wasmModRef = useRef<typeof import('blit-browser') | null>(null);
     const paletteRef = useRef<TerminalPalette | undefined>(palette);
 
@@ -686,6 +702,23 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         needsRenderRef.current = true;
       }
     }, [fontFamily, fontSize]);
+
+    // -----------------------------------------------------------------------
+    // Cursor blink timer
+    // -----------------------------------------------------------------------
+
+    useEffect(() => {
+      cursorBlinkOnRef.current = true;
+      const timer = setInterval(() => {
+        cursorBlinkOnRef.current = !cursorBlinkOnRef.current;
+        needsRenderRef.current = true;
+      }, 530);
+      cursorBlinkTimerRef.current = timer;
+      return () => {
+        clearInterval(timer);
+        cursorBlinkTimerRef.current = null;
+      };
+    }, []);
 
     // -----------------------------------------------------------------------
     // GL renderer lifecycle
@@ -863,6 +896,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             t.cursor_visible(),
             t.cursor_col,
             t.cursor_row,
+            t.cursor_style(),
+            cursorBlinkOnRef.current,
             cell,
             paletteRef.current?.bg ?? [0, 0, 0],
           );

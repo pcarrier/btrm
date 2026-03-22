@@ -529,6 +529,7 @@ const surfaceScratchCanvas = document.createElement('canvas');
 const surfaceScratchCtx = surfaceScratchCanvas.getContext('2d');
 const previewCompositeCanvas = document.createElement('canvas');
 const inputSink = document.getElementById('input-sink');
+inputSink.value = ''; // Clear any browser-restored content from prior page load
 const colorCssCache = new Map();
 const exposeSearchEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

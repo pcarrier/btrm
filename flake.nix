@@ -45,6 +45,39 @@
               default = 10000;
               description = "Scrollback buffer size in rows per PTY.";
             };
+
+            gateways = mkOption {
+              type = types.attrsOf (types.submodule {
+                options = {
+                  user = mkOption {
+                    type = types.str;
+                    description = "User whose blit-server socket to connect to.";
+                  };
+                  port = mkOption {
+                    type = types.port;
+                    default = 3264;
+                    description = "Port to listen on.";
+                  };
+                  addr = mkOption {
+                    type = types.str;
+                    default = "0.0.0.0";
+                    description = "Address to bind to.";
+                  };
+                  passFile = mkOption {
+                    type = types.path;
+                    description = "File containing the gateway passphrase.";
+                  };
+                  package = mkOption {
+                    type = types.package;
+                    default = self.packages.${pkgs.system}.blit-gateway;
+                    defaultText = "self.packages.\${system}.blit-gateway";
+                    description = "The blit-gateway package to use.";
+                  };
+                };
+              });
+              default = {};
+              description = "Named blit-gateway instances connecting to blit-server sockets.";
+            };
           };
 
           config = mkIf cfg.enable {
@@ -56,14 +89,33 @@
                 serviceConfig = {
                   Type = "simple";
                   User = user;
+                  WorkingDirectory = "~";
                   ExecStart = let
                     serverBin = "${cfg.package}/bin/blit-server";
                   in "${serverBin}";
                   Environment = lib.optional (cfg.shell != null) "SHELL=${cfg.shell}"
-                    ++ [ "HOME=%h" "BLIT_SCROLLBACK=${toString cfg.scrollback}" ];
+                    ++ [ "BLIT_SCROLLBACK=${toString cfg.scrollback}" ];
                 };
               };
-            }) cfg.users);
+            }) cfg.users)
+            // builtins.listToAttrs (lib.mapAttrsToList (name: gw: {
+              name = "blit-gateway-${name}";
+              value = {
+                description = "blit gateway ${name} for ${gw.user}";
+                after = [ "blit@${gw.user}.socket" "network.target" ];
+                requires = [ "blit@${gw.user}.socket" ];
+                wantedBy = [ "multi-user.target" ];
+                serviceConfig = {
+                  Type = "simple";
+                  ExecStart = "${gw.package}/bin/blit-gateway";
+                  Environment = [
+                    "BLIT_SOCK=/run/blit/${gw.user}.sock"
+                    "BLIT_ADDR=${gw.addr}:${toString gw.port}"
+                  ];
+                  EnvironmentFile = gw.passFile;
+                };
+              };
+            }) cfg.gateways);
 
             systemd.sockets = builtins.listToAttrs (map (user: {
               name = "blit@${user}";

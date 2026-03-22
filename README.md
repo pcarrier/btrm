@@ -131,6 +131,11 @@ The server supports `LISTEN_FDS=1` for systemd-style socket activation. Each use
     users = [ "alice" "bob" ];
     # shell = "/run/current-system/sw/bin/fish";  # optional
     # scrollback = 20000;                         # optional, default 10000
+    gateways.alice = {
+      user = "alice";
+      port = 3264;
+      passFile = "/run/secrets/blit-alice-pass"; # file containing BLIT_PASS=...
+    };
   };
 }
 ```

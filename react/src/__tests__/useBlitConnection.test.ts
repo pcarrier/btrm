@@ -224,4 +224,46 @@ describe('useBlitConnection', () => {
     act(() => transport.pushList([{ ptyId: 1, tag: '🚀' }]));
     expect(onList).toHaveBeenCalledWith([{ ptyId: 1, tag: '🚀' }]);
   });
+
+  // --- Multi-consumer fan-out ---
+
+  it('two hooks on the same transport both receive messages', () => {
+    const onCreated1 = vi.fn();
+    const onCreated2 = vi.fn();
+    renderHook(() => useBlitConnection(transport, { onCreated: onCreated1 }));
+    renderHook(() => useBlitConnection(transport, { onCreated: onCreated2 }));
+    act(() => transport.pushCreated(5, 'shared'));
+    expect(onCreated1).toHaveBeenCalledWith(5, 'shared');
+    expect(onCreated2).toHaveBeenCalledWith(5, 'shared');
+  });
+
+  it('two hooks on the same transport both track status', () => {
+    const { result: r1 } = renderHook(() => useBlitConnection(transport, {}));
+    const { result: r2 } = renderHook(() => useBlitConnection(transport, {}));
+    expect(r1.current.status).toBe('connected');
+    expect(r2.current.status).toBe('connected');
+    act(() => transport.setStatus('disconnected'));
+    expect(r1.current.status).toBe('disconnected');
+    expect(r2.current.status).toBe('disconnected');
+  });
+
+  it('unmounting one hook does not break the other', () => {
+    const onTitle1 = vi.fn();
+    const onTitle2 = vi.fn();
+    const { unmount } = renderHook(() =>
+      useBlitConnection(transport, { onTitle: onTitle1 }),
+    );
+    renderHook(() => useBlitConnection(transport, { onTitle: onTitle2 }));
+
+    // Both receive
+    act(() => transport.pushTitle(1, 'both'));
+    expect(onTitle1).toHaveBeenCalledTimes(1);
+    expect(onTitle2).toHaveBeenCalledTimes(1);
+
+    // Unmount first, second still works
+    unmount();
+    act(() => transport.pushTitle(1, 'solo'));
+    expect(onTitle1).toHaveBeenCalledTimes(1); // not called again
+    expect(onTitle2).toHaveBeenCalledTimes(2);
+  });
 });

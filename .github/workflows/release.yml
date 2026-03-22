@@ -72,6 +72,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Build & publish blit-browser
+        run: nix run .#browser-publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Build & publish blit-react
         run: nix run .#react-publish
         env:

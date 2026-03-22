@@ -43,6 +43,46 @@ export interface BlitConnectionCallbacks {
   onTitle?: (ptyId: number, title: string) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Per-transport fan-out: multiple useBlitConnection hooks can share one
+// transport without clobbering each other's onmessage/onstatuschange.
+// ---------------------------------------------------------------------------
+
+type MessageHandler = (data: ArrayBuffer) => void;
+type StatusHandler = (status: ConnectionStatus) => void;
+
+interface TransportFanout {
+  messageHandlers: Set<MessageHandler>;
+  statusHandlers: Set<StatusHandler>;
+  /** The handlers we installed on the transport (so we can detect replacement). */
+  installedOnMessage: MessageHandler;
+  installedOnStatus: StatusHandler;
+}
+
+const fanouts = new WeakMap<BlitTransport, TransportFanout>();
+
+function getFanout(transport: BlitTransport): TransportFanout {
+  let f = fanouts.get(transport);
+  if (f) return f;
+
+  const messageHandlers = new Set<MessageHandler>();
+  const statusHandlers = new Set<StatusHandler>();
+
+  const installedOnMessage: MessageHandler = (data) => {
+    for (const h of messageHandlers) h(data);
+  };
+  const installedOnStatus: StatusHandler = (status) => {
+    for (const h of statusHandlers) h(status);
+  };
+
+  transport.onmessage = installedOnMessage;
+  transport.onstatuschange = installedOnStatus;
+
+  f = { messageHandlers, statusHandlers, installedOnMessage, installedOnStatus };
+  fanouts.set(transport, f);
+  return f;
+}
+
 /**
  * Hook that manages a blit transport connection, parsing server messages
  * and providing helper functions for sending client messages.
@@ -70,20 +110,9 @@ export function useBlitConnection(
   const status = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   useEffect(() => {
-    const prevOnMessage = transport.onmessage;
-    const prevOnStatus = transport.onstatuschange;
+    const fanout = getFanout(transport);
 
-    transport.onstatuschange = (newStatus: ConnectionStatus) => {
-      statusRef.current = newStatus;
-      for (const listener of listenersRef.current) listener();
-    };
-    // Sync in case status changed before we attached.
-    if (statusRef.current !== transport.status) {
-      statusRef.current = transport.status;
-      for (const listener of listenersRef.current) listener();
-    }
-
-    transport.onmessage = (data: ArrayBuffer) => {
+    const onMessage = (data: ArrayBuffer) => {
       const bytes = new Uint8Array(data);
       if (bytes.length === 0) return;
 
@@ -136,9 +165,23 @@ export function useBlitConnection(
       }
     };
 
+    const onStatus = (newStatus: ConnectionStatus) => {
+      statusRef.current = newStatus;
+      for (const listener of listenersRef.current) listener();
+    };
+
+    fanout.messageHandlers.add(onMessage);
+    fanout.statusHandlers.add(onStatus);
+
+    // Sync in case status changed before we attached.
+    if (statusRef.current !== transport.status) {
+      statusRef.current = transport.status;
+      for (const listener of listenersRef.current) listener();
+    }
+
     return () => {
-      transport.onmessage = prevOnMessage;
-      transport.onstatuschange = prevOnStatus;
+      fanout.messageHandlers.delete(onMessage);
+      fanout.statusHandlers.delete(onStatus);
     };
   }, [transport]);
 

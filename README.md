@@ -468,11 +468,15 @@ nix build .#blit-cli-deb
 nix build .#blit-gateway-deb
 ```
 
-### npm publish bundle
+### npm publish
 
 ```bash
-nix run .#npm-publish -- --dry-run
+nix run .#npm-publish -- --dry-run        # blit-client
 nix run .#npm-publish
+nix run .#browser-publish -- --dry-run    # blit-browser
+nix run .#browser-publish
+nix run .#react-publish -- --dry-run      # blit-react
+nix run .#react-publish
 ```
 
 ## Verification

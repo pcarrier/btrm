@@ -141,7 +141,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.2.1";
+        version = "0.2.2";
 
         weztermHash = "sha256-V6WvkNZryYofarsyfcmsuvtpNJ/c3O+DmOKNvoYPbmA=";
         finlUnicodeHash = "sha256-38S6XH4hldbkb6NP+s7lXa/NR49PI0w3KYqd+jPHND0=";
@@ -265,6 +265,41 @@
   "types": "blit.d.ts",
   "files": ["blit_bg.wasm","blit_bg.js","blit_bg.wasm.d.ts","blit.js","blit.d.ts","blit_node.js"],
   "keywords": ["terminal","tty","wasm","streaming"],
+  "license": "MIT",
+  "repository": {"type":"git","url":"git+https://github.com/indent-com/blit.git"}
+}
+PKGJSON
+            echo "Package contents:"
+            ls -lh "$tmp"
+            echo ""
+            npm publish "$tmp" "$@"
+          '';
+        };
+
+        browser-publish = pkgs.writeShellApplication {
+          name = "browser-publish";
+          runtimeInputs = [ pkgs.nodejs ];
+          text = ''
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+
+            cp ${browserWasm}/blit_browser.js "$tmp"/
+            cp ${browserWasm}/blit_browser.d.ts "$tmp"/
+            cp ${browserWasm}/blit_browser_bg.wasm "$tmp"/
+            cp ${browserWasm}/blit_browser_bg.wasm.d.ts "$tmp"/ 2>/dev/null || true
+            chmod -R u+w "$tmp"
+
+            cat > "$tmp/package.json" <<'PKGJSON'
+{
+  "name": "blit-browser",
+  "version": "${version}",
+  "type": "module",
+  "description": "Low-latency terminal streaming — browser WASM renderer",
+  "main": "blit_browser.js",
+  "types": "blit_browser.d.ts",
+  "files": ["blit_browser_bg.wasm","blit_browser.js","blit_browser.d.ts","blit_browser_bg.wasm.d.ts"],
+  "sideEffects": ["./snippets/*"],
+  "keywords": ["terminal","tty","wasm","streaming","webgl"],
   "license": "MIT",
   "repository": {"type":"git","url":"git+https://github.com/indent-com/blit.git"}
 }
@@ -429,6 +464,7 @@ CTRL
         packages.blit-gateway = blit-gateway;
         packages.blit-client = blit-client-bundler;
         packages.npm-publish = npm-publish;
+        packages.browser-publish = browser-publish;
         packages.react-publish = react-publish;
         packages.default = blit-cli;
 

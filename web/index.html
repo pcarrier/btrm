@@ -442,7 +442,7 @@ Type <kbd>&gt;</kbd><em>command</em> in Expose and press <kbd>Enter</kbd> &mdash
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> &mdash; Toggle backlog<br>
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>{</kbd>/<kbd>}</kbd> &mdash; Previous/next PTY<br>
 <kbd>Shift</kbd>+<kbd>PageUp</kbd>/<kbd>PageDown</kbd> &mdash; Scroll back/forward<br>
-<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> &mdash; Palette picker<br>
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &mdash; Palette picker<br>
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> &mdash; Toggle HUD (size/fps/kbps)<br>
 <kbd>Ctrl</kbd>+<kbd>?</kbd> &mdash; Toggle this help
 </div></div>
@@ -490,6 +490,15 @@ const PALETTES = [
     { id: 'tokyo-night', name: 'Tokyo Night', dark: true,
       fg: [192,202,245], bg: [26,27,38],
       ansi: [[21,22,30],[247,118,142],[158,206,106],[224,175,104],[122,162,247],[187,154,247],[125,207,255],[169,177,214],[65,72,104],[247,118,142],[158,206,106],[224,175,104],[122,162,247],[187,154,247],[125,207,255],[192,202,245]] },
+    { id: 'tomorrow', name: 'Tomorrow', dark: false,
+      fg: [77,77,76], bg: [255,255,255],
+      ansi: [[0,0,0],[200,40,41],[113,140,0],[234,183,0],[66,113,174],[137,89,168],[62,153,159],[255,255,255],[142,144,140],[200,40,41],[113,140,0],[234,183,0],[66,113,174],[137,89,168],[62,153,159],[255,255,255]] },
+    { id: 'tomorrow-night', name: 'Tomorrow Night', dark: true,
+      fg: [197,200,198], bg: [29,31,33],
+      ansi: [[29,31,33],[204,102,102],[181,189,104],[240,198,116],[129,162,190],[178,148,187],[138,190,183],[197,200,198],[150,152,150],[204,102,102],[181,189,104],[240,198,116],[129,162,190],[178,148,187],[138,190,183],[255,255,255]] },
+    { id: 'tomorrow-night-midnight', name: 'Tomorrow Night Midnight', dark: true,
+      fg: [197,200,198], bg: [0,0,0],
+      ansi: [[0,0,0],[204,102,102],[153,204,153],[255,204,102],[102,153,204],[204,153,204],[102,204,204],[204,204,204],[153,153,153],[242,119,122],[153,204,153],[255,204,102],[102,153,204],[204,153,204],[102,204,204],[255,255,255]] },
 ];
 const USE_WEBGL_LEAD = true;
 const BG_OP_STRIDE = 4;
@@ -794,18 +803,20 @@ void main() {
         const ch = cell.ph * scaleY;
         const x1 = offsetX + cursorCol * cw;
         const y1 = offsetY + cursorRow * ch;
+        gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ZERO);
         if (cursorStyle === 3 || cursorStyle === 4) {
             // Underline: bottom ~2px
             const h = Math.max(1, Math.round(ch * 0.12));
-            drawSolidRect(x1, y1 + ch - h, x1 + cw, y1 + ch, 0.8, 0.8, 0.8, 0.8);
+            drawSolidRect(x1, y1 + ch - h, x1 + cw, y1 + ch, 1, 1, 1, 1);
         } else if (cursorStyle === 5 || cursorStyle === 6) {
             // Bar: left ~2px
             const w = Math.max(1, Math.round(cw * 0.12));
-            drawSolidRect(x1, y1, x1 + w, y1 + ch, 0.8, 0.8, 0.8, 0.8);
+            drawSolidRect(x1, y1, x1 + w, y1 + ch, 1, 1, 1, 1);
         } else {
             // Block (0, 1, 2)
-            drawSolidRect(x1, y1, x1 + cw, y1 + ch, 0.8, 0.8, 0.8, 0.5);
+            drawSolidRect(x1, y1, x1 + cw, y1 + ch, 1, 1, 1, 1);
         }
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     function renderGlyphs(glyphOps, atlasCanvas, atlasVersion, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1) {
@@ -902,14 +913,15 @@ void main() {
         } = view;
         const placement = resolveViewPlacement(view);
         if (clear) {
+            const [pbr, pbg, pbb] = currentPalette.bg;
             drawSolidRect(
                 placement.offsetX,
                 placement.offsetY,
                 placement.offsetX + placement.drawWidth,
                 placement.offsetY + placement.drawHeight,
-                0,
-                0,
-                0,
+                pbr / 255,
+                pbg / 255,
+                pbb / 255,
                 1,
             );
         }
@@ -1087,10 +1099,13 @@ function applyPalette(palette, { persist = true } = {}) {
     document.documentElement.setAttribute('data-theme', palette.dark ? 'dark' : 'light');
     document.documentElement.style.setProperty('--term-bg', termBgColor);
     colorCssCache.clear();
-    for (const t of Object.values(terminals)) {
+    for (const id of Object.keys(terminals)) {
+        const t = terminals[id];
         t.set_default_colors(...palette.fg, ...palette.bg);
         for (let i = 0; i < 16; i++) t.set_ansi_color(i, ...palette.ansi[i]);
         t.invalidate_render_cache();
+        dirtyTerminals.add(Number(id));
+        dirtyPreviewPtys.add(Number(id));
     }
     // Redraw everything
     resetLeadCanvasState();
@@ -2788,6 +2803,7 @@ async function main() {
         // PTY management
         if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
             if (e.key === 'H') { e.preventDefault(); hudVisible = !hudVisible; updateHud(); return; }
+            if (e.key === 'P') { e.preventDefault(); togglePaletteMenu(); return; }
             if (e.key === 'W') { e.preventDefault(); if (focusedPty !== null) closePty(focusedPty); return; }
             if (e.key === 'B') {
                 e.preventDefault();

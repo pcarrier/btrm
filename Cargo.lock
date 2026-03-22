@@ -293,7 +293,9 @@ version = "0.2.2"
 dependencies = [
  "axum",
  "futures-util",
+ "http-body-util",
  "tokio",
+ "tower",
 ]
 
 [[package]]

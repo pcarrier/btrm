@@ -368,7 +368,7 @@ Type <kbd>&gt;</kbd><em>command</em> in Expose and press <kbd>Enter</kbd> &mdash
 <kbd>Ctrl</kbd>+<kbd>?</kbd> &mdash; Toggle this help
 </div></div>
 <script type="module">
-const _base = location.pathname.endsWith('/') ? location.pathname : location.pathname.replace(/[^/]*$/, '');
+const _base = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
 const { default: init, Terminal } = await import(_base + 'blit_browser.js');
 
 const DEFAULT_FONT = '"PragmataPro Liga", "PragmataPro", ui-monospace, monospace';
@@ -2692,7 +2692,7 @@ async function main() {
     // Catch the first keypress anywhere on the page and redirect to the sink,
     // then re-dispatch so the keystroke isn't swallowed.
     document.addEventListener('keydown', (e) => {
-        if (document.activeElement !== inputSink && !exposeOpen) {
+        if (document.activeElement !== inputSink && !exposeOpen && document.activeElement !== passInput) {
             inputSink.focus();
             inputSink.dispatchEvent(new KeyboardEvent('keydown', e));
         }

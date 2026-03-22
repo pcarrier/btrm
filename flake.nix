@@ -473,12 +473,11 @@ CTRL
           binPkg = blit-server-static;
           description = "blit terminal streaming server";
           extraInstall = let
-            socketUnit = ./systemd + "/blit@.socket";
-            serviceUnit = ./systemd + "/blit@.service";
+            systemdDir = ./systemd;
           in ''
             mkdir -p pkg/lib/systemd/system
-            cp ${socketUnit} pkg/lib/systemd/system/blit@.socket
-            cp ${serviceUnit} pkg/lib/systemd/system/blit@.service
+            cp "${systemdDir}/blit@.socket" "pkg/lib/systemd/system/blit@.socket"
+            cp "${systemdDir}/blit@.service" "pkg/lib/systemd/system/blit@.service"
           '';
         };
         packages.blit-cli-deb = mkDeb {

@@ -4,7 +4,6 @@ use axum::http::header::CONTENT_TYPE;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
-use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -40,7 +39,24 @@ impl axum::serve::Listener for NoDelayListener {
 }
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
-const WEB_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../web");
+const ASSET_JS: &[u8] = include_bytes!("../../web/blit_browser.js");
+const ASSET_WASM: &[u8] = include_bytes!("../../web/blit_browser_bg.wasm");
+// wasm-bindgen inline_js snippet — content is stable, hash in the path changes per build.
+const ASSET_SNIPPET_INLINE0: &[u8] = br#"const glyphTextCache = new Map();
+
+export function blitFillTextCodePoint(ctx, codePoint, x, y) {
+  let text = glyphTextCache.get(codePoint);
+  if (text === undefined) {
+    text = String.fromCodePoint(codePoint);
+    glyphTextCache.set(codePoint, text);
+  }
+  ctx.fillText(text, x, y);
+}
+
+export function blitFillText(ctx, text, x, y) {
+  ctx.fillText(text, x, y);
+}
+"#;
 
 struct Config {
     passphrase: String,
@@ -89,9 +105,7 @@ async fn main() {
         sock_path,
     });
 
-    let app = axum::Router::new()
-        .fallback(get(root_handler))
-        .with_state(state);
+    let app = build_app(state);
 
     let tcp = tokio::net::TcpListener::bind(&addr).await.unwrap();
     let listener = NoDelayListener(tcp);
@@ -99,12 +113,16 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+fn build_app(state: AppState) -> axum::Router {
+    axum::Router::new()
+        .fallback(get(root_handler))
+        .with_state(state)
+}
+
 async fn root_handler(State(state): State<AppState>, request: axum::extract::Request) -> Response {
     let path = request.uri().path();
-    if let Some(asset_path) = static_asset_path(path) {
-        if let Ok(bytes) = tokio::fs::read(&asset_path).await {
-            return ([(CONTENT_TYPE, content_type(&asset_path))], bytes).into_response();
-        }
+    if let Some((bytes, ct)) = embedded_asset(path) {
+        return ([(CONTENT_TYPE, ct)], bytes).into_response();
     }
     let is_ws = request
         .headers()
@@ -122,32 +140,18 @@ async fn root_handler(State(state): State<AppState>, request: axum::extract::Req
     }
 }
 
-fn static_asset_path(path: &str) -> Option<PathBuf> {
-    // Use only the last path segment — assets are flat in WEB_ROOT and
-    // the gateway may be mounted behind a reverse proxy at a sub-path.
+/// Match the last path segment against embedded assets.
+/// Returns the asset bytes and content-type, or None to fall through to index.html.
+fn embedded_asset(path: &str) -> Option<(&'static [u8], &'static str)> {
+    // Match /snippets/blit-browser-<hash>/inline0.js regardless of prefix or hash
+    if path.contains("/snippets/blit-browser-") && path.ends_with("/inline0.js") {
+        return Some((ASSET_SNIPPET_INLINE0, "application/javascript"));
+    }
     let filename = path.rsplit('/').next().unwrap_or("");
-    if filename.is_empty() {
-        return None;
-    }
-    let relative = Path::new(filename);
-    if relative
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return None;
-    }
-    Some(Path::new(WEB_ROOT).join(relative))
-}
-
-fn content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default() {
-        "js" => "application/javascript",
-        "wasm" => "application/wasm",
-        "d.ts" => "text/plain; charset=utf-8",
-        "json" => "application/json",
-        "css" => "text/css; charset=utf-8",
-        "html" => "text/html; charset=utf-8",
-        _ => "application/octet-stream",
+    match filename {
+        "blit_browser.js" => Some((ASSET_JS, "application/javascript")),
+        "blit_browser_bg.wasm" => Some((ASSET_WASM, "application/wasm")),
+        _ => None,
     }
 }
 
@@ -217,158 +221,217 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use axum::body::Body;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
 
-    // --- static_asset_path tests ---
+    fn test_app() -> axum::Router {
+        let state: AppState = Arc::new(Config {
+            passphrase: "test".into(),
+            sock_path: "/nonexistent.sock".into(),
+        });
+        build_app(state)
+    }
+
+    // --- HTTP integration tests ---
+
+    #[tokio::test]
+    async fn get_root_returns_index_html() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/html"), "expected text/html, got {ct}");
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.len() > 100);
+    }
+
+    #[tokio::test]
+    async fn get_subpath_returns_index_html() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/vt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // /vt has no matching static asset filename "vt", so falls through to index.html
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/html"), "expected text/html, got {ct}");
+    }
+
+    #[tokio::test]
+    async fn get_js_asset_at_root() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/blit_browser.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert_eq!(ct, "application/javascript");
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert!(!body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_js_asset_behind_prefix() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/vt/blit_browser.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert_eq!(ct, "application/javascript");
+    }
+
+    #[tokio::test]
+    async fn get_snippet_behind_prefix() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/vt/snippets/blit-browser-3cf46cd3055f488b/inline0.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert_eq!(ct, "application/javascript");
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = std::str::from_utf8(&body).unwrap();
+        assert!(text.contains("blitFillText"));
+    }
+
+    #[tokio::test]
+    async fn get_snippet_different_hash() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/snippets/blit-browser-aaaaaaaaaaaaaaaa/inline0.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert_eq!(ct, "application/javascript");
+    }
+
+    #[tokio::test]
+    async fn get_wasm_asset_behind_prefix() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/vt/blit_browser_bg.wasm")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert_eq!(ct, "application/wasm");
+    }
+
+    #[tokio::test]
+    async fn nonexistent_asset_returns_index_html() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/vt/nonexistent_file.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/html"));
+    }
+
+    // --- embedded_asset tests ---
 
     #[test]
-    fn static_asset_path_normal_file() {
-        let result = static_asset_path("/app.js").unwrap();
-        assert_eq!(result, Path::new(WEB_ROOT).join("app.js"));
+    fn embedded_asset_js() {
+        let (bytes, ct) = embedded_asset("/blit_browser.js").unwrap();
+        assert_eq!(ct, "application/javascript");
+        assert!(!bytes.is_empty());
     }
 
     #[test]
-    fn static_asset_path_nested_uses_filename_only() {
-        // Gateway may be behind a reverse proxy at a sub-path
-        let result = static_asset_path("/assets/style.css").unwrap();
-        assert_eq!(result, Path::new(WEB_ROOT).join("style.css"));
+    fn embedded_asset_wasm() {
+        let (bytes, ct) = embedded_asset("/blit_browser_bg.wasm").unwrap();
+        assert_eq!(ct, "application/wasm");
+        assert!(!bytes.is_empty());
     }
 
     #[test]
-    fn static_asset_path_empty() {
-        assert!(static_asset_path("").is_none());
+    fn embedded_asset_behind_prefix() {
+        let (_, ct) = embedded_asset("/vt/blit_browser.js").unwrap();
+        assert_eq!(ct, "application/javascript");
     }
 
     #[test]
-    fn static_asset_path_just_slash() {
-        assert!(static_asset_path("/").is_none());
+    fn embedded_asset_deep_prefix() {
+        let (_, ct) = embedded_asset("/a/b/c/blit_browser_bg.wasm").unwrap();
+        assert_eq!(ct, "application/wasm");
     }
 
     #[test]
-    fn static_asset_path_multiple_slashes() {
-        assert!(static_asset_path("///").is_none());
+    fn embedded_asset_snippet() {
+        let (bytes, ct) = embedded_asset("/snippets/blit-browser-abc123/inline0.js").unwrap();
+        assert_eq!(ct, "application/javascript");
+        assert!(std::str::from_utf8(bytes).unwrap().contains("blitFillText"));
     }
 
     #[test]
-    fn static_asset_path_traversal_dotdot() {
-        // Last segment is "passwd" which is a normal filename
-        let result = static_asset_path("/../etc/passwd").unwrap();
-        assert_eq!(result, Path::new(WEB_ROOT).join("passwd"));
+    fn embedded_asset_snippet_behind_prefix() {
+        let (_, ct) = embedded_asset("/vt/snippets/blit-browser-xyz/inline0.js").unwrap();
+        assert_eq!(ct, "application/javascript");
     }
 
     #[test]
-    fn static_asset_path_double_dots_bare() {
-        // Last segment is ".." which is Component::ParentDir
-        assert!(static_asset_path("/..").is_none());
+    fn embedded_asset_unknown_returns_none() {
+        assert!(embedded_asset("/unknown.js").is_none());
     }
 
     #[test]
-    fn static_asset_path_current_dir_dot() {
-        // Last segment is "." which is Component::CurDir
-        assert!(static_asset_path("/.").is_none());
+    fn embedded_asset_empty_returns_none() {
+        assert!(embedded_asset("").is_none());
     }
 
     #[test]
-    fn static_asset_path_no_leading_slash() {
-        let result = static_asset_path("app.js").unwrap();
-        assert_eq!(result, Path::new(WEB_ROOT).join("app.js"));
-    }
-
-    #[test]
-    fn static_asset_path_deeply_nested_uses_filename() {
-        let result = static_asset_path("/a/b/c/d.wasm").unwrap();
-        assert_eq!(result, Path::new(WEB_ROOT).join("d.wasm"));
-    }
-
-    #[test]
-    fn static_asset_path_reverse_proxy_prefix() {
-        // /vt/blit_browser.js → just "blit_browser.js"
-        let result = static_asset_path("/vt/blit_browser.js").unwrap();
-        assert_eq!(result, Path::new(WEB_ROOT).join("blit_browser.js"));
-    }
-
-    // --- content_type tests ---
-
-    #[test]
-    fn content_type_js() {
-        assert_eq!(content_type(Path::new("app.js")), "application/javascript");
-    }
-
-    #[test]
-    fn content_type_wasm() {
-        assert_eq!(content_type(Path::new("mod.wasm")), "application/wasm");
-    }
-
-    #[test]
-    fn content_type_html() {
-        assert_eq!(
-            content_type(Path::new("index.html")),
-            "text/html; charset=utf-8"
-        );
-    }
-
-    #[test]
-    fn content_type_css() {
-        assert_eq!(
-            content_type(Path::new("style.css")),
-            "text/css; charset=utf-8"
-        );
-    }
-
-    #[test]
-    fn content_type_json() {
-        assert_eq!(content_type(Path::new("data.json")), "application/json");
-    }
-
-    #[test]
-    fn content_type_d_ts() {
-        // Path::extension() returns only the last extension, so "foo.d.ts"
-        // has extension "ts", which does not match the "d.ts" arm.
-        // This means .d.ts files fall through to the default.
-        assert_eq!(
-            content_type(Path::new("types.d.ts")),
-            "application/octet-stream"
-        );
-    }
-
-    #[test]
-    fn content_type_svg() {
-        // svg is not explicitly handled, falls to default
-        assert_eq!(
-            content_type(Path::new("logo.svg")),
-            "application/octet-stream"
-        );
-    }
-
-    #[test]
-    fn content_type_png() {
-        assert_eq!(
-            content_type(Path::new("icon.png")),
-            "application/octet-stream"
-        );
-    }
-
-    #[test]
-    fn content_type_ico() {
-        assert_eq!(
-            content_type(Path::new("favicon.ico")),
-            "application/octet-stream"
-        );
-    }
-
-    #[test]
-    fn content_type_unknown() {
-        assert_eq!(
-            content_type(Path::new("readme.xyz")),
-            "application/octet-stream"
-        );
-    }
-
-    #[test]
-    fn content_type_no_extension() {
-        assert_eq!(
-            content_type(Path::new("Makefile")),
-            "application/octet-stream"
-        );
+    fn embedded_asset_slash_returns_none() {
+        assert!(embedded_asset("/").is_none());
     }
 }

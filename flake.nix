@@ -496,6 +496,13 @@ CTRL
           name = "blit-tests";
           runtimeInputs = [ rustToolchain pkgs.nodejs pkgs.pnpm ];
           text = ''
+            echo "=== Copying WASM assets for blit-cli include_bytes! ==="
+            mkdir -p web/snippets
+            cp -n ${browserWasm}/blit_browser.js web/ 2>/dev/null || true
+            cp -n ${browserWasm}/blit_browser_bg.wasm web/ 2>/dev/null || true
+            cp -n ${browserWasm}/blit_browser.d.ts web/ 2>/dev/null || true
+            cp -n ${browserWasm}/blit_browser_bg.wasm.d.ts web/ 2>/dev/null || true
+
             echo "=== Rust tests ==="
             cargo test --workspace
             echo ""

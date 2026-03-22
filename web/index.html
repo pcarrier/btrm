@@ -2318,6 +2318,7 @@ function touchLru(id) {
 
 function focusPty(id, { scrollOffsetOverride = null } = {}) {
     const previous = focusedPty;
+    if (previous === null) inputSink.value = ''; // discard any browser-restored content
     focusedPty = id;
     touchLru(id);
     scrollOffset = Number.isFinite(scrollOffsetOverride) && scrollOffsetOverride > 0

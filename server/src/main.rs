@@ -408,14 +408,21 @@ fn byte_budget_for(client: &ClientState, budget_ms: f32) -> usize {
 
 fn target_byte_window(client: &ClientState) -> usize {
     let budget = byte_budget_for(client, path_rtt_ms(client) + target_queue_ms(client));
-    // Ensure the byte window can hold the frame window worth of *lead*
-    // frames so the pipeline stays full across one RTT.  Use paced
-    // (lead) frame size — not avg_frame_bytes which includes large
-    // previews and would re-introduce the bufferbloat the budget fixes.
-    let lead_floor = (client.avg_paced_frame_bytes.max(256.0)
-        * target_frame_window(client).max(2) as f32)
-        .ceil() as usize;
-    budget.max(lead_floor)
+    let frame_bytes = client.avg_paced_frame_bytes.max(256.0).ceil() as usize;
+    let target_frames = target_frame_window(client);
+    let pipeline_bytes = frame_bytes.saturating_mul(target_frames);
+    // For small pipelines (e.g. idle terminals with 1KB frames), allow the
+    // full frame window worth of bytes so we pipeline across the RTT instead
+    // of stop-and-wait.  For large pipelines (e.g. 50KB frames × 5 frames =
+    // 250KB), the budget (BDP-based) is the binding constraint; fall back to
+    // a one-frame floor so we don't pile up many RTTs worth of large frames.
+    const PIPELINE_FLOOR_LIMIT: usize = 32_768; // 32 KB
+    let floor = if pipeline_bytes <= PIPELINE_FLOOR_LIMIT {
+        pipeline_bytes
+    } else {
+        frame_bytes // one-frame floor for large pipelines
+    };
+    budget.max(floor)
 }
 
 fn send_interval(client: &ClientState) -> Duration {
@@ -557,10 +564,8 @@ fn record_ack(client: &mut ClientState) {
         let sample_ms = frame.sent_at.elapsed().as_secs_f32() * 1_000.0;
         client.rtt_ms = ewma_with_direction(client.rtt_ms, sample_ms, 0.125, 0.25);
         if client.min_rtt_ms > 0.0 {
-            // Slow decay toward smoothed RTT so the floor can recover from
-            // stale values or measurement artefacts (e.g. min_rtt=0).
-            client.min_rtt_ms = client.min_rtt_ms * 0.999 + client.rtt_ms * 0.001;
-            // But if this sample is a genuine new low, lock it in.
+            // Only update downward: min_rtt tracks the unloaded path RTT and
+            // must not drift upward during congestion (queued RTT ≠ path RTT).
             client.min_rtt_ms = client.min_rtt_ms.min(sample_ms);
         } else {
             client.min_rtt_ms = sample_ms;
@@ -601,11 +606,36 @@ fn record_ack(client: &mut ClientState) {
                 let jitter_sample = (sample_goodput - prev_goodput_sample).abs();
                 client.goodput_bps =
                     ewma_with_direction(client.goodput_bps, sample_goodput, 0.5, 0.125);
-                client.goodput_jitter_bps =
-                    ewma_with_direction(client.goodput_jitter_bps, jitter_sample, 0.5, 0.125);
-                client.max_goodput_jitter_bps =
-                    (client.max_goodput_jitter_bps * 0.98).max(jitter_sample);
-                client.last_goodput_sample_bps = sample_goodput;
+                // Only update jitter from windows with at least 2 frames.
+                // Single-frame windows are pure measurement noise (0 or 1
+                // frame per 25 ms is a Bernoulli trial, not a congestion
+                // signal) and inflate jitter_bps, which in turn depresses
+                // bandwidth_floor_bps and causes pacing to stall.
+                let min_reliable = (client.avg_paced_frame_bytes.max(256.0) * 2.0) as usize;
+                if client.goodput_window_bytes >= min_reliable {
+                    client.goodput_jitter_bps = ewma_with_direction(
+                        client.goodput_jitter_bps,
+                        jitter_sample,
+                        0.5,
+                        0.125,
+                    );
+                    client.max_goodput_jitter_bps =
+                        (client.max_goodput_jitter_bps * 0.98).max(jitter_sample);
+                    // Cap jitter at 45% of goodput so jitter_ratio can never
+                    // exceed 0.45 from measurement noise alone.  Real congestion
+                    // will still drive goodput_bps down and widen the window.
+                    client.max_goodput_jitter_bps =
+                        client.max_goodput_jitter_bps.min(client.goodput_bps * 0.45);
+                } else {
+                    // Thin sample: gently decay jitter rather than updating it.
+                    client.goodput_jitter_bps *= 0.9;
+                    client.max_goodput_jitter_bps *= 0.95;
+                }
+                // Sticky-high: never let last_goodput_sample_bps drop abruptly.
+                // A sudden drop (e.g. 1-frame window following a 2-frame window)
+                // inflates jitter_sample on the next cycle, collapsing probe_frames.
+                client.last_goodput_sample_bps =
+                    (client.last_goodput_sample_bps * 0.99).max(sample_goodput);
             } else {
                 // When the path is underfilled, ACK cadence mostly measures our
                 // own pacing rather than network capacity.  Use a fall alpha
@@ -1466,6 +1496,16 @@ async fn tick(state: &AppState) -> TickOutcome {
 
     let client_ids: Vec<u64> = sess.clients.keys().copied().collect();
     for cid in client_ids {
+        // When the pipe is idle (nothing in flight), RTT cannot be measured
+        // and the last observed value stales.  Decay it toward min_rtt so
+        // a stale congested RTT doesn't permanently suppress the send window
+        // after congestion clears or traffic patterns change (e.g. switching
+        // from a large-frame burst to idle small-frame updates).
+        if let Some(c) = sess.clients.get_mut(&cid) {
+            if c.inflight_bytes == 0 && c.min_rtt_ms > 0.0 && c.rtt_ms > c.min_rtt_ms {
+                c.rtt_ms = (c.rtt_ms * 0.99 + c.min_rtt_ms * 0.01).max(c.min_rtt_ms);
+            }
+        }
         let (
             lead,
             subscriptions,
@@ -2962,5 +3002,441 @@ mod tests {
         record_preview_send(&mut client, 5, first);
         let second = *client.preview_next_send_at.get(&5).unwrap();
         assert!(second > first, "successive sends should advance deadline");
+    }
+
+    // ── congestion control end-to-end properties ──
+    //
+    // These tests encode the two goals of the congestion controller:
+    //   1. Fast pipe  → full display FPS, minimal added latency
+    //   2. Bottleneck → lowest sustainable FPS, fast recovery when pipe clears
+    //
+    // Some tests assert desired future behaviour and currently FAIL due to
+    // known issues (min_rtt contamination, lead_floor dominating byte window).
+    // They are marked with a comment so they are easy to find when fixing.
+
+    /// Return a client in ideal fast-pipe conditions: sub-2ms RTT, abundant
+    /// bandwidth.  The local fast-path should fire and pacing_fps = display_fps.
+    fn fast_pipe_client() -> ClientState {
+        let mut c = test_client();
+        c.display_fps = 120.0;
+        c.rtt_ms = 1.0;
+        c.min_rtt_ms = 1.0;
+        c.goodput_bps = 50_000_000.0;
+        c.delivery_bps = 50_000_000.0;
+        c.last_goodput_sample_bps = 50_000_000.0;
+        c.avg_paced_frame_bytes = 30_000.0;
+        c.avg_preview_frame_bytes = 1_024.0;
+        c.avg_frame_bytes = 30_000.0;
+        c.browser_apply_ms = 0.3;
+        c
+    }
+
+    /// Return a client that has converged to a clearly congested state:
+    /// ~10× min_rtt inflation, low goodput.
+    fn congested_client() -> ClientState {
+        let mut c = test_client();
+        c.display_fps = 120.0;
+        c.rtt_ms = 500.0;
+        c.min_rtt_ms = 40.0;
+        c.goodput_bps = 200_000.0;
+        c.delivery_bps = 150_000.0;
+        c.last_goodput_sample_bps = 200_000.0;
+        c.avg_paced_frame_bytes = 50_000.0;
+        c.avg_preview_frame_bytes = 1_024.0;
+        c.avg_frame_bytes = 50_000.0;
+        c.goodput_jitter_bps = 50_000.0;
+        c.max_goodput_jitter_bps = 200_000.0;
+        c.browser_apply_ms = 1.0;
+        c
+    }
+
+    /// Simulate one ACK: insert a frame with the given RTT into inflight and
+    /// call record_ack.  Forces a goodput-window sample each call so that
+    /// goodput estimates respond within a few calls.
+    fn sim_ack(client: &mut ClientState, bytes: usize, rtt_ms: f32) {
+        let sent_at = Instant::now() - Duration::from_millis(rtt_ms as u64);
+        client.inflight_bytes += bytes;
+        client.inflight_frames.push_back(InFlightFrame {
+            sent_at,
+            bytes,
+            paced: true,
+        });
+        // Age the goodput window so record_ack always emits a sample.
+        client.goodput_window_start =
+            Instant::now() - Duration::from_millis(25);
+        record_ack(client);
+    }
+
+    fn sim_acks(client: &mut ClientState, n: usize, bytes: usize, rtt_ms: f32) {
+        for _ in 0..n {
+            sim_ack(client, bytes, rtt_ms);
+        }
+    }
+
+    // ── property: full FPS on a fast pipe ──
+
+    #[test]
+    fn fast_pipe_uses_full_display_fps() {
+        let client = fast_pipe_client();
+        assert!(
+            local_fast_path(&client),
+            "expected local_fast_path for sub-2ms, high-bandwidth client"
+        );
+        assert!(
+            (pacing_fps(&client) - client.display_fps).abs() < 0.01,
+            "pacing_fps {} should equal display_fps {} on fast pipe",
+            pacing_fps(&client),
+            client.display_fps,
+        );
+    }
+
+    #[test]
+    fn fast_pipe_send_interval_within_one_frame() {
+        let client = fast_pipe_client();
+        let interval_ms = send_interval(&client).as_secs_f32() * 1000.0;
+        let frame_ms = 1000.0 / client.display_fps;
+        assert!(
+            interval_ms <= frame_ms + 0.1,
+            "send_interval {interval_ms:.2}ms exceeds one frame ({frame_ms:.2}ms) on fast pipe"
+        );
+    }
+
+    #[test]
+    fn fast_pipe_window_stays_open_under_normal_load() {
+        let mut client = fast_pipe_client();
+        // A handful of frames in flight should not close the window.
+        fill_inflight(&mut client, 4, 30_000);
+        assert!(
+            window_open(&client),
+            "window should remain open with light inflight on a fast pipe"
+        );
+    }
+
+    // ── property: degraded FPS when bottlenecked ──
+
+    #[test]
+    fn congested_pipe_reduces_pacing_fps_substantially() {
+        let client = congested_client();
+        let fps = pacing_fps(&client);
+        assert!(
+            fps < client.display_fps * 0.5,
+            "pacing_fps {fps:.0} should be well below display_fps {} when congested",
+            client.display_fps,
+        );
+    }
+
+    #[test]
+    fn congested_pipe_is_throughput_limited() {
+        let client = congested_client();
+        assert!(
+            throughput_limited(&client),
+            "congested client must be recognised as throughput-limited"
+        );
+    }
+
+    // ── property: byte window should stay near BDP ──
+    //
+    // KNOWN FAILING: lead_floor in target_byte_window overrides the BDP
+    // budget when avg_paced_frame_bytes is large.  Fix: cap lead_floor.
+
+    #[test]
+    fn byte_window_bounded_near_bdp_when_congested() {
+        let client = congested_client();
+        // BDP at the unloaded path RTT.
+        let bdp = client.goodput_bps * (path_rtt_ms(&client) / 1_000.0);
+        let window = target_byte_window(&client);
+        assert!(
+            window < bdp as usize * 8,
+            "byte window {window}B is {:.1}× BDP ({bdp:.0}B); \
+             expected ≤ 8× — lead_floor may be dominating",
+            window as f32 / bdp.max(1.0),
+        );
+    }
+
+    // ── property: min_rtt must not drift upward under congestion ──
+    //
+    // KNOWN FAILING: the `min_rtt_ms * 0.999 + rtt_ms * 0.001` update
+    // bleeds queued RTT into min_rtt.
+
+    #[test]
+    fn min_rtt_not_contaminated_by_congested_rtts() {
+        let mut client = test_client();
+        client.display_fps = 120.0;
+        client.rtt_ms = 40.0;
+        client.min_rtt_ms = 40.0;
+        client.goodput_bps = 2_000_000.0;
+        client.delivery_bps = 2_000_000.0;
+        client.avg_paced_frame_bytes = 30_000.0;
+        client.avg_preview_frame_bytes = 1_024.0;
+        let original_min = client.min_rtt_ms;
+
+        // 200 ACKs arriving with 500ms RTT (severe congestion).
+        sim_acks(&mut client, 200, 30_000, 500.0);
+
+        assert!(
+            client.min_rtt_ms < original_min * 2.0,
+            "min_rtt drifted from {original_min}ms to {:.1}ms after 200 congested ACKs",
+            client.min_rtt_ms,
+        );
+    }
+
+    // ── property: fast recovery when congestion clears ──
+
+    #[test]
+    fn delivery_bps_rises_quickly_when_congestion_clears() {
+        let mut client = congested_client();
+        let before = client.delivery_bps;
+
+        // 10 ACKs at low latency / high throughput.
+        sim_acks(&mut client, 10, 30_000, 40.0);
+
+        assert!(
+            client.delivery_bps > before * 2.0,
+            "delivery_bps {:.0} should more than double from {before:.0} after 10 fast ACKs",
+            client.delivery_bps,
+        );
+    }
+
+    #[test]
+    fn pacing_fps_recovers_after_congestion_clears() {
+        let mut client = congested_client();
+
+        // Use window-saturated rounds: fill the window with frames, age the
+        // goodput window once, then ACK all.  The first ACK each round emits
+        // a sample; the remaining target-1 ACKs carry over into the next
+        // window, so sample throughput grows as target grows — mimicking a
+        // real link where the sender keeps the pipe full across one RTT.
+        for _ in 0..40 {
+            let target = target_frame_window(&client).max(2);
+            for _ in 0..target {
+                let sent_at = Instant::now() - Duration::from_millis(40);
+                client.inflight_bytes += 30_000;
+                client.inflight_frames.push_back(InFlightFrame {
+                    sent_at,
+                    bytes: 30_000,
+                    paced: true,
+                });
+            }
+            client.goodput_window_start = Instant::now() - Duration::from_millis(25);
+            for _ in 0..target {
+                record_ack(&mut client);
+            }
+        }
+
+        let fps = pacing_fps(&client);
+        assert!(
+            fps > client.display_fps * 0.7,
+            "pacing_fps {fps:.0} didn't recover toward display_fps {} \
+             after window-saturated rounds at low RTT",
+            client.display_fps,
+        );
+    }
+
+    #[test]
+    fn rtt_estimate_drops_quickly_when_congestion_clears() {
+        let mut client = test_client();
+        client.rtt_ms = 500.0;
+        client.min_rtt_ms = 40.0;
+        client.goodput_bps = 2_000_000.0;
+        client.avg_paced_frame_bytes = 30_000.0;
+        client.avg_preview_frame_bytes = 1_024.0;
+
+        // The asymmetric EWMA uses rise=0.125, fall=0.25, so rtt_ms drops
+        // at fall_alpha=0.25 per sample toward the new low.
+        sim_acks(&mut client, 10, 30_000, 40.0);
+
+        assert!(
+            client.rtt_ms < 300.0,
+            "rtt_ms {:.0}ms did not fall fast enough after congestion cleared",
+            client.rtt_ms,
+        );
+    }
+
+    // ── property: probing ──
+
+    #[test]
+    fn probe_collapses_immediately_on_queue_delay() {
+        let mut client = test_client();
+        client.display_fps = 120.0;
+        client.rtt_ms = 40.0;
+        client.min_rtt_ms = 40.0;
+        client.goodput_bps = 5_000_000.0;
+        client.delivery_bps = 5_000_000.0;
+        client.last_goodput_sample_bps = 5_000_000.0;
+        client.avg_paced_frame_bytes = 10_000.0;
+        client.avg_preview_frame_bytes = 1_024.0;
+        client.probe_frames = 10.0;
+
+        // ACKs arriving with high RTT signal queue buildup.
+        sim_acks(&mut client, 5, 10_000, 600.0);
+
+        assert!(
+            client.probe_frames < 5.0,
+            "probe_frames {:.1} should have collapsed on queue delay signal",
+            client.probe_frames,
+        );
+    }
+
+    #[test]
+    fn probe_grows_when_window_saturated_with_clean_rtt() {
+        let mut client = test_client();
+        client.display_fps = 120.0;
+        client.rtt_ms = 40.0;
+        client.min_rtt_ms = 40.0;
+        client.goodput_bps = 5_000_000.0;
+        client.delivery_bps = 5_000_000.0;
+        client.last_goodput_sample_bps = 5_000_000.0;
+        client.avg_paced_frame_bytes = 10_000.0;
+        client.avg_preview_frame_bytes = 1_024.0;
+        client.goodput_jitter_bps = 0.0;
+        client.max_goodput_jitter_bps = 0.0;
+        client.probe_frames = 0.0;
+
+        // Saturate inflight so window_saturated returns true during acks.
+        let target = target_frame_window(&client);
+        for _ in 0..target {
+            let sent_at = Instant::now() - Duration::from_millis(40);
+            client.inflight_bytes += 10_000;
+            client.inflight_frames.push_back(InFlightFrame {
+                sent_at,
+                bytes: 10_000,
+                paced: true,
+            });
+        }
+
+        // Ack one frame with clean RTT.  One saturated ACK is sufficient to
+        // verify the property: as probe_frames increments, target_frame_window
+        // grows, so the remaining (target-1) frames would fall below the 90%
+        // threshold and trigger gentle decay.  The property under test is that
+        // *receiving an ACK while window-saturated* increments probe_frames —
+        // not that it stays incremented across subsequent unsaturated ACKs.
+        // Also: do NOT age the goodput window — that would emit a per-frame
+        // sample far below goodput_bps, spiking jitter and collapsing probe.
+        record_ack(&mut client);
+
+        assert!(
+            client.probe_frames > 0.0,
+            "probe_frames should grow when window-saturated with clean RTT"
+        );
+    }
+
+    // ── property: frame window larger on high-latency links ──
+
+    #[test]
+    fn frame_window_larger_on_high_latency_link() {
+        let mut lo = test_client();
+        lo.display_fps = 120.0;
+        lo.rtt_ms = 10.0;
+        lo.min_rtt_ms = 10.0;
+        lo.goodput_bps = 5_000_000.0;
+        lo.delivery_bps = 5_000_000.0;
+        lo.avg_paced_frame_bytes = 10_000.0;
+        lo.avg_preview_frame_bytes = 1_024.0;
+
+        let mut hi = test_client();
+        hi.display_fps = 120.0;
+        hi.rtt_ms = 200.0;
+        hi.min_rtt_ms = 200.0;
+        hi.goodput_bps = 5_000_000.0;
+        hi.delivery_bps = 5_000_000.0;
+        hi.avg_paced_frame_bytes = 10_000.0;
+        hi.avg_preview_frame_bytes = 1_024.0;
+
+        let lo_win = target_frame_window(&lo);
+        let hi_win = target_frame_window(&hi);
+        assert!(
+            hi_win > lo_win,
+            "high-latency link ({hi_win}f) should need more frames in flight \
+             than low-latency ({lo_win}f)"
+        );
+    }
+
+    // ── property: small-frame byte window allows pipelining ──
+
+    #[test]
+    fn small_frame_byte_window_enables_pipelining() {
+        // Tiny terminal frames (~1KB) with a stale congested RTT and low
+        // goodput estimate (stop-and-wait artifact): byte window must be at
+        // least target_frame_window × frame_bytes so the sender can pipeline
+        // rather than stay stuck in stop-and-wait.
+        let mut client = test_client();
+        client.display_fps = 120.0;
+        client.rtt_ms = 165.0;
+        client.min_rtt_ms = 8.0;
+        client.goodput_bps = 11_000.0; // stop-and-wait artifact
+        client.delivery_bps = 6_800.0;
+        client.last_goodput_sample_bps = 11_000.0;
+        client.avg_paced_frame_bytes = 1_120.0;
+        client.avg_preview_frame_bytes = 1_024.0;
+        client.goodput_jitter_bps = 4_300.0;
+        client.max_goodput_jitter_bps = 6_500.0;
+
+        let window = target_byte_window(&client);
+        let frames = target_frame_window(&client);
+        let pipeline = frames * 1_120;
+
+        assert!(
+            window >= pipeline,
+            "byte window {window}B should be >= pipeline ({frames}f × 1120B = {pipeline}B) \
+             so small frames can pipeline across the RTT"
+        );
+    }
+
+    #[test]
+    fn large_frame_byte_window_bounded_by_one_frame_floor() {
+        // With large frames (50KB), pipelining the full frame window (5×50KB=250KB)
+        // would be many multiples of BDP.  Byte window should fall back to
+        // the one-frame floor so the BDP budget governs.
+        let mut client = test_client();
+        client.display_fps = 120.0;
+        client.rtt_ms = 165.0;
+        client.min_rtt_ms = 8.0;
+        client.goodput_bps = 11_000.0;
+        client.delivery_bps = 6_800.0;
+        client.last_goodput_sample_bps = 11_000.0;
+        client.avg_paced_frame_bytes = 50_000.0; // large frame
+        client.avg_preview_frame_bytes = 1_024.0;
+        client.goodput_jitter_bps = 0.0;
+        client.max_goodput_jitter_bps = 0.0;
+
+        let window = target_byte_window(&client);
+        let frames = target_frame_window(&client);
+        let pipeline = frames.saturating_mul(50_000);
+
+        assert!(
+            window < pipeline,
+            "byte window {window}B should be < full pipeline {pipeline}B \
+             ({frames}f × 50KB) — large frames must use one-frame floor"
+        );
+        assert!(
+            window >= 50_000,
+            "byte window {window}B must be at least one frame (50KB)"
+        );
+    }
+
+    // ── property: fast-path requires both low RTT and sufficient bandwidth ──
+
+    #[test]
+    fn fast_path_blocked_by_high_rtt() {
+        let mut client = fast_pipe_client();
+        client.rtt_ms = 50.0;
+        client.min_rtt_ms = 50.0;
+        assert!(
+            !local_fast_path(&client),
+            "fast path must not fire when rtt_ms=50ms"
+        );
+    }
+
+    #[test]
+    fn fast_path_blocked_by_insufficient_bandwidth() {
+        let mut client = fast_pipe_client();
+        // Drop goodput below what's needed to sustain display_fps.
+        client.goodput_bps = 100_000.0;
+        client.delivery_bps = 100_000.0;
+        client.last_goodput_sample_bps = 100_000.0;
+        assert!(
+            !local_fast_path(&client),
+            "fast path must not fire when bandwidth is insufficient"
+        );
     }
 }

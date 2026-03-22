@@ -1,10 +1,10 @@
 # blit
 
-Low-latency terminal streaming for long-fat networks.
+Terminal streaming for high-latency networks.
 
-`blit-server` multiplexes PTYs on a Unix socket, diffs terminal state into compact binary frames, and ships those frames to browser, terminal, or JS/WASM clients. The current codebase splits more of that stack into reusable crates, uses the wezterm parser end to end, introduces a browser Expose switcher with live previews, and adds a callback-rendered demo that does not depend on escape-sequence parsing.
+blit gives you a multiplexed terminal over a browser or native client that stays responsive on links where SSH falls apart — satellite hops, cross-continent VPNs, spotty mobile connections. If you've ever typed into a remote shell and waited a full second to see the character echo, blit is the fix.
 
-blit is tuned for links where stop-and-wait falls apart: 12-byte cells, LZ4-compressed frame payloads, independent title updates, client-reported display metrics, and sender pacing sized for high RTT paths instead of LAN-only defaults.
+It works for anyone who needs remote shells: ops engineers SSHing into production, developers on distant dev boxes, teams sharing terminal sessions. The browser UI runs anywhere with no install; the CLI gives you a native fallback. A React component and JS/WASM client let you embed terminals in your own apps.
 
 ## Quick Start
 
@@ -90,6 +90,22 @@ graph LR
     S <-->|Unix socket| C
     C -. SSH / raw TCP bridge .- S
 ```
+
+### How data flows
+
+**Server side.** `blit-server` owns PTYs and terminal state. When a PTY produces output, the wezterm parser (`blit-wezterm`) interprets escape sequences and updates an in-memory cell grid. The server then diffs this grid against what each client last received, producing a compact binary frame: 12-byte cells (style flags, fg/bg color, up to 4 bytes of UTF-8 content), LZ4-compressed, with per-client delta tracking. Only changed cells are sent.
+
+**Transport.** The server exposes a Unix socket. `blit-gateway` bridges that socket to HTTP/WebSocket for browser clients, handling authentication and serving the static web assets. The `blit` CLI can either connect directly to the socket (local) or tunnel it over SSH (`-L` forwarding) and spin up an embedded gateway on a random loopback port. Clients and server exchange a binary protocol of tagged messages (`C2S_INPUT`, `C2S_RESIZE`, `S2C_UPDATE`, etc.) — no JSON, no text framing.
+
+**Client side.** The browser receives compressed frame diffs over WebSocket and feeds them to a WASM terminal state machine (`blit-browser`). Rendering is WebGL: glyphs are rasterized into a texture atlas at the device-pixel cell size, then drawn as textured quads. Background colors and cursor are separate draw calls. The 2D canvas composites the WebGL surface with overflow text (emoji, wide Unicode) and predicted input. The React component (`blit-react`) wraps the same WASM module with transport injection, so you can swap WebSocket for WebRTC or anything else.
+
+### Why server and gateway are separate
+
+The server is a long-lived per-user daemon (often socket-activated by systemd) that manages PTY lifetimes and scrollback. The gateway is a stateless HTTP proxy that can be restarted, load-balanced, or run behind a reverse proxy without losing terminal sessions. For local use, the CLI embeds the gateway, so you only run one process.
+
+### Wire format
+
+Each cell is 12 bytes: 2 bytes of flags (color type, bold, dim, italic, underline, inverse, wide, content length), 3 bytes foreground, 3 bytes background, 4 bytes UTF-8 content. Frames are LZ4-compressed diffs — only cells that changed since the client's last-acknowledged frame. The client reports display metrics (backlog depth, render time, display refresh rate) so the server can pace frame production and drop frames when the client can't keep up. Flow control uses explicit ACK counting rather than TCP backpressure alone, which is what makes it work on high-RTT links.
 
 ## Runtime Guide
 
@@ -205,9 +221,11 @@ Shortcuts:
 | Shortcut | Action |
 |---|---|
 | `Ctrl`/`Cmd`+`K` | Open Expose / switch PTY |
+| `Ctrl`/`Cmd`+`Shift`+`K` | Palette picker |
 | `Ctrl`/`Cmd`+`Shift`+`Enter` | New PTY in focused PTY's cwd (falls back to shell default) |
 | `Ctrl+Shift+W` | Close focused PTY |
 | `Ctrl+Shift+B` | Toggle backlog |
+| `Ctrl+Shift+H` | Toggle HUD (size/fps/kbps) |
 | `Ctrl+Shift+{` / `Ctrl+Shift+}` | Previous / next PTY |
 | `Shift+PageUp` / `Shift+PageDown` | Scrollback |
 | `Ctrl+Shift+/` | Toggle help |

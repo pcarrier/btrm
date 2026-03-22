@@ -87,6 +87,21 @@ async fn write_frame(writer: &mut (impl AsyncWrite + Unpin), payload: &[u8]) -> 
 
 #[tokio::main]
 async fn main() {
+    for arg in std::env::args().skip(1) {
+        if arg == "--help" || arg == "-h" {
+            println!("blit-gateway {} — terminal streaming WebSocket gateway", env!("CARGO_PKG_VERSION"));
+            println!();
+            println!("All configuration is via environment variables:");
+            println!("  BLIT_PASS    Browser passphrase (required)");
+            println!("  BLIT_ADDR    Listen address (default: 0.0.0.0:3264)");
+            println!("  BLIT_SOCK    Upstream server socket");
+            std::process::exit(0);
+        }
+        if arg == "--version" || arg == "-V" {
+            println!("blit-gateway {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+    }
     let passphrase = std::env::var("BLIT_PASS").unwrap_or_else(|_| {
         eprintln!("BLIT_PASS environment variable required");
         std::process::exit(1);

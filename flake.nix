@@ -455,6 +455,13 @@ PKGJSON
           '';
         };
 
+        installManPages = ''
+          mkdir -p $out/share/man/man1
+          for f in ${manPages}/share/man/man1/*.1; do
+            install -m 644 "$f" $out/share/man/man1/
+          done
+        '';
+
         blit-server = rustPlatform.buildRustPackage {
           pname = "blit-server";
           inherit version;
@@ -462,6 +469,7 @@ PKGJSON
           cargoBuildFlags = [ "-p" "blit-server" ];
           cargoLock = cargoLockConfig;
           preBuild = patchWeztermTerminfo;
+          postInstall = installManPages;
           doCheck = false;
         };
 
@@ -472,6 +480,7 @@ PKGJSON
           cargoBuildFlags = [ "-p" "blit-cli" ];
           cargoLock = cargoLockConfig;
           preBuild = copyWebAssets;
+          postInstall = installManPages;
           doCheck = false;
           meta.mainProgram = "blit";
         };
@@ -487,6 +496,7 @@ PKGJSON
             cp ${browserWasm}/blit_browser_bg.wasm web/
             cp ${browserWasm}/blit_browser.js web/
           '';
+          postInstall = installManPages;
           doCheck = false;
         };
 
@@ -559,7 +569,21 @@ PKGJSON
         };
 
 
-        mkDeb = { pname, binName ? pname, binPkg, description, extraInstall ? "" }: pkgs.stdenv.mkDerivation {
+        manPagesSrc = ./man;
+        manPages = pkgs.stdenv.mkDerivation {
+          name = "blit-man-${version}";
+          src = manPagesSrc;
+          nativeBuildInputs = [ pkgs.scdoc ];
+          buildPhase = ''
+            mkdir -p $out/share/man/man1
+            for f in *.scd; do
+              scdoc < "$f" > "$out/share/man/man1/''${f%.scd}"
+            done
+          '';
+          installPhase = "true";
+        };
+
+        mkDeb = { pname, binName ? pname, binPkg, manName ? binName, description, extraInstall ? "" }: pkgs.stdenv.mkDerivation {
           pname = "${pname}-deb";
           inherit version;
           nativeBuildInputs = [ pkgs.dpkg ];
@@ -567,8 +591,12 @@ PKGJSON
           buildPhase =
             let arch = if pkgs.stdenv.hostPlatform.isAarch64 then "arm64" else "amd64";
             in ''
-              mkdir -p pkg/DEBIAN pkg/usr/bin
+              mkdir -p pkg/DEBIAN pkg/usr/bin pkg/usr/share/man/man1
               cp ${binPkg}/bin/${binName} pkg/usr/bin/
+              if [ -f ${manPages}/share/man/man1/${manName}.1 ]; then
+                cp ${manPages}/share/man/man1/${manName}.1 pkg/usr/share/man/man1/
+                gzip -9 pkg/usr/share/man/man1/${manName}.1
+              fi
               ${extraInstall}
               cat > pkg/DEBIAN/control <<'CTRL'
 Package: ${pname}
@@ -645,6 +673,7 @@ CTRL
             pkgs.process-compose
             pkgs.cargo-watch
             pkgs.cargo-llvm-cov
+            pkgs.scdoc
           ];
 
           shellHook = ''

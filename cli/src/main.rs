@@ -520,6 +520,23 @@ impl Transport {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("blit {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("blit {} — terminal streaming client", env!("CARGO_PKG_VERSION"));
+        println!();
+        println!("USAGE: blit [OPTIONS] [HOST]");
+        println!();
+        println!("OPTIONS:");
+        println!("  --console           Render to terminal instead of opening browser");
+        println!("  --socket PATH       Connect to a specific Unix socket");
+        println!("  --tcp HOST:PORT     Connect via raw TCP");
+        println!("  --help, -h          Print this help");
+        println!("  --version, -V       Print version");
+        return;
+    }
     let console_mode = args.iter().any(|a| a == "--console");
     if console_mode {
         let filtered_args: Vec<String> =
@@ -1090,6 +1107,7 @@ enum ExposeAction {
     Select,
     Create,
     Kill,
+    Quit,
 }
 
 fn parse_expose_key(buf: &[u8]) -> (ExposeAction, usize) {
@@ -1109,6 +1127,7 @@ fn parse_expose_key(buf: &[u8]) -> (ExposeAction, usize) {
         0x0D | 0x0A => (ExposeAction::Select, 1),     // Enter
         0x0E => (ExposeAction::Create, 1),             // Ctrl-N
         0x17 => (ExposeAction::Kill, 1),               // Ctrl-W
+        b'q' | b'Q' => (ExposeAction::Quit, 1),
         _ => (ExposeAction::None, 1),
     }
 }
@@ -1202,11 +1221,11 @@ async fn run(transport: Transport) {
             ev = ev_rx.recv() => {
                 match ev {
                     Some(Event::Stdin(data)) => {
-                        handle_stdin(
+                        if handle_stdin(
                             &data, &mut expose, &mut focused_pty, &ptys,
                             &mut renderer, &mut screen, &mut out_buf,
                             &frame_tx, &mut stdout, cur_rows, cur_cols,
-                        ).await;
+                        ).await { break; }
                     }
                     Some(Event::Resize(r, c)) => {
                         cur_rows = r;
@@ -1220,6 +1239,15 @@ async fn run(transport: Transport) {
                             }
                         } else if let Some(id) = focused_pty {
                             let _ = frame_tx.send(make_frame(&msg_resize(id, r, c))).await;
+                            // Force full redraw after resize
+                            screen.mark_all_dirty();
+                            out_buf.clear();
+                            renderer.render(&screen, &mut out_buf);
+                            screen.clear_all_dirty();
+                            if !out_buf.is_empty() {
+                                let _ = stdout.write_all(&out_buf).await;
+                                let _ = stdout.flush().await;
+                            }
                         }
                     }
                     None => break,
@@ -1229,6 +1257,7 @@ async fn run(transport: Transport) {
     }
 }
 
+/// Returns true if the CLI should quit.
 async fn handle_stdin(
     data: &[u8],
     expose: &mut Expose,
@@ -1241,7 +1270,7 @@ async fn handle_stdin(
     stdout: &mut tokio::io::Stdout,
     rows: u16,
     cols: u16,
-) {
+) -> bool {
     // Check for Ctrl-K (0x0B) to toggle expose
     if !expose.open {
         // Scan for Ctrl-K in the input
@@ -1266,25 +1295,27 @@ async fn handle_stdin(
                     let _ = stdout.flush().await;
             // Process remaining bytes after Ctrl-K as expose input
             if pos + 1 < data.len() {
-                handle_expose_input(
+                if handle_expose_input(
                     &data[pos + 1..], expose, focused_pty, renderer, screen,
                     out_buf, frame_tx, stdout, rows, cols,
-                ).await;
+                ).await { return true; }
             }
-            return;
+            return false;
         }
         // No Ctrl-K — forward all to PTY
         if let Some(id) = *focused_pty {
             let _ = frame_tx.send(make_frame(&msg_input(id, data))).await;
         }
     } else {
-        handle_expose_input(
+        if handle_expose_input(
             data, expose, focused_pty, renderer, screen,
             out_buf, frame_tx, stdout, rows, cols,
-        ).await;
+        ).await { return true; }
     }
+    false
 }
 
+/// Returns true if the CLI should quit.
 async fn handle_expose_input(
     data: &[u8],
     expose: &mut Expose,
@@ -1296,7 +1327,7 @@ async fn handle_expose_input(
     stdout: &mut tokio::io::Stdout,
     rows: u16,
     cols: u16,
-) {
+) -> bool {
     let mut off = 0;
     while off < data.len() {
         let (action, consumed) = parse_expose_key(&data[off..]);
@@ -1313,7 +1344,7 @@ async fn handle_expose_input(
                         let _ = frame_tx.send(make_frame(&msg_input(id, &data[off..]))).await;
                     }
                 }
-                return;
+                return false;
             }
             ExposeAction::Up => {
                 if expose.selected > 0 {
@@ -1335,7 +1366,7 @@ async fn handle_expose_input(
                     let _ = frame_tx.send(make_frame(&msg_resize(id, rows, cols))).await;
                 }
                 close_expose(expose, focused_pty, renderer, screen, out_buf, frame_tx, stdout, rows, cols).await;
-                return;
+                return false;
             }
             ExposeAction::Create => {
                 let _ = frame_tx.send(make_frame(&msg_create(rows, cols))).await;
@@ -1349,6 +1380,9 @@ async fn handle_expose_input(
                         .await;
                 }
             }
+            ExposeAction::Quit => {
+                return true;
+            }
         }
     }
     // Re-render expose after processing all keys
@@ -1361,6 +1395,7 @@ async fn handle_expose_input(
                     let _ = stdout.flush().await;
         }
     }
+    false
 }
 
 async fn close_expose(

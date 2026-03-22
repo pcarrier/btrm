@@ -1270,6 +1270,11 @@ fn parse_config() -> Config {
         if arg == "--help" || arg == "-h" {
             println!("{}", usage());
             println!("  --socket PATH            Unix socket path (or set BLIT_SOCK)");
+            println!("  --version, -V            Print version");
+            std::process::exit(0);
+        }
+        if arg == "--version" || arg == "-V" {
+            println!("blit-server {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         }
 

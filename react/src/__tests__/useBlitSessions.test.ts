@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useBlitSessions } from '../hooks/useBlitSessions';
 import { MockTransport } from './mock-transport';
@@ -33,17 +33,52 @@ describe('useBlitSessions', () => {
     expect(result.current.sessions).toEqual([]);
   });
 
-  it('autoCreateIfEmpty sends CREATE on empty LIST', () => {
+  // --- autoCreate ---
+
+  it('autoCreateIfEmpty sends CREATE on empty LIST with default tag', () => {
     renderHook(() =>
       useBlitSessions(transport, { autoCreateIfEmpty: true }),
     );
     act(() => transport.pushList([]));
     const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
     expect(creates.length).toBe(1);
-    // Verify it's a valid CREATE message with tag_len=0
     expect(creates[0].length).toBe(7);
-    expect(creates[0][5]).toBe(0); // tag_len lo
-    expect(creates[0][6]).toBe(0); // tag_len hi
+    expect(creates[0][5]).toBe(0);
+    expect(creates[0][6]).toBe(0);
+  });
+
+  it('autoCreateIfEmpty sends CREATE with autoCreateTag', () => {
+    renderHook(() =>
+      useBlitSessions(transport, {
+        autoCreateIfEmpty: true,
+        autoCreateTag: 'interactive',
+      }),
+    );
+    act(() => transport.pushList([]));
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    expect(creates.length).toBe(1);
+    const tagLen = creates[0][5] | (creates[0][6] << 8);
+    expect(tagLen).toBe(11);
+    const tag = new TextDecoder().decode(creates[0].slice(7, 7 + tagLen));
+    expect(tag).toBe('interactive');
+  });
+
+  it('autoCreateIfEmpty sends CREATE with autoCreateCommand', () => {
+    renderHook(() =>
+      useBlitSessions(transport, {
+        autoCreateIfEmpty: true,
+        autoCreateTag: 'bg',
+        autoCreateCommand: 'make build',
+      }),
+    );
+    act(() => transport.pushList([]));
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    expect(creates.length).toBe(1);
+    const tagLen = creates[0][5] | (creates[0][6] << 8);
+    const tag = new TextDecoder().decode(creates[0].slice(7, 7 + tagLen));
+    expect(tag).toBe('bg');
+    const cmd = new TextDecoder().decode(creates[0].slice(7 + tagLen));
+    expect(cmd).toBe('make build');
   });
 
   it('does not auto-create when LIST is non-empty', () => {
@@ -54,6 +89,8 @@ describe('useBlitSessions', () => {
     const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
     expect(creates.length).toBe(0);
   });
+
+  // --- CREATED / CLOSED ---
 
   it('tracks CREATED', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
@@ -88,6 +125,8 @@ describe('useBlitSessions', () => {
     expect(result.current.sessions[0].state).toBe('active');
   });
 
+  // --- Titles ---
+
   it('updates title on TITLE', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
@@ -102,10 +141,11 @@ describe('useBlitSessions', () => {
     expect(result.current.sessions[0].title).toBeNull();
   });
 
+  // --- LIST reconciliation ---
+
   it('reconciles LIST — marks missing PTYs as closed, adds new', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     act(() => transport.pushList([{ ptyId: 1, tag: 'a' }, { ptyId: 2, tag: 'b' }]));
-    // Second LIST: pty 1 gone, pty 3 added
     act(() => transport.pushList([{ ptyId: 2, tag: 'b' }, { ptyId: 3, tag: 'c' }]));
     const s = result.current.sessions;
     expect(s.find((x) => x.ptyId === 1)?.state).toBe('closed');
@@ -132,7 +172,7 @@ describe('useBlitSessions', () => {
     expect(result.current.sessions.map((s) => s.ptyId)).toEqual([1, 2, 3]);
   });
 
-  // --- Control functions ---
+  // --- createPty ---
 
   it('createPty sends CREATE with default size', () => {
     const { result } = renderHook(() =>
@@ -140,7 +180,7 @@ describe('useBlitSessions', () => {
         getInitialSize: () => ({ rows: 30, cols: 120 }),
       }),
     );
-    act(() => result.current.createPty());
+    act(() => { result.current.createPty(); });
     const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
     expect(msg).toBeDefined();
     expect(msg[1] | (msg[2] << 8)).toBe(30);
@@ -149,7 +189,7 @@ describe('useBlitSessions', () => {
 
   it('createPty sends CREATE with tag and command', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => result.current.createPty({ tag: 'my-tag', command: 'vim' }));
+    act(() => { result.current.createPty({ tag: 'my-tag', command: 'vim' }); });
     const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
     expect(msg).toBeDefined();
     const tagLen = msg[5] | (msg[6] << 8);
@@ -162,26 +202,97 @@ describe('useBlitSessions', () => {
 
   it('createPty with custom rows/cols', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => result.current.createPty({ rows: 50, cols: 200 }));
+    act(() => { result.current.createPty({ rows: 50, cols: 200 }); });
     const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
     expect(msg[1] | (msg[2] << 8)).toBe(50);
     expect(msg[3] | (msg[4] << 8)).toBe(200);
   });
 
-  it('focusPty sends FOCUS', () => {
+  it('createPty returns a promise that resolves with ptyId', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => result.current.focusPty(7));
-    const msg = transport.sent.find((m) => m[0] === C2S_FOCUS)!;
-    expect(msg).toBeDefined();
-    expect(msg[1] | (msg[2] << 8)).toBe(7);
+    let resolved: number | undefined;
+    act(() => {
+      result.current.createPty({ tag: 'test' }).then((id) => { resolved = id; });
+    });
+    expect(resolved).toBeUndefined();
+    await act(async () => { transport.pushCreated(42, 'test'); });
+    expect(resolved).toBe(42);
   });
+
+  it('createPty promises resolve in FIFO order', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    const ids: number[] = [];
+    act(() => {
+      result.current.createPty({ tag: 'a' }).then((id) => ids.push(id));
+      result.current.createPty({ tag: 'b' }).then((id) => ids.push(id));
+    });
+    await act(async () => {
+      transport.pushCreated(10, 'a');
+      transport.pushCreated(20, 'b');
+    });
+    expect(ids).toEqual([10, 20]);
+  });
+
+  // --- closePty ---
 
   it('closePty sends CLOSE', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => result.current.closePty(3));
+    act(() => { result.current.closePty(3); });
     const msg = transport.sent.find((m) => m[0] === C2S_CLOSE)!;
     expect(msg).toBeDefined();
     expect(msg[1] | (msg[2] << 8)).toBe(3);
+  });
+
+  it('closePty returns a promise that resolves on S2C_CLOSED', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([{ ptyId: 7, tag: '' }]));
+    let resolved = false;
+    act(() => {
+      result.current.closePty(7).then(() => { resolved = true; });
+    });
+    expect(resolved).toBe(false);
+    await act(async () => { transport.pushClosed(7); });
+    expect(resolved).toBe(true);
+  });
+
+  // --- focusPty / focusedPtyId ---
+
+  it('focusPty sends FOCUS and updates focusedPtyId', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([{ ptyId: 1 }, { ptyId: 2 }]));
+    act(() => result.current.focusPty(2));
+    const msg = transport.sent.find((m) => m[0] === C2S_FOCUS)!;
+    expect(msg).toBeDefined();
+    expect(msg[1] | (msg[2] << 8)).toBe(2);
+    expect(result.current.focusedPtyId).toBe(2);
+  });
+
+  it('focusedPtyId auto-selects first entry from LIST', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([{ ptyId: 5, tag: 'a' }, { ptyId: 6, tag: 'b' }]));
+    expect(result.current.focusedPtyId).toBe(5);
+  });
+
+  it('focusedPtyId is null for empty LIST', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([]));
+    expect(result.current.focusedPtyId).toBeNull();
+  });
+
+  it('focusedPtyId moves to next active on CLOSED', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([{ ptyId: 1 }, { ptyId: 2 }]));
+    act(() => result.current.focusPty(1));
+    expect(result.current.focusedPtyId).toBe(1);
+    act(() => transport.pushClosed(1));
+    expect(result.current.focusedPtyId).toBe(2);
+  });
+
+  it('focusedPtyId becomes null when all sessions close', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([{ ptyId: 1 }]));
+    act(() => transport.pushClosed(1));
+    expect(result.current.focusedPtyId).toBeNull();
   });
 
   // --- Status tracking ---
@@ -191,5 +302,95 @@ describe('useBlitSessions', () => {
     expect(result.current.status).toBe('connected');
     act(() => transport.setStatus('disconnected'));
     expect(result.current.status).toBe('disconnected');
+  });
+
+  // --- Lifecycle callbacks ---
+
+  it('calls onSessionCreated when a session is created', () => {
+    const onSessionCreated = vi.fn();
+    renderHook(() =>
+      useBlitSessions(transport, { onSessionCreated }),
+    );
+    act(() => transport.pushList([]));
+    act(() => transport.pushCreated(3, 'shell'));
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ ptyId: 3, tag: 'shell', state: 'active' }),
+    );
+  });
+
+  it('calls onSessionClosed when a session is closed', () => {
+    const onSessionClosed = vi.fn();
+    renderHook(() =>
+      useBlitSessions(transport, { onSessionClosed }),
+    );
+    act(() => transport.pushList([{ ptyId: 1, tag: 'x' }]));
+    act(() => transport.pushClosed(1));
+    expect(onSessionClosed).toHaveBeenCalledWith(
+      expect.objectContaining({ ptyId: 1, state: 'closed' }),
+    );
+  });
+
+  it('calls onDisconnect when transport disconnects after being connected', () => {
+    const onDisconnect = vi.fn();
+    renderHook(() =>
+      useBlitSessions(transport, { onDisconnect }),
+    );
+    act(() => transport.setStatus('disconnected'));
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onReconnect when transport reconnects', () => {
+    const onReconnect = vi.fn();
+    const onDisconnect = vi.fn();
+    renderHook(() =>
+      useBlitSessions(transport, { onReconnect, onDisconnect }),
+    );
+    act(() => transport.setStatus('disconnected'));
+    act(() => transport.setStatus('connected'));
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // --- WASM title reading via getTerminal ---
+
+  it('reads title from getTerminal on S2C_UPDATE', () => {
+    const terminal = { title: () => 'zsh: ~/project' };
+    const { result } = renderHook(() =>
+      useBlitSessions(transport, {
+        getTerminal: (ptyId) => (ptyId === 1 ? terminal : null),
+      }),
+    );
+    act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
+    act(() => transport.pushUpdate(1));
+    expect(result.current.sessions[0].title).toBe('zsh: ~/project');
+  });
+
+  it('does not update title when getTerminal returns null', () => {
+    const { result } = renderHook(() =>
+      useBlitSessions(transport, {
+        getTerminal: () => null,
+      }),
+    );
+    act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
+    act(() => transport.pushTitle(1, 'explicit'));
+    act(() => transport.pushUpdate(1));
+    expect(result.current.sessions[0].title).toBe('explicit');
+  });
+
+  it('deduplicates title updates from getTerminal', () => {
+    let renderCount = 0;
+    const terminal = { title: () => 'same-title' };
+    const { result } = renderHook(() => {
+      renderCount++;
+      return useBlitSessions(transport, {
+        getTerminal: () => terminal,
+      });
+    });
+    act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
+    act(() => transport.pushUpdate(1));
+    const countAfterFirstUpdate = renderCount;
+    act(() => transport.pushUpdate(1));
+    expect(renderCount).toBe(countAfterFirstUpdate);
+    expect(result.current.sessions[0].title).toBe('same-title');
   });
 });

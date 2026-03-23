@@ -1,21 +1,31 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react';
-import type { BlitTransport, BlitSession } from '../types';
-import {
-  C2S_CREATE,
-  C2S_FOCUS,
-  C2S_CLOSE,
-  S2C_CREATED,
-  S2C_CLOSED,
-  S2C_LIST,
-  S2C_TITLE,
-} from '../types';
+import type { BlitTransport, BlitSession, ConnectionStatus } from '../types';
 import { useBlitConnection } from './useBlitConnection';
 
 export interface UseBlitSessionsOptions {
   /** Automatically create a PTY if the initial list is empty. Default: false. */
   autoCreateIfEmpty?: boolean;
+  /** Tag to assign to auto-created PTYs (requires autoCreateIfEmpty). */
+  autoCreateTag?: string;
+  /** Command to run in auto-created PTYs (requires autoCreateIfEmpty). */
+  autoCreateCommand?: string;
   /** Returns the initial terminal size for auto-created PTYs. */
   getInitialSize?: () => { rows: number; cols: number };
+  /**
+   * Optional accessor for the WASM Terminal instance backing a PTY.
+   * When provided, the hook reads `terminal.title()` after each S2C_UPDATE
+   * frame and updates `session.title` — matching the upstream web client
+   * behavior for OSC 0/2 title sequences.
+   */
+  getTerminal?: (ptyId: number) => { title(): string } | null;
+  /** Called when a new session appears (server-initiated or from createPty). */
+  onSessionCreated?: (session: BlitSession) => void;
+  /** Called when a session is closed (server-initiated or from closePty). */
+  onSessionClosed?: (session: BlitSession) => void;
+  /** Called when the transport disconnects. */
+  onDisconnect?: () => void;
+  /** Called when the transport reconnects (status becomes 'connected'). */
+  onReconnect?: () => void;
 }
 
 export function useBlitSessions(
@@ -23,13 +33,23 @@ export function useBlitSessions(
   options?: UseBlitSessionsOptions,
 ) {
   const autoCreate = options?.autoCreateIfEmpty ?? false;
+  const autoTag = options?.autoCreateTag;
+  const autoCommand = options?.autoCreateCommand;
   const getSize = options?.getInitialSize ?? (() => ({ rows: 24, cols: 80 }));
+  const getTerminalRef = useRef(options?.getTerminal);
+  getTerminalRef.current = options?.getTerminal;
+  const lifecycleRef = useRef(options);
+  lifecycleRef.current = options;
 
-  // Immutable snapshot for useSyncExternalStore.
   const sessionsRef = useRef<readonly BlitSession[]>([]);
   const listenersRef = useRef(new Set<() => void>());
   const readyRef = useRef(false);
   const readyListenersRef = useRef(new Set<() => void>());
+  const focusedPtyIdRef = useRef<number | null>(null);
+  const focusedListenersRef = useRef(new Set<() => void>());
+  const pendingCreatesRef = useRef<Array<(ptyId: number) => void>>([]);
+  const pendingClosesRef = useRef<Map<number, Array<() => void>>>(new Map());
+  const wasConnectedRef = useRef(transport.status === 'connected');
 
   const notify = useCallback(() => {
     for (const l of listenersRef.current) l();
@@ -38,6 +58,20 @@ export function useBlitSessions(
   const notifyReady = useCallback(() => {
     for (const l of readyListenersRef.current) l();
   }, []);
+
+  const notifyFocused = useCallback(() => {
+    for (const l of focusedListenersRef.current) l();
+  }, []);
+
+  const setFocused = useCallback(
+    (ptyId: number | null) => {
+      if (focusedPtyIdRef.current !== ptyId) {
+        focusedPtyIdRef.current = ptyId;
+        notifyFocused();
+      }
+    },
+    [notifyFocused],
+  );
 
   const upsert = useCallback(
     (ptyId: number, tag: string, patch: Partial<BlitSession>) => {
@@ -64,6 +98,10 @@ export function useBlitSessions(
   const onCreated = useCallback(
     (ptyId: number, tag: string) => {
       upsert(ptyId, tag, { state: 'active' });
+      const resolve = pendingCreatesRef.current.shift();
+      if (resolve) resolve(ptyId);
+      const session = sessionsRef.current.find((s) => s.ptyId === ptyId);
+      if (session) lifecycleRef.current?.onSessionCreated?.(session);
     },
     [upsert],
   );
@@ -77,14 +115,23 @@ export function useBlitSessions(
         next[idx] = { ...next[idx], state: 'closed' };
         sessionsRef.current = next;
         notify();
+        lifecycleRef.current?.onSessionClosed?.(next[idx]);
+        const resolvers = pendingClosesRef.current.get(closedId);
+        if (resolvers) {
+          pendingClosesRef.current.delete(closedId);
+          for (const r of resolvers) r();
+        }
+      }
+      if (focusedPtyIdRef.current === closedId) {
+        const nextActive = sessionsRef.current.find((s) => s.state === 'active');
+        setFocused(nextActive?.ptyId ?? null);
       }
     },
-    [notify],
+    [notify, setFocused],
   );
 
   const onList = useCallback(
     (entries: { ptyId: number; tag: string }[]) => {
-      // Reconcile: mark missing as closed, add new as active.
       const ids = new Set(entries.map((e) => e.ptyId));
       let next = sessionsRef.current
         .map((s) => (ids.has(s.ptyId) ? s : { ...s, state: 'closed' as const }));
@@ -101,22 +148,22 @@ export function useBlitSessions(
       }
       notify();
 
+      if (focusedPtyIdRef.current !== null && !ids.has(focusedPtyIdRef.current)) {
+        const nextActive = next.find((s) => s.state === 'active');
+        setFocused(nextActive?.ptyId ?? null);
+      } else if (focusedPtyIdRef.current === null && entries.length > 0) {
+        setFocused(entries[0].ptyId);
+      }
+
       if (autoCreate && entries.length === 0) {
         const { rows, cols } = getSize();
-        const encoder = new TextEncoder();
-        const msg = new Uint8Array(7);
-        msg[0] = C2S_CREATE;
-        msg[1] = rows & 0xff;
-        msg[2] = (rows >> 8) & 0xff;
-        msg[3] = cols & 0xff;
-        msg[4] = (cols >> 8) & 0xff;
-        // tag_len = 0
-        msg[5] = 0;
-        msg[6] = 0;
-        transport.send(msg);
+        sendCreateRef.current(rows, cols, {
+          tag: autoTag,
+          command: autoCommand,
+        });
       }
     },
-    [notify, notifyReady, autoCreate, getSize, transport],
+    [notify, notifyReady, setFocused, autoCreate, autoTag, autoCommand, getSize],
   );
 
   const onTitle = useCallback(
@@ -133,10 +180,49 @@ export function useBlitSessions(
     [notify],
   );
 
+  const onUpdate = useCallback(
+    (ptyId: number, _payload: Uint8Array) => {
+      const getTerminal = getTerminalRef.current;
+      if (!getTerminal) return;
+      const terminal = getTerminal(ptyId);
+      if (!terminal) return;
+      const title = terminal.title();
+      const prev = sessionsRef.current;
+      const idx = prev.findIndex((s) => s.ptyId === ptyId);
+      if (idx >= 0 && prev[idx].title !== title) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], title };
+        sessionsRef.current = next;
+        notify();
+      }
+    },
+    [notify],
+  );
+
+  const onStatusChange = useCallback(
+    (newStatus: ConnectionStatus) => {
+      if (newStatus === 'disconnected' || newStatus === 'error') {
+        if (wasConnectedRef.current) {
+          wasConnectedRef.current = false;
+          lifecycleRef.current?.onDisconnect?.();
+        }
+      } else if (newStatus === 'connected') {
+        if (!wasConnectedRef.current) {
+          wasConnectedRef.current = true;
+          lifecycleRef.current?.onReconnect?.();
+        }
+      }
+    },
+    [],
+  );
+
+  const sendCreateRef = useRef<(rows: number, cols: number, options?: { tag?: string; command?: string }) => void>(() => {});
+
   const { status, sendCreate, sendFocus, sendClose } = useBlitConnection(
     transport,
-    { onCreated, onClosed, onList, onTitle },
+    { onCreated, onClosed, onList, onTitle, onUpdate, onStatusChange },
   );
+  sendCreateRef.current = sendCreate;
 
   // --- Public API ---
 
@@ -164,12 +250,27 @@ export function useBlitSessions(
     useCallback(() => readyRef.current, []),
   );
 
+  const focusedPtyId = useSyncExternalStore(
+    useCallback(
+      (l: () => void) => {
+        focusedListenersRef.current.add(l);
+        return () => focusedListenersRef.current.delete(l);
+      },
+      [],
+    ),
+    useCallback(() => focusedPtyIdRef.current, []),
+    useCallback(() => focusedPtyIdRef.current, []),
+  );
+
   const createPty = useCallback(
-    (opts?: { rows?: number; cols?: number; command?: string; tag?: string }) => {
+    (opts?: { rows?: number; cols?: number; command?: string; tag?: string }): Promise<number> => {
       const { rows, cols } = getSize();
-      sendCreate(opts?.rows ?? rows, opts?.cols ?? cols, {
-        tag: opts?.tag,
-        command: opts?.command,
+      return new Promise<number>((resolve) => {
+        pendingCreatesRef.current.push(resolve);
+        sendCreate(opts?.rows ?? rows, opts?.cols ?? cols, {
+          tag: opts?.tag,
+          command: opts?.command,
+        });
       });
     },
     [sendCreate, getSize],
@@ -177,17 +278,26 @@ export function useBlitSessions(
 
   const focusPty = useCallback(
     (ptyId: number) => {
+      setFocused(ptyId);
       sendFocus(ptyId);
     },
-    [sendFocus],
+    [sendFocus, setFocused],
   );
 
   const closePty = useCallback(
-    (ptyId: number) => {
-      sendClose(ptyId);
+    (ptyId: number): Promise<void> => {
+      return new Promise<void>((resolve) => {
+        const existing = pendingClosesRef.current.get(ptyId);
+        if (existing) {
+          existing.push(resolve);
+        } else {
+          pendingClosesRef.current.set(ptyId, [resolve]);
+        }
+        sendClose(ptyId);
+      });
     },
     [sendClose],
   );
 
-  return { ready, sessions, status, createPty, focusPty, closePty } as const;
+  return { ready, sessions, status, focusedPtyId, createPty, focusPty, closePty } as const;
 }

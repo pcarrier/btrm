@@ -27,6 +27,11 @@ export type ConnectionStatus =
  * Implementations handle the underlying protocol (WebSocket, WebTransport, etc.)
  * while consumers only deal with binary messages and status changes.
  */
+export type BlitTransportEventMap = {
+  message: ArrayBuffer;
+  statuschange: ConnectionStatus;
+};
+
 export interface BlitTransport {
   /** Send binary data to the server. */
   send(data: Uint8Array): void;
@@ -34,10 +39,16 @@ export interface BlitTransport {
   close(): void;
   /** Current connection status. */
   readonly status: ConnectionStatus;
-  /** Called when a binary message is received from the server. */
-  onmessage: ((data: ArrayBuffer) => void) | null;
-  /** Called when the connection status changes. */
-  onstatuschange: ((status: ConnectionStatus) => void) | null;
+  /** Register a listener for transport events. */
+  addEventListener<K extends keyof BlitTransportEventMap>(
+    type: K,
+    listener: (data: BlitTransportEventMap[K]) => void,
+  ): void;
+  /** Remove a previously registered listener. */
+  removeEventListener<K extends keyof BlitTransportEventMap>(
+    type: K,
+    listener: (data: BlitTransportEventMap[K]) => void,
+  ): void;
 }
 
 /** A tracked PTY session. */

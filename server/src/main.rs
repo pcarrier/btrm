@@ -41,6 +41,7 @@ trait PtyDriver: Send {
     fn search_result(&self, query: &str) -> Option<PtySearchResult>;
     fn take_title_dirty(&mut self) -> bool;
     fn cursor_position(&self) -> (u16, u16);
+    fn synced_output(&self) -> bool;
     fn snapshot(&mut self, echo: bool, icanon: bool) -> FrameState;
     fn scrollback_frame(&mut self, offset: usize) -> FrameState;
 }
@@ -88,6 +89,10 @@ impl PtyDriver for WeztermDriver {
         WeztermDriver::cursor_position(self)
     }
 
+    fn synced_output(&self) -> bool {
+        WeztermDriver::synced_output(self)
+    }
+
     fn snapshot(&mut self, echo: bool, icanon: bool) -> FrameState {
         WeztermDriver::snapshot(self, echo, icanon)
     }
@@ -117,6 +122,11 @@ const SNAPSHOT_WRITE_DEBOUNCE: Duration = Duration::from_micros(500);
 /// Maximum time to defer a snapshot after the PTY first becomes dirty.
 /// Caps the debounce for continuous output (e.g. base64 /dev/random).
 const SNAPSHOT_MAX_DEFER: Duration = Duration::from_millis(1);
+/// Maximum time to defer a snapshot while the application holds an open
+/// synchronized-output bracket (?2026h without a matching ?2026l).  Large
+/// enough to cover a single video frame at 24fps (~41ms) with headroom;
+/// acts as a safety valve if the application crashes mid-frame.
+const SNAPSHOT_SYNC_DEFER: Duration = Duration::from_millis(50);
 
 async fn read_frame(reader: &mut (impl AsyncRead + Unpin)) -> Option<Vec<u8>> {
     let mut len_buf = [0u8; 4];
@@ -1484,6 +1494,18 @@ async fn tick(state: &AppState) -> TickOutcome {
                     Some(existing) => existing.min(retry),
                     None => retry,
                 });
+                continue;
+            }
+        }
+        // Respect synchronized output (DEC ?2026): the application has
+        // opened a frame boundary and not yet closed it.  Defer until
+        // ?2026l arrives or SNAPSHOT_SYNC_DEFER elapses (safety valve for
+        // a crashed/buggy application that never sends the closing marker).
+        if pty.driver.synced_output() {
+            let sync_capped = pty.dirty_since
+                .map(|since| since + SNAPSHOT_SYNC_DEFER <= now)
+                .unwrap_or(false);
+            if !sync_capped {
                 continue;
             }
         }

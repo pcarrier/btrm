@@ -119,6 +119,11 @@ struct ModeTracker {
     mouse_mode: u16,
     mouse_encoding: u16,
     cursor_style: u16,
+    /// DEC private mode 2026: application has opened a synchronized-output
+    /// bracket (\x1b[?2026h) and has not yet closed it (\x1b[?2026l).
+    /// While true the server should defer snapshotting to avoid capturing
+    /// a partially-drawn frame (e.g. mpv mid video-frame write).
+    synced_output: bool,
     parse_state: EscapeParseState,
 }
 
@@ -204,6 +209,7 @@ impl ModeTracker {
         self.mouse_mode = 0;
         self.mouse_encoding = 0;
         self.cursor_style = 0;
+        self.synced_output = false;
     }
 
     fn soft_reset(&mut self) {
@@ -238,6 +244,7 @@ impl ModeTracker {
                     47 | 1047 | 1049 => self.alt_screen = set,
                     9 | 1000 | 1002 | 1003 => self.update_mouse_mode(param, set),
                     1005 | 1006 | 1016 => self.update_mouse_encoding(param, set),
+                    2026 => self.synced_output = set,
                     _ => {}
                 }
             }
@@ -449,6 +456,13 @@ impl TerminalDriver {
 
     pub fn take_title_dirty(&mut self) -> bool {
         std::mem::take(&mut self.title_dirty)
+    }
+
+    /// Returns true while the application has an open synchronized-output
+    /// bracket (DEC private mode 2026).  The server should defer snapshotting
+    /// until this returns false to avoid capturing a partially-drawn frame.
+    pub fn synced_output(&self) -> bool {
+        self.modes.synced_output
     }
 
     pub fn cursor_position(&self) -> (u16, u16) {
@@ -1376,5 +1390,38 @@ mod tests {
         let clean = driver.snapshot(true, true);
         assert!(clean.cells() != garbled.cells());
         assert_eq!(clean.get_text(0, 0, 0, 6), "$ hello");
+    }
+
+    #[test]
+    fn synced_output_tracks_bracket_open_and_close() {
+        let mut driver = TerminalDriver::new(24, 80, 1000);
+        assert!(!driver.synced_output(), "off by default");
+        driver.process(b"\x1b[?2026h");
+        assert!(driver.synced_output(), "on after ?2026h");
+        driver.process(b"\x1b[?2026l");
+        assert!(!driver.synced_output(), "off after ?2026l");
+    }
+
+    #[test]
+    fn synced_output_clears_on_full_reset() {
+        let mut driver = TerminalDriver::new(24, 80, 1000);
+        driver.process(b"\x1b[?2026h");
+        assert!(driver.synced_output());
+        driver.process(b"\x1bc"); // RIS — full reset
+        assert!(!driver.synced_output(), "off after RIS");
+    }
+
+    #[test]
+    fn synced_output_survives_chunked_input() {
+        let mut driver = TerminalDriver::new(24, 80, 1000);
+        // Feed the CSI sequence in pieces the way a kernel PTY buffer split might.
+        driver.process(b"\x1b");
+        driver.process(b"[?");
+        driver.process(b"20");
+        driver.process(b"26h");
+        assert!(driver.synced_output(), "on after chunked ?2026h");
+        driver.process(b"\x1b[?20");
+        driver.process(b"26l");
+        assert!(!driver.synced_output(), "off after chunked ?2026l");
     }
 }

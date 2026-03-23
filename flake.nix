@@ -666,14 +666,16 @@ CTRL
         devShells.default = pkgs.mkShell {
           buildInputs = [
             rustToolchain
-            pkgs.wasm-pack
-            pkgs.wasm-bindgen-cli
             pkgs.binaryen
-            pkgs.pkgsStatic.stdenv.cc
-            pkgs.process-compose
-            pkgs.cargo-watch
             pkgs.cargo-llvm-cov
+            pkgs.cargo-watch
+            pkgs.nodejs
+            pkgs.pkgsStatic.stdenv.cc
+            pkgs.pnpm
+            pkgs.process-compose
             pkgs.scdoc
+            pkgs.wasm-bindgen-cli
+            pkgs.wasm-pack
           ];
 
           shellHook = ''

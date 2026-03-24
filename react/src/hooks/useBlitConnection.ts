@@ -3,6 +3,7 @@ import type { BlitTransport, ConnectionStatus } from '../types';
 import {
   S2C_UPDATE,
   S2C_CREATED,
+  S2C_CREATED_N,
   S2C_CLOSED,
   S2C_LIST,
   S2C_TITLE,
@@ -11,6 +12,7 @@ import {
   C2S_SUBSCRIBE,
   C2S_UNSUBSCRIBE,
   C2S_CREATE,
+  C2S_CREATE_N,
   C2S_CLOSE,
   C2S_FOCUS,
   C2S_RESIZE,
@@ -43,6 +45,7 @@ export interface SearchResult {
 export interface BlitConnectionCallbacks {
   onUpdate?: (ptyId: number, payload: Uint8Array) => void;
   onCreated?: (ptyId: number, tag: string) => void;
+  onCreatedN?: (nonce: number, ptyId: number, tag: string) => void;
   onClosed?: (ptyId: number) => void;
   onList?: (entries: PtyListEntry[]) => void;
   onTitle?: (ptyId: number, title: string) => void;
@@ -90,6 +93,14 @@ export function useBlitConnection(
           const ptyId = bytes[1] | (bytes[2] << 8);
           const tag = textDecoder.decode(bytes.subarray(3));
           callbacksRef.current.onCreated?.(ptyId, tag);
+          break;
+        }
+        case S2C_CREATED_N: {
+          if (bytes.length < 5) break;
+          const nonce = bytes[1] | (bytes[2] << 8);
+          const ptyId = bytes[3] | (bytes[4] << 8);
+          const tag = textDecoder.decode(bytes.subarray(5));
+          callbacksRef.current.onCreatedN?.(nonce, ptyId, tag);
           break;
         }
         case S2C_CLOSED: {
@@ -234,6 +245,30 @@ export function useBlitConnection(
     [transport],
   );
 
+  const sendCreateN = useCallback(
+    (nonce: number, rows: number, cols: number, options?: { tag?: string; command?: string }) => {
+      const encoder = new TextEncoder();
+      const tagBytes = options?.tag ? encoder.encode(options.tag) : new Uint8Array(0);
+      const commandBytes = options?.command?.trim()
+        ? encoder.encode(options.command.trim())
+        : null;
+      const msg = new Uint8Array(9 + tagBytes.length + (commandBytes ? commandBytes.length : 0));
+      msg[0] = C2S_CREATE_N;
+      msg[1] = nonce & 0xff;
+      msg[2] = (nonce >> 8) & 0xff;
+      msg[3] = rows & 0xff;
+      msg[4] = (rows >> 8) & 0xff;
+      msg[5] = cols & 0xff;
+      msg[6] = (cols >> 8) & 0xff;
+      msg[7] = tagBytes.length & 0xff;
+      msg[8] = (tagBytes.length >> 8) & 0xff;
+      if (tagBytes.length) msg.set(tagBytes, 9);
+      if (commandBytes) msg.set(commandBytes, 9 + tagBytes.length);
+      transport.send(msg);
+    },
+    [transport],
+  );
+
   const sendFocus = useCallback(
     (ptyId: number) => {
       const msg = new Uint8Array(3);
@@ -285,6 +320,7 @@ export function useBlitConnection(
     sendResize,
     sendScroll,
     sendCreate,
+    sendCreateN,
     sendFocus,
     sendClose,
     sendSubscribe,

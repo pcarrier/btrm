@@ -36,6 +36,7 @@ pub const C2S_SUBSCRIBE: u8 = 0x13;
 pub const C2S_UNSUBSCRIBE: u8 = 0x14;
 pub const C2S_SEARCH: u8 = 0x15;
 pub const C2S_CREATE_AT: u8 = 0x16;
+pub const C2S_CREATE_N: u8 = 0x17;
 
 pub const S2C_UPDATE: u8 = 0x00;
 pub const S2C_CREATED: u8 = 0x01;
@@ -43,6 +44,7 @@ pub const S2C_CLOSED: u8 = 0x02;
 pub const S2C_LIST: u8 = 0x03;
 pub const S2C_TITLE: u8 = 0x04;
 pub const S2C_SEARCH_RESULTS: u8 = 0x05;
+pub const S2C_CREATED_N: u8 = 0x06;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
@@ -1013,6 +1015,7 @@ impl CallbackRenderer {
 pub enum ServerMsg<'a> {
     Update { pty_id: u16, payload: &'a [u8] },
     Created { pty_id: u16, tag: &'a str },
+    CreatedN { nonce: u16, pty_id: u16, tag: &'a str },
     Closed { pty_id: u16 },
     List { entries: Vec<PtyListEntry<'a>> },
     Title { pty_id: u16, title: &'a [u8] },
@@ -1058,6 +1061,15 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
                 pty_id: u16::from_le_bytes([data[1], data[2]]),
                 tag,
             })
+        }
+        S2C_CREATED_N => {
+            if data.len() < 5 {
+                return None;
+            }
+            let nonce = u16::from_le_bytes([data[1], data[2]]);
+            let pty_id = u16::from_le_bytes([data[3], data[4]]);
+            let tag = std::str::from_utf8(data.get(5..).unwrap_or_default()).unwrap_or_default();
+            Some(ServerMsg::CreatedN { nonce, pty_id, tag })
         }
         S2C_CLOSED => {
             if data.len() < 3 {
@@ -1178,6 +1190,25 @@ pub fn msg_create_at(rows: u16, cols: u16, tag: &str, src_pty_id: u16) -> Vec<u8
     msg.extend_from_slice(&tag_len.to_le_bytes());
     msg.extend_from_slice(tag_bytes);
     msg.extend_from_slice(&src_pty_id.to_le_bytes());
+    msg
+}
+
+pub fn msg_create_n(nonce: u16, rows: u16, cols: u16, tag: &str) -> Vec<u8> {
+    let tag_bytes = tag.as_bytes();
+    let tag_len = tag_bytes.len() as u16;
+    let mut msg = Vec::with_capacity(9 + tag_bytes.len());
+    msg.push(C2S_CREATE_N);
+    msg.extend_from_slice(&nonce.to_le_bytes());
+    msg.extend_from_slice(&rows.to_le_bytes());
+    msg.extend_from_slice(&cols.to_le_bytes());
+    msg.extend_from_slice(&tag_len.to_le_bytes());
+    msg.extend_from_slice(tag_bytes);
+    msg
+}
+
+pub fn msg_create_n_command(nonce: u16, rows: u16, cols: u16, tag: &str, command: &str) -> Vec<u8> {
+    let mut msg = msg_create_n(nonce, rows, cols, tag);
+    msg.extend_from_slice(command.as_bytes());
     msg
 }
 
@@ -2020,6 +2051,45 @@ mod tests {
             }
             _ => panic!("expected Created"),
         }
+    }
+
+    #[test]
+    fn parse_created_n_with_tag() {
+        let mut wire = vec![S2C_CREATED_N, 0x2a, 0x00, 0x05, 0x00];
+        wire.extend_from_slice(b"hello");
+        let msg = parse_server_msg(&wire).unwrap();
+        match msg {
+            ServerMsg::CreatedN { nonce, pty_id, tag } => {
+                assert_eq!(nonce, 42);
+                assert_eq!(pty_id, 5);
+                assert_eq!(tag, "hello");
+            }
+            _ => panic!("expected CreatedN"),
+        }
+    }
+
+    #[test]
+    fn msg_create_n_format() {
+        let msg = msg_create_n(42, 24, 80, "test");
+        assert_eq!(msg[0], C2S_CREATE_N);
+        assert_eq!(u16::from_le_bytes([msg[1], msg[2]]), 42);
+        assert_eq!(u16::from_le_bytes([msg[3], msg[4]]), 24);
+        assert_eq!(u16::from_le_bytes([msg[5], msg[6]]), 80);
+        assert_eq!(u16::from_le_bytes([msg[7], msg[8]]), 4);
+        assert_eq!(&msg[9..], b"test");
+    }
+
+    #[test]
+    fn msg_create_n_command_format() {
+        let msg = msg_create_n_command(7, 30, 120, "bg", "make build");
+        assert_eq!(msg[0], C2S_CREATE_N);
+        assert_eq!(u16::from_le_bytes([msg[1], msg[2]]), 7);
+        assert_eq!(u16::from_le_bytes([msg[3], msg[4]]), 30);
+        assert_eq!(u16::from_le_bytes([msg[5], msg[6]]), 120);
+        let tag_len = u16::from_le_bytes([msg[7], msg[8]]) as usize;
+        assert_eq!(tag_len, 2);
+        assert_eq!(&msg[9..9 + tag_len], b"bg");
+        assert_eq!(&msg[9 + tag_len..], b"make build");
     }
 
     #[test]

@@ -236,6 +236,10 @@ impl ServerMsg {
                 kind: remote::S2C_CREATED, pty_id, request_id: 0, tag: tag.to_owned(),
                 payload: Vec::new(), pty_ids: Vec::new(), tags: Vec::new(), search_results: Vec::new(),
             },
+            Msg::CreatedN { nonce, pty_id, tag } => Self {
+                kind: remote::S2C_CREATED_N, pty_id, request_id: nonce, tag: tag.to_owned(),
+                payload: Vec::new(), pty_ids: Vec::new(), tags: Vec::new(), search_results: Vec::new(),
+            },
             Msg::Closed { pty_id } => Self {
                 kind: remote::S2C_CLOSED, pty_id, request_id: 0, tag: String::new(),
                 payload: Vec::new(), pty_ids: Vec::new(), tags: Vec::new(), search_results: Vec::new(),

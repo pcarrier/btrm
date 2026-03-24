@@ -1,6 +1,7 @@
 import type { BlitTransport, BlitTransportEventMap, ConnectionStatus } from '../types';
 import {
   S2C_CREATED,
+  S2C_CREATED_N,
   S2C_CLOSED,
   S2C_LIST,
   S2C_TITLE,
@@ -8,10 +9,14 @@ import {
 } from '../types';
 
 export class MockTransport implements BlitTransport {
-  private _status: ConnectionStatus = 'connected';
+  private _status: ConnectionStatus;
   private messageListeners = new Set<(data: ArrayBuffer) => void>();
   private statusListeners = new Set<(status: ConnectionStatus) => void>();
   sent: Uint8Array[] = [];
+
+  constructor(initialStatus: ConnectionStatus = 'connected') {
+    this._status = initialStatus;
+  }
 
   get status() {
     return this._status;
@@ -66,6 +71,18 @@ export class MockTransport implements BlitTransport {
     msg[1] = ptyId & 0xff;
     msg[2] = (ptyId >> 8) & 0xff;
     msg.set(tagBytes, 3);
+    this.push(msg);
+  }
+
+  pushCreatedN(nonce: number, ptyId: number, tag = '') {
+    const tagBytes = new TextEncoder().encode(tag);
+    const msg = new Uint8Array(5 + tagBytes.length);
+    msg[0] = S2C_CREATED_N;
+    msg[1] = nonce & 0xff;
+    msg[2] = (nonce >> 8) & 0xff;
+    msg[3] = ptyId & 0xff;
+    msg[4] = (ptyId >> 8) & 0xff;
+    msg.set(tagBytes, 5);
     this.push(msg);
   }
 

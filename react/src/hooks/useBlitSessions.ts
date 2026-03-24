@@ -47,9 +47,11 @@ export function useBlitSessions(
   const readyListenersRef = useRef(new Set<() => void>());
   const focusedPtyIdRef = useRef<number | null>(null);
   const focusedListenersRef = useRef(new Set<() => void>());
-  const pendingCreatesRef = useRef<Array<(ptyId: number) => void>>([]);
+  const pendingCreatesRef = useRef<Map<number, (ptyId: number) => void>>(new Map());
+  const nonceCounterRef = useRef(0);
   const pendingClosesRef = useRef<Map<number, Array<() => void>>>(new Map());
   const wasConnectedRef = useRef(transport.status === 'connected');
+  const hasConnectedRef = useRef(transport.status === 'connected');
 
   const notify = useCallback(() => {
     for (const l of listenersRef.current) l();
@@ -98,8 +100,20 @@ export function useBlitSessions(
   const onCreated = useCallback(
     (ptyId: number, tag: string) => {
       upsert(ptyId, tag, { state: 'active' });
-      const resolve = pendingCreatesRef.current.shift();
-      if (resolve) resolve(ptyId);
+      const session = sessionsRef.current.find((s) => s.ptyId === ptyId);
+      if (session) lifecycleRef.current?.onSessionCreated?.(session);
+    },
+    [upsert],
+  );
+
+  const onCreatedN = useCallback(
+    (nonce: number, ptyId: number, tag: string) => {
+      upsert(ptyId, tag, { state: 'active' });
+      const resolve = pendingCreatesRef.current.get(nonce);
+      if (resolve) {
+        pendingCreatesRef.current.delete(nonce);
+        resolve(ptyId);
+      }
       const session = sessionsRef.current.find((s) => s.ptyId === ptyId);
       if (session) lifecycleRef.current?.onSessionCreated?.(session);
     },
@@ -206,10 +220,21 @@ export function useBlitSessions(
           wasConnectedRef.current = false;
           lifecycleRef.current?.onDisconnect?.();
         }
+        for (const resolve of pendingCreatesRef.current.values()) {
+          resolve(-1);
+        }
+        pendingCreatesRef.current.clear();
+        for (const resolvers of pendingClosesRef.current.values()) {
+          for (const r of resolvers) r();
+        }
+        pendingClosesRef.current.clear();
       } else if (newStatus === 'connected') {
         if (!wasConnectedRef.current) {
           wasConnectedRef.current = true;
-          lifecycleRef.current?.onReconnect?.();
+          if (hasConnectedRef.current) {
+            lifecycleRef.current?.onReconnect?.();
+          }
+          hasConnectedRef.current = true;
         }
       }
     },
@@ -218,9 +243,9 @@ export function useBlitSessions(
 
   const sendCreateRef = useRef<(rows: number, cols: number, options?: { tag?: string; command?: string }) => void>(() => {});
 
-  const { status, sendCreate, sendFocus, sendClose } = useBlitConnection(
+  const { status, sendCreate, sendCreateN, sendFocus, sendClose } = useBlitConnection(
     transport,
-    { onCreated, onClosed, onList, onTitle, onUpdate, onStatusChange },
+    { onCreated, onCreatedN, onClosed, onList, onTitle, onUpdate, onStatusChange },
   );
   sendCreateRef.current = sendCreate;
 
@@ -266,14 +291,15 @@ export function useBlitSessions(
     (opts?: { rows?: number; cols?: number; command?: string; tag?: string }): Promise<number> => {
       const { rows, cols } = getSize();
       return new Promise<number>((resolve) => {
-        pendingCreatesRef.current.push(resolve);
-        sendCreate(opts?.rows ?? rows, opts?.cols ?? cols, {
+        const nonce = nonceCounterRef.current = (nonceCounterRef.current + 1) & 0xffff;
+        pendingCreatesRef.current.set(nonce, resolve);
+        sendCreateN(nonce, opts?.rows ?? rows, opts?.cols ?? cols, {
           tag: opts?.tag,
           command: opts?.command,
         });
       });
     },
-    [sendCreate, getSize],
+    [sendCreateN, getSize],
   );
 
   const focusPty = useCallback(

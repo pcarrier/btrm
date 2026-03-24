@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useBlitSessions } from '../hooks/useBlitSessions';
 import { MockTransport } from './mock-transport';
-import { C2S_CREATE, C2S_FOCUS, C2S_CLOSE } from '../types';
+import { C2S_CREATE, C2S_CREATE_N, C2S_FOCUS, C2S_CLOSE } from '../types';
 
 describe('useBlitSessions', () => {
   let transport: MockTransport;
@@ -174,63 +174,109 @@ describe('useBlitSessions', () => {
 
   // --- createPty ---
 
-  it('createPty sends CREATE with default size', () => {
+  it('createPty sends C2S_CREATE_N with nonce and default size', () => {
     const { result } = renderHook(() =>
       useBlitSessions(transport, {
         getInitialSize: () => ({ rows: 30, cols: 120 }),
       }),
     );
     act(() => { result.current.createPty(); });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
     expect(msg).toBeDefined();
-    expect(msg[1] | (msg[2] << 8)).toBe(30);
-    expect(msg[3] | (msg[4] << 8)).toBe(120);
+    expect(msg[3] | (msg[4] << 8)).toBe(30);
+    expect(msg[5] | (msg[6] << 8)).toBe(120);
   });
 
-  it('createPty sends CREATE with tag and command', () => {
+  it('createPty sends C2S_CREATE_N with tag and command', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     act(() => { result.current.createPty({ tag: 'my-tag', command: 'vim' }); });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
     expect(msg).toBeDefined();
-    const tagLen = msg[5] | (msg[6] << 8);
+    const tagLen = msg[7] | (msg[8] << 8);
     expect(tagLen).toBe(6);
-    const tag = new TextDecoder().decode(msg.slice(7, 7 + tagLen));
+    const tag = new TextDecoder().decode(msg.slice(9, 9 + tagLen));
     expect(tag).toBe('my-tag');
-    const cmd = new TextDecoder().decode(msg.slice(7 + tagLen));
+    const cmd = new TextDecoder().decode(msg.slice(9 + tagLen));
     expect(cmd).toBe('vim');
   });
 
   it('createPty with custom rows/cols', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     act(() => { result.current.createPty({ rows: 50, cols: 200 }); });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
-    expect(msg[1] | (msg[2] << 8)).toBe(50);
-    expect(msg[3] | (msg[4] << 8)).toBe(200);
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    expect(msg[3] | (msg[4] << 8)).toBe(50);
+    expect(msg[5] | (msg[6] << 8)).toBe(200);
   });
 
-  it('createPty returns a promise that resolves with ptyId', async () => {
+  it('createPty returns a promise that resolves with ptyId via S2C_CREATED_N', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     let resolved: number | undefined;
     act(() => {
       result.current.createPty({ tag: 'test' }).then((id) => { resolved = id; });
     });
     expect(resolved).toBeUndefined();
-    await act(async () => { transport.pushCreated(42, 'test'); });
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    const nonce = msg[1] | (msg[2] << 8);
+    await act(async () => { transport.pushCreatedN(nonce, 42, 'test'); });
     expect(resolved).toBe(42);
   });
 
-  it('createPty promises resolve in FIFO order', async () => {
+  it('createPty promises resolve by nonce matching', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     const ids: number[] = [];
     act(() => {
       result.current.createPty({ tag: 'a' }).then((id) => ids.push(id));
       result.current.createPty({ tag: 'b' }).then((id) => ids.push(id));
     });
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE_N);
+    const nonce1 = creates[0][1] | (creates[0][2] << 8);
+    const nonce2 = creates[1][1] | (creates[1][2] << 8);
     await act(async () => {
-      transport.pushCreated(10, 'a');
-      transport.pushCreated(20, 'b');
+      transport.pushCreatedN(nonce1, 10, 'a');
+      transport.pushCreatedN(nonce2, 20, 'b');
     });
     expect(ids).toEqual([10, 20]);
+  });
+
+  it('server-initiated S2C_CREATED does not resolve pending createPty promises', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    let resolved: number | undefined;
+    act(() => {
+      result.current.createPty({ tag: 'mine' }).then((id) => { resolved = id; });
+    });
+    await act(async () => {
+      transport.pushCreated(99, 'server-initiated');
+    });
+    expect(resolved).toBeUndefined();
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    const nonce = msg[1] | (msg[2] << 8);
+    await act(async () => {
+      transport.pushCreatedN(nonce, 42, 'mine');
+    });
+    expect(resolved).toBe(42);
+  });
+
+  it('createPty promise resolves with -1 on disconnect', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    let resolved: number | undefined;
+    act(() => {
+      result.current.createPty({ tag: 'test' }).then((id) => { resolved = id; });
+    });
+    expect(resolved).toBeUndefined();
+    await act(async () => { transport.setStatus('disconnected'); });
+    expect(resolved).toBe(-1);
+  });
+
+  it('closePty promise resolves on disconnect', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushList([{ ptyId: 7, tag: '' }]));
+    let resolved = false;
+    act(() => {
+      result.current.closePty(7).then(() => { resolved = true; });
+    });
+    expect(resolved).toBe(false);
+    await act(async () => { transport.setStatus('disconnected'); });
+    expect(resolved).toBe(true);
   });
 
   // --- closePty ---
@@ -339,7 +385,7 @@ describe('useBlitSessions', () => {
     expect(onDisconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onReconnect when transport reconnects', () => {
+  it('calls onReconnect when transport reconnects (not on initial connect)', () => {
     const onReconnect = vi.fn();
     const onDisconnect = vi.fn();
     renderHook(() =>
@@ -348,6 +394,29 @@ describe('useBlitSessions', () => {
     act(() => transport.setStatus('disconnected'));
     act(() => transport.setStatus('connected'));
     expect(onDisconnect).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call onReconnect on initial connect for initially-disconnected transport', () => {
+    const disconnectedTransport = new MockTransport('disconnected');
+    const onReconnect = vi.fn();
+    renderHook(() =>
+      useBlitSessions(disconnectedTransport, { onReconnect }),
+    );
+    act(() => disconnectedTransport.setStatus('connected'));
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
+  it('calls onReconnect after initial connect + disconnect + reconnect', () => {
+    const disconnectedTransport = new MockTransport('disconnected');
+    const onReconnect = vi.fn();
+    renderHook(() =>
+      useBlitSessions(disconnectedTransport, { onReconnect }),
+    );
+    act(() => disconnectedTransport.setStatus('connected'));
+    expect(onReconnect).not.toHaveBeenCalled();
+    act(() => disconnectedTransport.setStatus('disconnected'));
+    act(() => disconnectedTransport.setStatus('connected'));
     expect(onReconnect).toHaveBeenCalledTimes(1);
   });
 

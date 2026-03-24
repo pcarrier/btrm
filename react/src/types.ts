@@ -89,6 +89,7 @@ export const C2S_FOCUS = 0x11;
 export const C2S_CLOSE = 0x12;
 export const C2S_SUBSCRIBE = 0x13;
 export const C2S_UNSUBSCRIBE = 0x14;
+export const C2S_CREATE_N = 0x17;
 
 /** Wire protocol constants: server-to-client message types. */
 export const S2C_UPDATE = 0x00;
@@ -97,3 +98,4 @@ export const S2C_CLOSED = 0x02;
 export const S2C_LIST = 0x03;
 export const S2C_TITLE = 0x04;
 export const S2C_SEARCH_RESULTS = 0x05;
+export const S2C_CREATED_N = 0x06;

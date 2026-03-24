@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useBlitSessions } from '../hooks/useBlitSessions';
 import { MockTransport } from './mock-transport';
-import { C2S_CREATE, C2S_CREATE_N, C2S_FOCUS, C2S_CLOSE } from '../types';
+import { C2S_CREATE, C2S_CREATE_N, C2S_FOCUS, C2S_CLOSE, FEATURE_CREATE_NONCE } from '../types';
 
 describe('useBlitSessions', () => {
   let transport: MockTransport;
@@ -174,12 +174,13 @@ describe('useBlitSessions', () => {
 
   // --- createPty ---
 
-  it('createPty sends C2S_CREATE_N with nonce and default size', () => {
+  it('createPty sends C2S_CREATE_N with nonce and default size after hello', () => {
     const { result } = renderHook(() =>
       useBlitSessions(transport, {
         getInitialSize: () => ({ rows: 30, cols: 120 }),
       }),
     );
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     act(() => { result.current.createPty(); });
     const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
     expect(msg).toBeDefined();
@@ -187,8 +188,9 @@ describe('useBlitSessions', () => {
     expect(msg[5] | (msg[6] << 8)).toBe(120);
   });
 
-  it('createPty sends C2S_CREATE_N with tag and command', () => {
+  it('createPty sends C2S_CREATE_N with tag and command after hello', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     act(() => { result.current.createPty({ tag: 'my-tag', command: 'vim' }); });
     const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
     expect(msg).toBeDefined();
@@ -200,16 +202,35 @@ describe('useBlitSessions', () => {
     expect(cmd).toBe('vim');
   });
 
-  it('createPty with custom rows/cols', () => {
+  it('createPty with custom rows/cols after hello', () => {
     const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     act(() => { result.current.createPty({ rows: 50, cols: 200 }); });
     const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
     expect(msg[3] | (msg[4] << 8)).toBe(50);
     expect(msg[5] | (msg[6] << 8)).toBe(200);
   });
 
+  it('createPty sends C2S_CREATE without hello (old server)', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => { result.current.createPty({ tag: 'test' }); });
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
+    expect(msg).toBeDefined();
+    expect(transport.sent.find((m) => m[0] === C2S_CREATE_N)).toBeUndefined();
+  });
+
+  it('createPty sends C2S_CREATE when hello has no FEATURE_CREATE_NONCE', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, 0));
+    act(() => { result.current.createPty({ tag: 'test' }); });
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
+    expect(msg).toBeDefined();
+    expect(transport.sent.find((m) => m[0] === C2S_CREATE_N)).toBeUndefined();
+  });
+
   it('createPty returns a promise that resolves with ptyId via S2C_CREATED_N', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     let resolved: number | undefined;
     act(() => {
       result.current.createPty({ tag: 'test' }).then((id) => { resolved = id; });
@@ -223,6 +244,7 @@ describe('useBlitSessions', () => {
 
   it('createPty promises resolve by nonce matching', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     const ids: number[] = [];
     act(() => {
       result.current.createPty({ tag: 'a' }).then((id) => ids.push(id));
@@ -240,6 +262,7 @@ describe('useBlitSessions', () => {
 
   it('S2C_CREATED_N resolves by nonce, ignoring unrelated S2C_CREATED', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     const ids: number[] = [];
     act(() => {
       result.current.createPty({ tag: 'a' }).then((id) => ids.push(id));
@@ -447,9 +470,23 @@ describe('useBlitSessions', () => {
     expect(onReconnect).toHaveBeenCalledTimes(1);
   });
 
+  // --- S2C_HELLO version negotiation ---
+
+  it('closes transport on hello with version > PROTOCOL_VERSION', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(2, FEATURE_CREATE_NONCE));
+    expect(result.current.status).toBe('disconnected');
+  });
+
+  it('accepts hello with version 1', () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
+    expect(result.current.status).toBe('connected');
+  });
+
   // --- WASM title reading via getTerminal ---
 
-  it('reads title from getTerminal on S2C_UPDATE', () => {
+  it('reads title from getTerminal on S2C_UPDATE', async () => {
     const terminal = { title: () => 'zsh: ~/project' };
     const { result } = renderHook(() =>
       useBlitSessions(transport, {
@@ -457,11 +494,11 @@ describe('useBlitSessions', () => {
       }),
     );
     act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
-    act(() => transport.pushUpdate(1));
+    await act(async () => transport.pushUpdate(1));
     expect(result.current.sessions[0].title).toBe('zsh: ~/project');
   });
 
-  it('does not update title when getTerminal returns null', () => {
+  it('does not update title when getTerminal returns null', async () => {
     const { result } = renderHook(() =>
       useBlitSessions(transport, {
         getTerminal: () => null,
@@ -469,11 +506,11 @@ describe('useBlitSessions', () => {
     );
     act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
     act(() => transport.pushTitle(1, 'explicit'));
-    act(() => transport.pushUpdate(1));
+    await act(async () => transport.pushUpdate(1));
     expect(result.current.sessions[0].title).toBe('explicit');
   });
 
-  it('deduplicates title updates from getTerminal', () => {
+  it('deduplicates title updates from getTerminal', async () => {
     let renderCount = 0;
     const terminal = { title: () => 'same-title' };
     const { result } = renderHook(() => {
@@ -483,9 +520,9 @@ describe('useBlitSessions', () => {
       });
     });
     act(() => transport.pushList([{ ptyId: 1, tag: '' }]));
-    act(() => transport.pushUpdate(1));
+    await act(async () => transport.pushUpdate(1));
     const countAfterFirstUpdate = renderCount;
-    act(() => transport.pushUpdate(1));
+    await act(async () => transport.pushUpdate(1));
     expect(renderCount).toBe(countAfterFirstUpdate);
     expect(result.current.sessions[0].title).toBe('same-title');
   });

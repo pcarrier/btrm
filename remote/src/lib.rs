@@ -45,6 +45,9 @@ pub const S2C_LIST: u8 = 0x03;
 pub const S2C_TITLE: u8 = 0x04;
 pub const S2C_SEARCH_RESULTS: u8 = 0x05;
 pub const S2C_CREATED_N: u8 = 0x06;
+pub const S2C_HELLO: u8 = 0x07;
+
+pub const FEATURE_CREATE_NONCE: u32 = 1 << 0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
@@ -1013,6 +1016,7 @@ impl CallbackRenderer {
 }
 
 pub enum ServerMsg<'a> {
+    Hello { version: u16, features: u32 },
     Update { pty_id: u16, payload: &'a [u8] },
     Created { pty_id: u16, tag: &'a str },
     CreatedN { nonce: u16, pty_id: u16, tag: &'a str },
@@ -1043,6 +1047,14 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
         return None;
     }
     match data[0] {
+        S2C_HELLO => {
+            if data.len() < 7 {
+                return None;
+            }
+            let version = u16::from_le_bytes([data[1], data[2]]);
+            let features = u32::from_le_bytes([data[3], data[4], data[5], data[6]]);
+            Some(ServerMsg::Hello { version, features })
+        }
         S2C_UPDATE => {
             if data.len() < 3 {
                 return None;
@@ -1161,6 +1173,14 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
         }
         _ => None,
     }
+}
+
+pub fn msg_hello(version: u16, features: u32) -> Vec<u8> {
+    let mut msg = Vec::with_capacity(7);
+    msg.push(S2C_HELLO);
+    msg.extend_from_slice(&version.to_le_bytes());
+    msg.extend_from_slice(&features.to_le_bytes());
+    msg
 }
 
 pub fn msg_create(rows: u16, cols: u16) -> Vec<u8> {

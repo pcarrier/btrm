@@ -3,6 +3,7 @@ import {
   S2C_CREATED,
   S2C_CREATED_N,
   S2C_CLOSED,
+  S2C_HELLO,
   S2C_LIST,
   S2C_TITLE,
   S2C_UPDATE,
@@ -108,6 +109,18 @@ export class MockTransport implements BlitTransport {
     msg[1] = ptyId & 0xff;
     msg[2] = (ptyId >> 8) & 0xff;
     msg.set(titleBytes, 3);
+    this.push(msg);
+  }
+
+  pushHello(version: number, features: number) {
+    const msg = new Uint8Array(7);
+    msg[0] = S2C_HELLO;
+    msg[1] = version & 0xff;
+    msg[2] = (version >> 8) & 0xff;
+    msg[3] = features & 0xff;
+    msg[4] = (features >> 8) & 0xff;
+    msg[5] = (features >> 16) & 0xff;
+    msg[6] = (features >> 24) & 0xff;
     this.push(msg);
   }
 

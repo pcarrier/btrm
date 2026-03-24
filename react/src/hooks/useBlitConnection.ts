@@ -8,6 +8,7 @@ import {
   S2C_LIST,
   S2C_TITLE,
   S2C_SEARCH_RESULTS,
+  S2C_HELLO,
   C2S_ACK,
   C2S_SUBSCRIBE,
   C2S_UNSUBSCRIBE,
@@ -50,6 +51,7 @@ export interface BlitConnectionCallbacks {
   onList?: (entries: PtyListEntry[]) => void;
   onTitle?: (ptyId: number, title: string) => void;
   onSearchResults?: (results: SearchResult[]) => void;
+  onHello?: (version: number, features: number) => void;
   onStatusChange?: (status: ConnectionStatus) => void;
 }
 
@@ -150,6 +152,14 @@ export function useBlitConnection(
             results.push({ ptyId, line, col, text });
           }
           callbacksRef.current.onSearchResults?.(results);
+          break;
+        }
+        case S2C_HELLO: {
+          if (bytes.length < 7) break;
+          const version = bytes[1] | (bytes[2] << 8);
+          const features =
+            bytes[3] | (bytes[4] << 8) | (bytes[5] << 16) | (bytes[6] << 24);
+          callbacksRef.current.onHello?.(version, features);
           break;
         }
       }

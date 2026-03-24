@@ -1,5 +1,6 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 import type { BlitTransport, BlitSession, ConnectionStatus } from '../types';
+import { FEATURE_CREATE_NONCE, PROTOCOL_VERSION } from '../types';
 import { useBlitConnection } from './useBlitConnection';
 
 export interface UseBlitSessionsOptions {
@@ -49,6 +50,7 @@ export function useBlitSessions(
   const focusedListenersRef = useRef(new Set<() => void>());
   const pendingCreatesRef = useRef<Map<number, (ptyId: number) => void>>(new Map());
   const nonceCounterRef = useRef(0);
+  const serverFeaturesRef = useRef<number | null>(null);
   const pendingClosesRef = useRef<Map<number, Array<() => void>>>(new Map());
   const wasConnectedRef = useRef(transport.status === 'connected');
   const hasConnectedRef = useRef(transport.status === 'connected');
@@ -100,7 +102,9 @@ export function useBlitSessions(
   const onCreated = useCallback(
     (ptyId: number, tag: string) => {
       upsert(ptyId, tag, { state: 'active' });
-      if (pendingCreatesRef.current.size > 0) {
+      const hasNonce = serverFeaturesRef.current !== null &&
+        (serverFeaturesRef.current & FEATURE_CREATE_NONCE) !== 0;
+      if (!hasNonce && pendingCreatesRef.current.size > 0) {
         const first = pendingCreatesRef.current.entries().next().value!;
         pendingCreatesRef.current.delete(first[0]);
         first[1](ptyId);
@@ -203,17 +207,19 @@ export function useBlitSessions(
     (ptyId: number, _payload: Uint8Array) => {
       const getTerminal = getTerminalRef.current;
       if (!getTerminal) return;
-      const terminal = getTerminal(ptyId);
-      if (!terminal) return;
-      const title = terminal.title();
-      const prev = sessionsRef.current;
-      const idx = prev.findIndex((s) => s.ptyId === ptyId);
-      if (idx >= 0 && prev[idx].title !== title) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], title };
-        sessionsRef.current = next;
-        notify();
-      }
+      queueMicrotask(() => {
+        const terminal = getTerminal(ptyId);
+        if (!terminal) return;
+        const title = terminal.title();
+        const prev = sessionsRef.current;
+        const idx = prev.findIndex((s) => s.ptyId === ptyId);
+        if (idx >= 0 && prev[idx].title !== title) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], title };
+          sessionsRef.current = next;
+          notify();
+        }
+      });
     },
     [notify],
   );
@@ -246,11 +252,22 @@ export function useBlitSessions(
     [],
   );
 
+  const onHello = useCallback(
+    (version: number, features: number) => {
+      if (version > PROTOCOL_VERSION) {
+        transport.close();
+        return;
+      }
+      serverFeaturesRef.current = features;
+    },
+    [transport],
+  );
+
   const sendCreateRef = useRef<(rows: number, cols: number, options?: { tag?: string; command?: string }) => void>(() => {});
 
   const { status, sendCreate, sendCreateN, sendFocus, sendClose } = useBlitConnection(
     transport,
-    { onCreated, onCreatedN, onClosed, onList, onTitle, onUpdate, onStatusChange },
+    { onCreated, onCreatedN, onClosed, onList, onTitle, onUpdate, onHello, onStatusChange },
   );
   sendCreateRef.current = sendCreate;
 
@@ -295,16 +312,22 @@ export function useBlitSessions(
   const createPty = useCallback(
     (opts?: { rows?: number; cols?: number; command?: string; tag?: string }): Promise<number> => {
       const { rows, cols } = getSize();
+      const r = opts?.rows ?? rows;
+      const c = opts?.cols ?? cols;
+      const createOpts = { tag: opts?.tag, command: opts?.command };
       return new Promise<number>((resolve) => {
         const nonce = nonceCounterRef.current = (nonceCounterRef.current + 1) & 0xffff;
         pendingCreatesRef.current.set(nonce, resolve);
-        sendCreateN(nonce, opts?.rows ?? rows, opts?.cols ?? cols, {
-          tag: opts?.tag,
-          command: opts?.command,
-        });
+        const hasNonce = serverFeaturesRef.current !== null &&
+          (serverFeaturesRef.current & FEATURE_CREATE_NONCE) !== 0;
+        if (hasNonce) {
+          sendCreateN(nonce, r, c, createOpts);
+        } else {
+          sendCreate(r, c, createOpts);
+        }
       });
     },
-    [sendCreateN, getSize],
+    [sendCreate, sendCreateN, getSize],
   );
 
   const focusPty = useCallback(

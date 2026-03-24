@@ -99,3 +99,7 @@ export const S2C_LIST = 0x03;
 export const S2C_TITLE = 0x04;
 export const S2C_SEARCH_RESULTS = 0x05;
 export const S2C_CREATED_N = 0x06;
+export const S2C_HELLO = 0x07;
+
+export const PROTOCOL_VERSION = 1;
+export const FEATURE_CREATE_NONCE = 1 << 0;

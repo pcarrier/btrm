@@ -1,7 +1,7 @@
 use blit_remote::{
     msg_ack, msg_close, msg_create, msg_focus, msg_input, msg_resize, TerminalState,
-    C2S_DISPLAY_RATE, CELL_SIZE, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_LIST, S2C_TITLE,
-    S2C_UPDATE,
+    C2S_DISPLAY_RATE, CELL_SIZE, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_HELLO, S2C_LIST,
+    S2C_TITLE, S2C_UPDATE,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -1513,6 +1513,8 @@ async fn handle_server_msg(
                 }
             }
         }
+
+        S2C_HELLO => {}
 
         S2C_CLOSED if frame.len() >= 3 => {
             let id = u16::from_le_bytes([frame[1], frame[2]]);

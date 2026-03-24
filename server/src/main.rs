@@ -1,8 +1,8 @@
 use blit_remote::{
-    build_update_msg, FrameState, C2S_ACK, C2S_CLIENT_METRICS, C2S_CLOSE, C2S_CREATE,
+    build_update_msg, msg_hello, FrameState, C2S_ACK, C2S_CLIENT_METRICS, C2S_CLOSE, C2S_CREATE,
     C2S_CREATE_AT, C2S_CREATE_N, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_RESIZE, C2S_SCROLL,
-    C2S_SEARCH, C2S_SUBSCRIBE, C2S_UNSUBSCRIBE, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_LIST,
-    S2C_SEARCH_RESULTS, S2C_TITLE,
+    C2S_SEARCH, C2S_SUBSCRIBE, C2S_UNSUBSCRIBE, FEATURE_CREATE_NONCE, S2C_CLOSED, S2C_CREATED,
+    S2C_CREATED_N, S2C_LIST, S2C_SEARCH_RESULTS, S2C_TITLE,
 };
 use blit_wezterm::{SearchResult as WeztermSearchResult, TerminalDriver as WeztermDriver};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1740,6 +1740,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 goodput_window_start: Instant::now(),
             },
         );
+        if let Some(c) = sess.clients.get(&client_id) {
+            let _ = c.tx.try_send(msg_hello(1, FEATURE_CREATE_NONCE));
+        }
         let list = sess.pty_list_msg();
         if let Some(c) = sess.clients.get(&client_id) {
             let _ = c.tx.try_send(list);

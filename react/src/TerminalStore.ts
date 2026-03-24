@@ -8,7 +8,6 @@ import {
 } from "./types";
 import type { BlitTransport, TerminalPalette } from "./types";
 
-const MAX_ACK_AHEAD = 2;
 
 let wasmInitPromise: Promise<typeof import("blit-browser")> | null = null;
 
@@ -31,7 +30,6 @@ export class TerminalStore {
   private desired = new Set<number>();
   private transport: BlitTransport;
   private dirtyListeners = new Set<TerminalDirtyListener>();
-  private ackAhead = 0;
   private leadPtyId: number | null = null;
   private fontFamily = DEFAULT_FONT;
   private cellPw = 1;
@@ -57,10 +55,8 @@ export class TerminalStore {
         this.terminals.set(ptyId, t);
       }
       t.feed_compressed(bytes.subarray(3));
-      if (this.ackAhead < MAX_ACK_AHEAD) {
-        this.transport.send(new Uint8Array([C2S_ACK]));
-        this.ackAhead += 1;
-      }
+      // ACK every frame immediately — don't gate on rendering.
+      this.transport.send(new Uint8Array([C2S_ACK]));
       for (const l of this.dirtyListeners) l(ptyId);
     };
 
@@ -141,10 +137,6 @@ export class TerminalStore {
   setDesiredSubscriptions(ptyIds: Set<number>): void {
     this.desired = new Set(ptyIds);
     this.syncSubscriptions();
-  }
-
-  resetAckAhead(): void {
-    this.ackAhead = 0;
   }
 
   addDirtyListener(listener: TerminalDirtyListener): () => void {

@@ -1162,7 +1162,6 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             }
           }
 
-          store.resetAckAhead();
         }
 
         rafRef.current = requestAnimationFrame(renderLoop);

@@ -238,22 +238,24 @@ describe('useBlitSessions', () => {
     expect(ids).toEqual([10, 20]);
   });
 
-  it('server-initiated S2C_CREATED does not resolve pending createPty promises', async () => {
+  it('S2C_CREATED_N resolves by nonce, ignoring unrelated S2C_CREATED', async () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    let resolved: number | undefined;
+    const ids: number[] = [];
     act(() => {
-      result.current.createPty({ tag: 'mine' }).then((id) => { resolved = id; });
+      result.current.createPty({ tag: 'a' }).then((id) => ids.push(id));
+      result.current.createPty({ tag: 'b' }).then((id) => ids.push(id));
     });
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE_N);
+    const nonce2 = creates[1][1] | (creates[1][2] << 8);
     await act(async () => {
-      transport.pushCreated(99, 'server-initiated');
+      transport.pushCreatedN(nonce2, 20, 'b');
     });
-    expect(resolved).toBeUndefined();
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
-    const nonce = msg[1] | (msg[2] << 8);
+    expect(ids).toEqual([20]);
+    const nonce1 = creates[0][1] | (creates[0][2] << 8);
     await act(async () => {
-      transport.pushCreatedN(nonce, 42, 'mine');
+      transport.pushCreatedN(nonce1, 10, 'a');
     });
-    expect(resolved).toBe(42);
+    expect(ids).toEqual([20, 10]);
   });
 
   it('createPty promise resolves with -1 on disconnect', async () => {
@@ -277,6 +279,31 @@ describe('useBlitSessions', () => {
     expect(resolved).toBe(false);
     await act(async () => { transport.setStatus('disconnected'); });
     expect(resolved).toBe(true);
+  });
+
+  it('createPty falls back to FIFO via S2C_CREATED against old servers', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    let resolved: number | undefined;
+    act(() => {
+      result.current.createPty({ tag: 'test' }).then((id) => { resolved = id; });
+    });
+    expect(resolved).toBeUndefined();
+    await act(async () => { transport.pushCreated(42, 'test'); });
+    expect(resolved).toBe(42);
+  });
+
+  it('createPty FIFO fallback resolves in order against old servers', async () => {
+    const { result } = renderHook(() => useBlitSessions(transport));
+    const ids: number[] = [];
+    act(() => {
+      result.current.createPty({ tag: 'a' }).then((id) => ids.push(id));
+      result.current.createPty({ tag: 'b' }).then((id) => ids.push(id));
+    });
+    await act(async () => {
+      transport.pushCreated(10, 'a');
+      transport.pushCreated(20, 'b');
+    });
+    expect(ids).toEqual([10, 20]);
   });
 
   // --- closePty ---

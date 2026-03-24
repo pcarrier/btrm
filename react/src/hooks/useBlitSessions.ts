@@ -100,6 +100,11 @@ export function useBlitSessions(
   const onCreated = useCallback(
     (ptyId: number, tag: string) => {
       upsert(ptyId, tag, { state: 'active' });
+      if (pendingCreatesRef.current.size > 0) {
+        const first = pendingCreatesRef.current.entries().next().value!;
+        pendingCreatesRef.current.delete(first[0]);
+        first[1](ptyId);
+      }
       const session = sessionsRef.current.find((s) => s.ptyId === ptyId);
       if (session) lifecycleRef.current?.onSessionCreated?.(session);
     },

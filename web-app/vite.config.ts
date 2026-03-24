@@ -31,18 +31,14 @@ export default bin.buffer;
     {
       name: "resolve-blit-snippets",
       resolveId(id, importer) {
-        // Resolve ./snippets/blit-browser-xxx/inline0.js imports from blit_browser.js
-        const match = id.match(/\.\/snippets\/(blit-browser-[^/]+)\/(.*)/);
-        if (match && importer) {
-          // Try the exact path first
-          const exact = join(snippetsDir, match[1], match[2]);
-          if (existsSync(exact)) return exact;
-          // Fall back to any blit-browser-* directory (hash changes per build)
-          if (existsSync(snippetsDir)) {
-            for (const dir of readdirSync(snippetsDir)) {
-              const candidate = join(snippetsDir, dir, match[2]);
-              if (existsSync(candidate)) return candidate;
-            }
+        // wasm-pack puts inline JS in ./snippets/blit-browser-<hash>/inline0.js
+        // The hash changes every build, so resolve to whatever dir exists.
+        const match = id.match(/\.\/snippets\/blit-browser-[^/]+\/(.*)/);
+        if (match && importer && existsSync(snippetsDir)) {
+          const file = match[1];
+          for (const dir of readdirSync(snippetsDir)) {
+            const candidate = join(snippetsDir, dir, file);
+            if (existsSync(candidate)) return candidate;
           }
         }
       },

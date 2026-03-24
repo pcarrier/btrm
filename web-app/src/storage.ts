@@ -1,0 +1,49 @@
+import {
+  PALETTES,
+  DEFAULT_FONT,
+} from "blit-react";
+import type { TerminalPalette } from "blit-react";
+
+export const PASS_KEY = "blit.passphrase";
+export const PALETTE_KEY = "blit.palette";
+export const FONT_KEY = "blit.fontFamily";
+
+export function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+export function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+export function wsUrl(): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return proto + "//" + location.host + location.pathname;
+}
+
+export function preferredPalette(): TerminalPalette {
+  const q = new URLSearchParams(location.search).get("palette");
+  if (q) {
+    const p = PALETTES.find((x) => x.id === q);
+    if (p) return p;
+  }
+  const s = readStorage(PALETTE_KEY);
+  if (s) {
+    const p = PALETTES.find((x) => x.id === s);
+    if (p) return p;
+  }
+  return PALETTES[0];
+}
+
+export function preferredFont(): string {
+  const q = new URLSearchParams(location.search).get("font");
+  if (q?.trim()) return q.trim();
+  const s = readStorage(FONT_KEY);
+  if (s?.trim()) return s.trim();
+  return DEFAULT_FONT;
+}

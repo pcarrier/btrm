@@ -4,7 +4,7 @@ Terminal streaming for high-latency networks.
 
 blit gives you a multiplexed terminal over a browser or native client that stays responsive on links where SSH falls apart — satellite hops, cross-continent VPNs, spotty mobile connections. If you've ever typed into a remote shell and waited a full second to see the character echo, blit is the fix.
 
-It works for anyone who needs remote shells: ops engineers SSHing into production, developers on distant dev boxes, teams sharing terminal sessions. The browser UI runs anywhere with no install; the CLI gives you a native fallback. A React component and JS/WASM client let you embed terminals in your own apps.
+It works for anyone who needs remote shells: ops engineers SSHing into production, developers on distant dev boxes, teams sharing terminal sessions. The browser UI runs anywhere with no install; the CLI gives you a native fallback. A React component lets you embed terminals in your own apps.
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ dev
 
 - browser JS/WASM asset rebuilds under `cargo watch`
 - `blit-server` under `cargo watch`
-- `blit-gateway` under `cargo watch`, including `web/` asset changes
+- `blit-gateway` under `cargo watch`
 
 ## Workspace
 
@@ -60,9 +60,8 @@ dev
 
 - `blit-remote`: protocol, frame diffs, terminal state decode, and callback/DOM rendering
 - `blit-wezterm`: wezterm-backed terminal driver
-- `blit-browser`: browser renderer/WASM module embedded by the gateway
-- `blit-client`: JS/WASM terminal client package built from `npm/`
-- `blit-react`: React component wrapping blit-client with injectable transport (`react/`)
+- `blit-browser`: browser renderer/WASM module (`browser/`)
+- `blit-react`: React component and TypeScript client library with injectable transport (`react/`)
 
 ## Architecture
 
@@ -71,6 +70,8 @@ graph LR
     subgraph Libraries
         R["blit-remote<br/>protocol + frame diff + callback renderer"]
         WZ["blit-wezterm<br/>wezterm driver"]
+        BR["blit-browser<br/>WASM terminal"]
+        RE["blit-react<br/>React + TS client"]
     end
 
     subgraph Runtime
@@ -78,13 +79,14 @@ graph LR
         G["blit-gateway"]
         C["blit CLI"]
         B["Browser UI"]
-        N["blit-client<br/>JS/WASM"]
     end
 
     WZ --> S
     R --> WZ
     R --> C
-    R --> N
+    R --> BR
+    BR --> RE
+    RE --> B
     G --> B
     S <-->|Unix socket| G
     S <-->|Unix socket| C
@@ -261,96 +263,73 @@ Mouse behavior:
 - Selection copies both `text/plain` and `text/html`
 - Wheel scrolls scrollback unless the PTY has mouse mode enabled, in which case the event is forwarded
 
-## JS/WASM Client
-
-The `blit-client` package exposes the shared protocol helpers and terminal state machine without tying you to the browser UI.
-
-```ts
-import {
-  Terminal,
-  parse_server_msg,
-  msg_ack,
-  msg_create,
-  msg_input,
-  msg_resize,
-  msg_subscribe,
-  msg_unsubscribe,
-  S2C_CREATED,
-  S2C_TITLE,
-  S2C_UPDATE,
-} from "blit-client";
-
-const term = new Terminal(24, 80);
-
-const create = msg_create(24, 80);
-const resize = msg_resize(0, 30, 120);
-const input = msg_input(0, new Uint8Array([0x6c, 0x73, 0x0d]));
-const subscribe = msg_subscribe(0);
-const unsubscribe = msg_unsubscribe(0);
-const ack = msg_ack();
-
-const msg = parse_server_msg(frame);
-if (!msg) return;
-
-switch (msg.kind()) {
-  case S2C_UPDATE():
-    term.feed_compressed(msg.payload());
-    console.log(term.title(), term.get_all_text());
-    break;
-  case S2C_TITLE():
-    console.log(`title for ${msg.pty_id()}: ${msg.title()}`);
-    break;
-  case S2C_CREATED():
-    console.log(`created ${msg.pty_id()}`);
-    break;
-}
-```
-
-Useful API surface:
-
-- `feed_compressed(data)` and `feed_compressed_batch(batch)`
-- `title()`, `get_text(...)`, `get_all_text()`, `get_cell(...)`
-- `cursor_visible()`, `app_cursor()`, `bracketed_paste()`, `mouse_mode()`, `mouse_encoding()`, `echo()`, `icanon()`
-- `msg_create`, `msg_create_at(rows, cols, tag, src_pty_id)`, `msg_input`, `msg_resize`, `msg_focus`, `msg_close`, `msg_subscribe`, `msg_unsubscribe`, `msg_ack`, `msg_scroll`, `msg_search`, `msg_display_rate`, `msg_client_metrics`
-- `parse_server_msg(...)` preserves rich search metadata via `search_result_count()`, `search_result(i)`, and `search_results()`
-
 ## React Component
 
-The `blit-react` package (`react/`) embeds a blit terminal in any React app. Networking is an injected dependency — bring your own transport.
+The `blit-react` package (`react/`) embeds a blit terminal in any React app. It includes the full TypeScript protocol layer, WebGL renderer, and keyboard encoding — no separate WASM client package needed. Networking is an injected dependency — bring your own transport.
 
 ### Quick start
 
 ```tsx
-import { BlitTerminal, WebSocketTransport, useBlitSessions } from "blit-react";
+import {
+  BlitProvider,
+  BlitTerminal,
+  WebSocketTransport,
+  TerminalStore,
+  useBlitSessions,
+} from "blit-react";
 import { useRef } from "react";
 
-function App() {
+function App({ wasm }) {
   const transport = useRef(
     new WebSocketTransport("wss://myhost:3264/", "secret"),
   ).current;
-  const { sessions, createPty } = useBlitSessions(transport, {
+  const store = useRef(new TerminalStore(transport, wasm)).current;
+  const { sessions } = useBlitSessions(transport, {
     autoCreateIfEmpty: true,
   });
   const active = sessions.find((s) => s.state === "active");
 
   return (
-    <BlitTerminal
-      transport={transport}
-      ptyId={active?.ptyId ?? null}
-      style={{ width: "100%", height: "100vh" }}
-    />
+    <BlitProvider transport={transport} store={store}>
+      <BlitTerminal
+        ptyId={active?.ptyId ?? null}
+        style={{ width: "100%", height: "100vh" }}
+      />
+    </BlitProvider>
   );
 }
 ```
 
+### `<BlitProvider>`
+
+Context provider that eliminates prop drilling. Child components (`BlitTerminal`, `useBlitSessions`) read `transport`, `store`, `palette`, `fontFamily`, and `fontSize` from context when props are omitted.
+
+```tsx
+<BlitProvider transport={transport} store={store} palette={nord} fontFamily="monospace" fontSize={14}>
+  {/* BlitTerminal and hooks read from context automatically */}
+</BlitProvider>
+```
+
+### `TerminalStore`
+
+Centralized WASM terminal lifecycle manager. Owns terminal instances, subscriptions, and frame processing.
+
+```ts
+import { TerminalStore } from "blit-react";
+
+// Pass a pre-initialized WASM module (sync) or a promise (async)
+const store = new TerminalStore(transport, wasmModule);
+const store = new TerminalStore(transport, initWasm()); // promise also works
+```
+
 ### `useBlitSessions`
 
-Manages the session lifecycle: LIST, CREATED, CLOSED, and TITLE parsing. Returns reactive state and control functions.
+Manages the session lifecycle: LIST, CREATED, CLOSED, and TITLE parsing. Returns reactive state and control functions. The `transport` argument is optional when a `BlitProvider` is present.
 
 ```ts
 const { ready, sessions, status, createPty, focusPty, closePty } =
   useBlitSessions(transport, {
-    autoCreateIfEmpty: true, // create a PTY if the server has none
+    autoCreateIfEmpty: true,
     getInitialSize: () => ({ rows: 24, cols: 80 }),
   });
 ```
@@ -360,30 +339,32 @@ const { ready, sessions, status, createPty, focusPty, closePty } =
 | `ready`     | `boolean`                | `true` after the first LIST is received.                    |
 | `sessions`  | `readonly BlitSession[]` | Current sessions with `ptyId`, `tag`, `title`, and `state`. |
 | `status`    | `ConnectionStatus`       | Transport connection status.                                |
-| `createPty` | `(opts?) => void`        | Create a PTY. Accepts `{ rows?, cols?, command?, tag? }`.   |
+| `createPty` | `(opts?) => Promise<number>` | Create a PTY. Accepts `{ rows?, cols?, command?, tag?, srcPtyId? }`. |
 | `focusPty`  | `(ptyId) => void`        | Focus a PTY on the server.                                  |
-| `closePty`  | `(ptyId) => void`        | Close a PTY.                                                |
+| `closePty`  | `(ptyId) => Promise<void>` | Close a PTY.                                              |
 
 ### `<BlitTerminal>`
 
-Renders a single PTY. Owns FOCUS, RESIZE, INPUT, SCROLL, mouse/keyboard encoding, and ACK after updates.
+Renders a single PTY. Owns RESIZE, INPUT, SCROLL, mouse/keyboard encoding, and WebGL rendering. All props except `ptyId` fall back to `BlitProvider` context.
 
 | Prop         | Type              | Description                                                           |
 | ------------ | ----------------- | --------------------------------------------------------------------- |
-| `transport`  | `BlitTransport`   | **Required.** Transport instance for server communication.            |
-| `ptyId`      | `number \| null`  | PTY to display. `null` = waiting for a PTY.                           |
+| `ptyId`      | `number \| null`  | **Required.** PTY to display. `null` = waiting for a PTY.             |
+| `transport`  | `BlitTransport`   | Falls back to context, then `store.transport`.                        |
+| `store`      | `TerminalStore`   | Falls back to context. Required via one or the other.                 |
 | `fontFamily` | `string`          | CSS font family. Default: `"PragmataPro, ui-monospace, monospace"`    |
 | `fontSize`   | `number`          | Font size in CSS pixels. Default: `13`                                |
 | `className`  | `string`          | CSS class for the container div.                                      |
 | `style`      | `CSSProperties`   | Inline styles for the container div.                                  |
 | `palette`    | `TerminalPalette` | Color palette (fg, bg, 16 ANSI colors). See `PALETTES` for built-ins. |
+| `readOnly`   | `boolean`         | Render-only mode: no input, resize, or scroll commands sent.          |
 
 ### Imperative handle
 
 ```tsx
 const termRef = useRef<BlitTerminalHandle>(null);
 
-<BlitTerminal ref={termRef} transport={transport} ptyId={ptyId} />;
+<BlitTerminal ref={termRef} ptyId={ptyId} />;
 
 termRef.current?.focus(); // focus the input sink
 termRef.current?.terminal; // underlying WASM Terminal instance
@@ -430,8 +411,10 @@ interface BlitTransport {
   send(data: Uint8Array): void;
   close(): void;
   readonly status: ConnectionStatus;
-  onmessage: ((data: ArrayBuffer) => void) | null;
-  onstatuschange: ((status: ConnectionStatus) => void) | null;
+  addEventListener(type: "message", listener: (data: ArrayBuffer) => void): void;
+  addEventListener(type: "statuschange", listener: (status: ConnectionStatus) => void): void;
+  removeEventListener(type: "message", listener: (data: ArrayBuffer) => void): void;
+  removeEventListener(type: "statuschange", listener: (status: ConnectionStatus) => void): void;
 }
 ```
 
@@ -464,14 +447,42 @@ const transport = createWebRtcDataChannelTransport(peerConnection, {
 await transport.waitForSync();
 ```
 
-### Hooks
+### Hooks and utilities
 
 For custom UIs that don't use the built-in `<BlitTerminal>`:
 
-- **`useBlitSessions(transport, options?)`** — manages session lifecycle (LIST, CREATED, CLOSED, TITLE). Returns `{ ready, sessions, status, createPty, focusPty, closePty }`.
-- **`useBlitConnection(transport, callbacks)`** — low-level server message parsing. Returns `sendInput`, `sendResize`, `sendCreate`, `sendFocus`, `sendClose`, `sendSubscribe`, `sendUnsubscribe`, `sendScroll`, `sendAck`, and `status`.
-- **`useBlitTerminal(options?)`** — manages WASM `Terminal` lifecycle and cell metrics.
+- **`useBlitSessions(transport?, options?)`** — manages session lifecycle. Transport falls back to context.
+- **`useBlitConnection(transport, callbacks)`** — low-level server message parsing. Returns `sendInput`, `sendResize`, `sendCreate2`, `sendFocus`, `sendClose`, `sendSubscribe`, `sendUnsubscribe`, `sendScroll`, `sendAck`, `sendSearch`, and `status`.
 - **`measureCell(fontFamily, fontSize)`** — measures cell dimensions snapped to device pixels.
+
+### Protocol builders
+
+Pure functions for building wire-format messages, useful for custom transports or testing:
+
+```ts
+import {
+  buildInputMessage,
+  buildResizeMessage,
+  buildScrollMessage,
+  buildCreate2Message,
+  buildFocusMessage,
+  buildCloseMessage,
+  buildSubscribeMessage,
+  buildUnsubscribeMessage,
+  buildSearchMessage,
+  buildAckMessage,
+} from "blit-react";
+
+const msg = buildInputMessage(ptyId, new TextEncoder().encode("ls\r"));
+transport.send(msg);
+```
+
+### Low-level exports
+
+For advanced use cases (custom renderers, non-React apps):
+
+- **`createGlRenderer(canvas)`** — creates the WebGL terminal renderer used internally by `BlitTerminal`.
+- **`keyToBytes(event, appCursor)`** — encodes a `KeyboardEvent` into terminal byte sequences.
 
 ## Callback Rendering
 
@@ -511,7 +522,6 @@ renderer.render(|dom| {
 nix build .#blit-server
 nix build .#blit-cli
 nix build .#blit-gateway
-nix build .#blit-client
 nix build .#blit-server-deb
 nix build .#blit-cli-deb
 nix build .#blit-gateway-deb
@@ -520,8 +530,6 @@ nix build .#blit-gateway-deb
 ### npm publish
 
 ```bash
-nix run .#npm-publish -- --dry-run        # blit-client
-nix run .#npm-publish
 nix run .#browser-publish -- --dry-run    # blit-browser
 nix run .#browser-publish
 nix run .#react-publish -- --dry-run      # blit-react
@@ -534,6 +542,7 @@ The current branch passes:
 
 - `nix develop -c cargo check --workspace`
 - `nix develop -c cargo test -p blit-remote`
+- `cd react && npx vitest run` (210 tests)
 
 ## License
 

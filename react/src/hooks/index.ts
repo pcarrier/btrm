@@ -8,5 +8,5 @@ export type {
 export { useBlitSessions } from "./useBlitSessions";
 export type { UseBlitSessionsOptions } from "./useBlitSessions";
 
-export { useBlitTerminal, measureCell } from "./useBlitTerminal";
-export type { CellMetrics, UseBlitTerminalOptions } from "./useBlitTerminal";
+export { measureCell } from "./useBlitTerminal";
+export type { CellMetrics } from "./useBlitTerminal";

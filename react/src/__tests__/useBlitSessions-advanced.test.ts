@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useBlitSessions } from "../hooks/useBlitSessions";
 import { MockTransport } from "./mock-transport";
-import { C2S_CREATE } from "../types";
+import { C2S_CREATE2 } from "../types";
 
 describe("useBlitSessions — advanced scenarios", () => {
   let transport: MockTransport;
@@ -216,10 +216,11 @@ describe("useBlitSessions — advanced scenarios", () => {
       }),
     );
     act(() => transport.pushList([]));
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     expect(creates.length).toBe(1);
-    expect(creates[0][1] | (creates[0][2] << 8)).toBe(40);
-    expect(creates[0][3] | (creates[0][4] << 8)).toBe(160);
+    // C2S_CREATE2: [type][nonce:2][rows:2][cols:2][features][tagLen:2]...
+    expect(creates[0][3] | (creates[0][4] << 8)).toBe(40);
+    expect(creates[0][5] | (creates[0][6] << 8)).toBe(160);
   });
 
   // --- Unicode stress ---

@@ -3,8 +3,8 @@ import { renderHook, act } from "@testing-library/react";
 import { useBlitSessions } from "../hooks/useBlitSessions";
 import { MockTransport } from "./mock-transport";
 import {
-  C2S_CREATE,
-  C2S_CREATE_N,
+  C2S_CREATE2,
+  CREATE2_HAS_COMMAND,
   C2S_FOCUS,
   C2S_CLOSE,
   FEATURE_CREATE_NONCE,
@@ -41,17 +41,17 @@ describe("useBlitSessions", () => {
 
   // --- autoCreate ---
 
-  it("autoCreateIfEmpty sends CREATE on empty LIST with default tag", () => {
+  it("autoCreateIfEmpty sends CREATE2 on empty LIST with default tag", () => {
     renderHook(() => useBlitSessions(transport, { autoCreateIfEmpty: true }));
     act(() => transport.pushList([]));
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     expect(creates.length).toBe(1);
-    expect(creates[0].length).toBe(7);
-    expect(creates[0][5]).toBe(0);
-    expect(creates[0][6]).toBe(0);
+    // tag length at bytes 8-9 should be 0
+    expect(creates[0][8]).toBe(0);
+    expect(creates[0][9]).toBe(0);
   });
 
-  it("autoCreateIfEmpty sends CREATE with autoCreateTag", () => {
+  it("autoCreateIfEmpty sends CREATE2 with autoCreateTag", () => {
     renderHook(() =>
       useBlitSessions(transport, {
         autoCreateIfEmpty: true,
@@ -59,15 +59,15 @@ describe("useBlitSessions", () => {
       }),
     );
     act(() => transport.pushList([]));
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     expect(creates.length).toBe(1);
-    const tagLen = creates[0][5] | (creates[0][6] << 8);
+    const tagLen = creates[0][8] | (creates[0][9] << 8);
     expect(tagLen).toBe(11);
-    const tag = new TextDecoder().decode(creates[0].slice(7, 7 + tagLen));
+    const tag = new TextDecoder().decode(creates[0].slice(10, 10 + tagLen));
     expect(tag).toBe("interactive");
   });
 
-  it("autoCreateIfEmpty sends CREATE with autoCreateCommand", () => {
+  it("autoCreateIfEmpty sends CREATE2 with autoCreateCommand", () => {
     renderHook(() =>
       useBlitSessions(transport, {
         autoCreateIfEmpty: true,
@@ -76,19 +76,20 @@ describe("useBlitSessions", () => {
       }),
     );
     act(() => transport.pushList([]));
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     expect(creates.length).toBe(1);
-    const tagLen = creates[0][5] | (creates[0][6] << 8);
-    const tag = new TextDecoder().decode(creates[0].slice(7, 7 + tagLen));
+    expect(creates[0][7]).toBe(CREATE2_HAS_COMMAND);
+    const tagLen = creates[0][8] | (creates[0][9] << 8);
+    const tag = new TextDecoder().decode(creates[0].slice(10, 10 + tagLen));
     expect(tag).toBe("bg");
-    const cmd = new TextDecoder().decode(creates[0].slice(7 + tagLen));
+    const cmd = new TextDecoder().decode(creates[0].slice(10 + tagLen));
     expect(cmd).toBe("make build");
   });
 
   it("does not auto-create when LIST is non-empty", () => {
     renderHook(() => useBlitSessions(transport, { autoCreateIfEmpty: true }));
     act(() => transport.pushList([{ ptyId: 1 }]));
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     expect(creates.length).toBe(0);
   });
 
@@ -186,68 +187,54 @@ describe("useBlitSessions", () => {
 
   // --- createPty ---
 
-  it("createPty sends C2S_CREATE_N with nonce and default size after hello", () => {
+  it("createPty sends C2S_CREATE2 with nonce and default size", () => {
     const { result } = renderHook(() =>
       useBlitSessions(transport, {
         getInitialSize: () => ({ rows: 30, cols: 120 }),
       }),
     );
-    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     act(() => {
       result.current.createPty();
     });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE2)!;
     expect(msg).toBeDefined();
     expect(msg[3] | (msg[4] << 8)).toBe(30);
     expect(msg[5] | (msg[6] << 8)).toBe(120);
   });
 
-  it("createPty sends C2S_CREATE_N with tag and command after hello", () => {
+  it("createPty sends C2S_CREATE2 with tag and command", () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     act(() => {
       result.current.createPty({ tag: "my-tag", command: "vim" });
     });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE2)!;
     expect(msg).toBeDefined();
-    const tagLen = msg[7] | (msg[8] << 8);
+    expect(msg[7]).toBe(CREATE2_HAS_COMMAND);
+    const tagLen = msg[8] | (msg[9] << 8);
     expect(tagLen).toBe(6);
-    const tag = new TextDecoder().decode(msg.slice(9, 9 + tagLen));
+    const tag = new TextDecoder().decode(msg.slice(10, 10 + tagLen));
     expect(tag).toBe("my-tag");
-    const cmd = new TextDecoder().decode(msg.slice(9 + tagLen));
+    const cmd = new TextDecoder().decode(msg.slice(10 + tagLen));
     expect(cmd).toBe("vim");
   });
 
-  it("createPty with custom rows/cols after hello", () => {
+  it("createPty with custom rows/cols", () => {
     const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => transport.pushHello(1, FEATURE_CREATE_NONCE));
     act(() => {
       result.current.createPty({ rows: 50, cols: 200 });
     });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE2)!;
     expect(msg[3] | (msg[4] << 8)).toBe(50);
     expect(msg[5] | (msg[6] << 8)).toBe(200);
   });
 
-  it("createPty sends C2S_CREATE without hello (old server)", () => {
+  it("createPty always sends C2S_CREATE2 regardless of hello", () => {
     const { result } = renderHook(() => useBlitSessions(transport));
     act(() => {
       result.current.createPty({ tag: "test" });
     });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE2)!;
     expect(msg).toBeDefined();
-    expect(transport.sent.find((m) => m[0] === C2S_CREATE_N)).toBeUndefined();
-  });
-
-  it("createPty sends C2S_CREATE when hello has no FEATURE_CREATE_NONCE", () => {
-    const { result } = renderHook(() => useBlitSessions(transport));
-    act(() => transport.pushHello(1, 0));
-    act(() => {
-      result.current.createPty({ tag: "test" });
-    });
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE)!;
-    expect(msg).toBeDefined();
-    expect(transport.sent.find((m) => m[0] === C2S_CREATE_N)).toBeUndefined();
   });
 
   it("createPty returns a promise that resolves with ptyId via S2C_CREATED_N", async () => {
@@ -260,7 +247,7 @@ describe("useBlitSessions", () => {
       });
     });
     expect(resolved).toBeUndefined();
-    const msg = transport.sent.find((m) => m[0] === C2S_CREATE_N)!;
+    const msg = transport.sent.find((m) => m[0] === C2S_CREATE2)!;
     const nonce = msg[1] | (msg[2] << 8);
     await act(async () => {
       transport.pushCreatedN(nonce, 42, "test");
@@ -276,7 +263,7 @@ describe("useBlitSessions", () => {
       result.current.createPty({ tag: "a" }).then((id) => ids.push(id));
       result.current.createPty({ tag: "b" }).then((id) => ids.push(id));
     });
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE_N);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     const nonce1 = creates[0][1] | (creates[0][2] << 8);
     const nonce2 = creates[1][1] | (creates[1][2] << 8);
     await act(async () => {
@@ -294,7 +281,7 @@ describe("useBlitSessions", () => {
       result.current.createPty({ tag: "a" }).then((id) => ids.push(id));
       result.current.createPty({ tag: "b" }).then((id) => ids.push(id));
     });
-    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE_N);
+    const creates = transport.sent.filter((m) => m[0] === C2S_CREATE2);
     const nonce2 = creates[1][1] | (creates[1][2] << 8);
     await act(async () => {
       transport.pushCreatedN(nonce2, 20, "b");

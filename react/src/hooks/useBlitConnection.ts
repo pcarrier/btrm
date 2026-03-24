@@ -9,19 +9,19 @@ import {
   S2C_TITLE,
   S2C_SEARCH_RESULTS,
   S2C_HELLO,
-  C2S_ACK,
-  C2S_SUBSCRIBE,
-  C2S_UNSUBSCRIBE,
-  C2S_CREATE2,
-  CREATE2_HAS_SRC_PTY,
-  CREATE2_HAS_COMMAND,
-  C2S_CLOSE,
-  C2S_FOCUS,
-  C2S_RESIZE,
-  C2S_INPUT,
-  C2S_SCROLL,
-  C2S_SEARCH,
 } from "../types";
+import {
+  buildAckMessage,
+  buildInputMessage,
+  buildResizeMessage,
+  buildScrollMessage,
+  buildCreate2Message,
+  buildFocusMessage,
+  buildCloseMessage,
+  buildSubscribeMessage,
+  buildUnsubscribeMessage,
+  buildSearchMessage,
+} from "../protocol";
 
 const textDecoder = new TextDecoder();
 
@@ -220,47 +220,26 @@ export function useBlitConnection(
   // --- Client message helpers ---
 
   const sendAck = useCallback(() => {
-    transport.send(new Uint8Array([C2S_ACK]));
+    transport.send(buildAckMessage());
   }, [transport]);
 
   const sendInput = useCallback(
     (ptyId: number, data: Uint8Array) => {
-      const msg = new Uint8Array(3 + data.length);
-      msg[0] = C2S_INPUT;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      msg.set(data, 3);
-      transport.send(msg);
+      transport.send(buildInputMessage(ptyId, data));
     },
     [transport],
   );
 
   const sendResize = useCallback(
     (ptyId: number, rows: number, cols: number) => {
-      const msg = new Uint8Array(7);
-      msg[0] = C2S_RESIZE;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      msg[3] = rows & 0xff;
-      msg[4] = (rows >> 8) & 0xff;
-      msg[5] = cols & 0xff;
-      msg[6] = (cols >> 8) & 0xff;
-      transport.send(msg);
+      transport.send(buildResizeMessage(ptyId, rows, cols));
     },
     [transport],
   );
 
   const sendScroll = useCallback(
     (ptyId: number, offset: number) => {
-      const msg = new Uint8Array(7);
-      msg[0] = C2S_SCROLL;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      msg[3] = offset & 0xff;
-      msg[4] = (offset >> 8) & 0xff;
-      msg[5] = (offset >> 16) & 0xff;
-      msg[6] = (offset >> 24) & 0xff;
-      transport.send(msg);
+      transport.send(buildScrollMessage(ptyId, offset));
     },
     [transport],
   );
@@ -272,97 +251,42 @@ export function useBlitConnection(
       cols: number,
       options?: { tag?: string; command?: string; srcPtyId?: number },
     ) => {
-      const encoder = new TextEncoder();
-      const tagBytes = options?.tag
-        ? encoder.encode(options.tag)
-        : new Uint8Array(0);
-      let features = 0;
-      const hasSrc = options?.srcPtyId != null;
-      const cmdText = options?.command?.trim() ?? "";
-      const hasCmd = cmdText.length > 0;
-      if (hasSrc) features |= CREATE2_HAS_SRC_PTY;
-      if (hasCmd) features |= CREATE2_HAS_COMMAND;
-      const cmdBytes = hasCmd ? encoder.encode(cmdText) : new Uint8Array(0);
-      const msg = new Uint8Array(
-        10 + tagBytes.length + (hasSrc ? 2 : 0) + cmdBytes.length,
-      );
-      msg[0] = C2S_CREATE2;
-      msg[1] = nonce & 0xff;
-      msg[2] = (nonce >> 8) & 0xff;
-      msg[3] = rows & 0xff;
-      msg[4] = (rows >> 8) & 0xff;
-      msg[5] = cols & 0xff;
-      msg[6] = (cols >> 8) & 0xff;
-      msg[7] = features;
-      msg[8] = tagBytes.length & 0xff;
-      msg[9] = (tagBytes.length >> 8) & 0xff;
-      let cursor = 10;
-      if (tagBytes.length) { msg.set(tagBytes, cursor); cursor += tagBytes.length; }
-      if (hasSrc) {
-        msg[cursor] = options!.srcPtyId! & 0xff;
-        msg[cursor + 1] = (options!.srcPtyId! >> 8) & 0xff;
-        cursor += 2;
-      }
-      if (cmdBytes.length) msg.set(cmdBytes, cursor);
-      transport.send(msg);
+      transport.send(buildCreate2Message(nonce, rows, cols, options));
     },
     [transport],
   );
 
   const sendFocus = useCallback(
     (ptyId: number) => {
-      const msg = new Uint8Array(3);
-      msg[0] = C2S_FOCUS;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      transport.send(msg);
+      transport.send(buildFocusMessage(ptyId));
     },
     [transport],
   );
 
   const sendClose = useCallback(
     (ptyId: number) => {
-      const msg = new Uint8Array(3);
-      msg[0] = C2S_CLOSE;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      transport.send(msg);
+      transport.send(buildCloseMessage(ptyId));
     },
     [transport],
   );
 
   const sendSubscribe = useCallback(
     (ptyId: number) => {
-      const msg = new Uint8Array(3);
-      msg[0] = C2S_SUBSCRIBE;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      transport.send(msg);
+      transport.send(buildSubscribeMessage(ptyId));
     },
     [transport],
   );
 
   const sendUnsubscribe = useCallback(
     (ptyId: number) => {
-      const msg = new Uint8Array(3);
-      msg[0] = C2S_UNSUBSCRIBE;
-      msg[1] = ptyId & 0xff;
-      msg[2] = (ptyId >> 8) & 0xff;
-      transport.send(msg);
+      transport.send(buildUnsubscribeMessage(ptyId));
     },
     [transport],
   );
 
   const sendSearch = useCallback(
     (requestId: number, query: string) => {
-      const encoder = new TextEncoder();
-      const queryBytes = encoder.encode(query);
-      const msg = new Uint8Array(3 + queryBytes.length);
-      msg[0] = C2S_SEARCH;
-      msg[1] = requestId & 0xff;
-      msg[2] = (requestId >> 8) & 0xff;
-      msg.set(queryBytes, 3);
-      transport.send(msg);
+      transport.send(buildSearchMessage(requestId, query));
     },
     [transport],
   );

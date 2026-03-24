@@ -69,8 +69,8 @@ export type BlitSession = {
 
 /** Options for the BlitTerminal component. */
 export interface BlitTerminalProps {
-  /** Transport instance for server communication. */
-  transport: BlitTransport;
+  /** Transport instance for server communication. Falls back to store.transport if omitted. */
+  transport?: BlitTransport;
   /** PTY ID to display. If null, the component waits for a PTY to be created. */
   ptyId: number | null;
   /** CSS font family for the terminal. */
@@ -85,8 +85,8 @@ export interface BlitTerminalProps {
   palette?: TerminalPalette;
   /** When true, the terminal renders but never sends resize, input, or scroll commands. */
   readOnly?: boolean;
-  /** TerminalStore for centralized terminal management. */
-  store: import("./TerminalStore").TerminalStore;
+  /** TerminalStore for centralized terminal management. Falls back to BlitProvider context if omitted. */
+  store?: import("./TerminalStore").TerminalStore;
 }
 
 export const DEFAULT_FONT = "PragmataPro, ui-monospace, monospace";

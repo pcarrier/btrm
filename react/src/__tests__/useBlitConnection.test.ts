@@ -7,13 +7,14 @@ import {
   C2S_RESIZE,
   C2S_SCROLL,
   C2S_ACK,
-  C2S_CREATE,
+  C2S_CREATE2,
   C2S_FOCUS,
   C2S_CLOSE,
   C2S_SUBSCRIBE,
   C2S_UNSUBSCRIBE,
   S2C_UPDATE,
   S2C_SEARCH_RESULTS,
+  CREATE2_HAS_COMMAND,
 } from "../types";
 
 describe("useBlitConnection", () => {
@@ -188,26 +189,33 @@ describe("useBlitConnection", () => {
     expect(offset).toBe(100);
   });
 
-  it("sendCreate sends CREATE with tag and command", () => {
+  it("sendCreate2 sends CREATE2 with tag and command", () => {
     const { result } = renderHook(() => useBlitConnection(transport, {}));
-    act(() => result.current.sendCreate(24, 80, { tag: "x", command: "ls" }));
+    act(() => result.current.sendCreate2(1, 24, 80, { tag: "x", command: "ls" }));
     const msg = transport.sent[0];
-    expect(msg[0]).toBe(C2S_CREATE);
-    expect(msg[1] | (msg[2] << 8)).toBe(24);
-    expect(msg[3] | (msg[4] << 8)).toBe(80);
-    const tagLen = msg[5] | (msg[6] << 8);
+    expect(msg[0]).toBe(C2S_CREATE2);
+    // nonce
+    expect(msg[1] | (msg[2] << 8)).toBe(1);
+    // rows, cols
+    expect(msg[3] | (msg[4] << 8)).toBe(24);
+    expect(msg[5] | (msg[6] << 8)).toBe(80);
+    // features
+    expect(msg[7]).toBe(CREATE2_HAS_COMMAND);
+    // tag length
+    const tagLen = msg[8] | (msg[9] << 8);
     expect(tagLen).toBe(1);
-    expect(new TextDecoder().decode(msg.slice(7, 8))).toBe("x");
-    expect(new TextDecoder().decode(msg.slice(8))).toBe("ls");
+    expect(new TextDecoder().decode(msg.slice(10, 10 + tagLen))).toBe("x");
+    expect(new TextDecoder().decode(msg.slice(10 + tagLen))).toBe("ls");
   });
 
-  it("sendCreate sends CREATE without tag/command", () => {
+  it("sendCreate2 sends CREATE2 without tag/command", () => {
     const { result } = renderHook(() => useBlitConnection(transport, {}));
-    act(() => result.current.sendCreate(24, 80));
+    act(() => result.current.sendCreate2(0, 24, 80));
     const msg = transport.sent[0];
-    expect(msg[0]).toBe(C2S_CREATE);
-    expect(msg[5] | (msg[6] << 8)).toBe(0);
-    expect(msg.length).toBe(7);
+    expect(msg[0]).toBe(C2S_CREATE2);
+    expect(msg[7]).toBe(0); // no features
+    expect(msg[8] | (msg[9] << 8)).toBe(0); // tag length = 0
+    expect(msg.length).toBe(10);
   });
 
   it("sendFocus sends FOCUS", () => {

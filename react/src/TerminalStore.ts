@@ -1,34 +1,25 @@
 import type { Terminal } from "blit-browser";
-import {
-  C2S_ACK,
-  C2S_SUBSCRIBE,
-  C2S_UNSUBSCRIBE,
-  S2C_UPDATE,
-  DEFAULT_FONT,
-} from "./types";
+import { S2C_UPDATE, DEFAULT_FONT } from "./types";
 import type { BlitTransport, TerminalPalette } from "./types";
+import {
+  buildAckMessage,
+  buildSubscribeMessage,
+  buildUnsubscribeMessage,
+} from "./protocol";
 
-
-let wasmInitPromise: Promise<typeof import("blit-browser")> | null = null;
-
-function initWasm(): Promise<typeof import("blit-browser")> {
-  if (!wasmInitPromise) {
-    wasmInitPromise = import("blit-browser").then(async (mod) => {
-      await mod.default();
-      return mod;
-    });
-  }
-  return wasmInitPromise;
-}
+export type BlitWasmModule = typeof import("blit-browser");
 
 export type TerminalDirtyListener = (ptyId: number) => void;
 
 export class TerminalStore {
-  private mod: typeof import("blit-browser") | null = null;
+  private mod: BlitWasmModule | null = null;
   private terminals = new Map<number, Terminal>();
+  private staleTerminals = new Map<number, Terminal>();
+  private retainCount = new Map<number, number>();
+  private pendingFree = new Set<number>();
   private subscribed = new Set<number>();
   private desired = new Set<number>();
-  private transport: BlitTransport;
+  private _transport: BlitTransport;
   private dirtyListeners = new Set<TerminalDirtyListener>();
   private leadPtyId: number | null = null;
   private fontFamily = DEFAULT_FONT;
@@ -41,8 +32,8 @@ export class TerminalStore {
   private ready = false;
   private readyListeners = new Set<() => void>();
 
-  constructor(transport: BlitTransport) {
-    this.transport = transport;
+  constructor(transport: BlitTransport, wasm: BlitWasmModule | Promise<BlitWasmModule>) {
+    this._transport = transport;
 
     this.onMessage = (data: ArrayBuffer) => {
       const bytes = new Uint8Array(data);
@@ -53,10 +44,16 @@ export class TerminalStore {
         if (!this.mod) return;
         t = this.createTerminal();
         this.terminals.set(ptyId, t);
+        // Free the stale terminal now that the fresh one is ready.
+        const stale = this.staleTerminals.get(ptyId);
+        if (stale) {
+          this.staleTerminals.delete(ptyId);
+          stale.free();
+        }
       }
       t.feed_compressed(bytes.subarray(3));
       // ACK every frame immediately — don't gate on rendering.
-      this.transport.send(new Uint8Array([C2S_ACK]));
+      this._transport.send(buildAckMessage());
       for (const l of this.dirtyListeners) l(ptyId);
     };
 
@@ -71,12 +68,17 @@ export class TerminalStore {
     transport.addEventListener("message", this.onMessage);
     transport.addEventListener("statuschange", this.onStatus);
 
-    initWasm().then((mod) => {
+    const resolved = wasm instanceof Promise ? wasm : Promise.resolve(wasm);
+    resolved.then((mod) => {
       if (this.disposed) return;
       this.mod = mod;
       this.ready = true;
       for (const l of this.readyListeners) l();
     });
+  }
+
+  get transport(): BlitTransport {
+    return this._transport;
   }
 
   isReady(): boolean {
@@ -103,7 +105,7 @@ export class TerminalStore {
   }
 
   getTerminal(ptyId: number): Terminal | null {
-    return this.terminals.get(ptyId) ?? null;
+    return this.terminals.get(ptyId) ?? this.staleTerminals.get(ptyId) ?? null;
   }
 
   setLead(ptyId: number | null): void {
@@ -139,36 +141,67 @@ export class TerminalStore {
     this.syncSubscriptions();
   }
 
+  retain(ptyId: number): void {
+    this.retainCount.set(ptyId, (this.retainCount.get(ptyId) ?? 0) + 1);
+  }
+
+  release(ptyId: number): void {
+    const count = (this.retainCount.get(ptyId) ?? 1) - 1;
+    if (count <= 0) {
+      this.retainCount.delete(ptyId);
+      if (this.pendingFree.has(ptyId)) {
+        this.pendingFree.delete(ptyId);
+        this.doFree(ptyId);
+      }
+    } else {
+      this.retainCount.set(ptyId, count);
+    }
+  }
+
+  freeTerminal(ptyId: number): void {
+    if ((this.retainCount.get(ptyId) ?? 0) > 0) {
+      this.pendingFree.add(ptyId);
+    } else {
+      this.doFree(ptyId);
+    }
+  }
+
+  private doFree(ptyId: number): void {
+    const t = this.terminals.get(ptyId);
+    if (t) {
+      t.free();
+      this.terminals.delete(ptyId);
+    }
+    this.subscribed.delete(ptyId);
+  }
+
   addDirtyListener(listener: TerminalDirtyListener): () => void {
     this.dirtyListeners.add(listener);
     return () => this.dirtyListeners.delete(listener);
   }
 
   private syncSubscriptions(): void {
-    if (this.transport.status !== "connected") return;
+    if (this._transport.status !== "connected") return;
     for (const id of this.desired) {
       if (!this.subscribed.has(id)) {
         this.subscribed.add(id);
-        const msg = new Uint8Array(3);
-        msg[0] = C2S_SUBSCRIBE;
-        msg[1] = id & 0xff;
-        msg[2] = (id >> 8) & 0xff;
-        this.transport.send(msg);
+        // Move the old terminal to stale so the component can keep
+        // rendering it until the first fresh frame arrives and creates
+        // a new terminal — avoids a black flash.
+        const old = this.terminals.get(id);
+        if (old) {
+          this.terminals.delete(id);
+          this.staleTerminals.set(id, old);
+        }
+        this._transport.send(buildSubscribeMessage(id));
       }
     }
     for (const id of this.subscribed) {
       if (!this.desired.has(id)) {
         this.subscribed.delete(id);
-        const msg = new Uint8Array(3);
-        msg[0] = C2S_UNSUBSCRIBE;
-        msg[1] = id & 0xff;
-        msg[2] = (id >> 8) & 0xff;
-        this.transport.send(msg);
-        const t = this.terminals.get(id);
-        if (t) {
-          t.free();
-          this.terminals.delete(id);
-        }
+        this._transport.send(buildUnsubscribeMessage(id));
+        // Don't free the terminal — BlitTerminal may still hold a ref.
+        // It will be freed on PTY close or store dispose.
       }
     }
   }
@@ -180,10 +213,12 @@ export class TerminalStore {
 
   dispose(): void {
     this.disposed = true;
-    this.transport.removeEventListener("message", this.onMessage);
-    this.transport.removeEventListener("statuschange", this.onStatus);
+    this._transport.removeEventListener("message", this.onMessage);
+    this._transport.removeEventListener("statuschange", this.onStatus);
     for (const t of this.terminals.values()) t.free();
     this.terminals.clear();
+    for (const t of this.staleTerminals.values()) t.free();
+    this.staleTerminals.clear();
     this.subscribed.clear();
     this.dirtyListeners.clear();
     this.readyListeners.clear();

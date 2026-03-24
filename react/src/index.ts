@@ -23,11 +23,8 @@ export type {
   UseBlitSessionsFn,
 } from "./hooks/useBlitSessions";
 
-export { useBlitTerminal, measureCell } from "./hooks/useBlitTerminal";
-export type {
-  CellMetrics,
-  UseBlitTerminalOptions,
-} from "./hooks/useBlitTerminal";
+export { measureCell } from "./hooks/useBlitTerminal";
+export type { CellMetrics } from "./hooks/useBlitTerminal";
 
 export { WebSocketTransport } from "./transports/websocket";
 export type { WebSocketTransportOptions } from "./transports/websocket";
@@ -51,4 +48,25 @@ export type {
 export { PALETTES } from "./palettes";
 
 export { TerminalStore } from "./TerminalStore";
-export type { TerminalDirtyListener } from "./TerminalStore";
+export type { BlitWasmModule, TerminalDirtyListener } from "./TerminalStore";
+
+export { BlitProvider, useBlitContext } from "./BlitContext";
+export type { BlitContextValue, BlitProviderProps } from "./BlitContext";
+
+export {
+  buildAckMessage,
+  buildInputMessage,
+  buildResizeMessage,
+  buildScrollMessage,
+  buildFocusMessage,
+  buildCloseMessage,
+  buildSubscribeMessage,
+  buildUnsubscribeMessage,
+  buildSearchMessage,
+  buildCreate2Message,
+} from "./protocol";
+
+export { createGlRenderer } from "./gl-renderer";
+export type { GlRenderer } from "./gl-renderer";
+
+export { keyToBytes } from "./keyboard";

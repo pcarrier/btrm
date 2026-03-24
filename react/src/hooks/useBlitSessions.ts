@@ -2,6 +2,7 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { BlitTransport, BlitSession, ConnectionStatus } from "../types";
 import { FEATURE_CREATE_NONCE, PROTOCOL_VERSION } from "../types";
 import { useBlitConnection, type SearchResult } from "./useBlitConnection";
+import { useBlitContext } from "../BlitContext";
 
 export interface UseBlitSessionsOptions {
   /** Automatically create a PTY if the initial list is empty. Default: false. */
@@ -50,14 +51,21 @@ export interface UseBlitSessionsReturn {
 }
 
 export type UseBlitSessionsFn = (
-  transport: BlitTransport,
+  transport?: BlitTransport,
   options?: UseBlitSessionsOptions,
 ) => UseBlitSessionsReturn;
 
 export function useBlitSessions(
-  transport: BlitTransport,
+  transportArg?: BlitTransport,
   options?: UseBlitSessionsOptions,
 ): UseBlitSessionsReturn {
+  const ctx = useBlitContext();
+  const transport = transportArg ?? ctx.transport;
+  if (!transport) {
+    throw new Error(
+      "useBlitSessions requires a transport argument or a BlitProvider ancestor",
+    );
+  }
   const autoCreate = options?.autoCreateIfEmpty ?? false;
   const autoTag = options?.autoCreateTag;
   const autoCommand = options?.autoCreateCommand;
@@ -394,7 +402,6 @@ export function useBlitSessions(
       const { rows, cols } = getSize();
       const r = opts?.rows ?? rows;
       const c = opts?.cols ?? cols;
-      const createOpts = { tag: opts?.tag, command: opts?.command };
       return new Promise<number>((resolve) => {
         const nonce = (nonceCounterRef.current =
           (nonceCounterRef.current + 1) & 0xffff);

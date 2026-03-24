@@ -1505,6 +1505,8 @@ function openExpose(initialQuery = '') {
     previewRailEl.classList.add('visible');
     syncExposeSelection();
     updatePreviewRail();
+    // Subscribe immediately so data starts flowing for previews.
+    for (const id of ptyIds) followPty(id);
     requestPreviewRender(null, true);
     schedulePtyFollowSync();
     requestAnimationFrame(() => exposeSearchEl.focus());
@@ -2235,6 +2237,7 @@ function renderPreviews() {
         let compositeWidth = 1;
         let compositeHeight = 0;
         for (const id of ids) {
+            if (!terminals[id]) continue; // no data yet — skip entirely
             const item = ensurePreviewItem(id);
             const { widthCss, heightCss } = previewCanvasSizeCss(id, item);
             const { pixelW, pixelH } = ensurePreviewCanvasSize(item, widthCss, heightCss);
@@ -2242,11 +2245,11 @@ function renderPreviews() {
             compositeWidth = Math.max(compositeWidth, pixelW);
             compositeHeight += pixelH;
         }
+        if (entries.length === 0) { dirtyPreviewPtys.clear(); previewLayoutDirty = false; return; }
         previewCompositeRenderer.resize(compositeWidth, Math.max(1, compositeHeight));
         const views = [];
         for (const entry of entries) {
             const terminal = terminals[entry.id];
-            if (!terminal) continue;
             terminal.prepare_full_render_ops();
             views.push({
                 x: 0,

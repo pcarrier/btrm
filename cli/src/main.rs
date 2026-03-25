@@ -593,11 +593,14 @@ async fn run_browser(args: Vec<String>) {
 
     let flag = args.get(1).map(|s| s.as_str());
 
+    let mut remote_host: Option<String> = None;
+
     let connector = if flag == Some("--tcp") {
         let addr = args.get(2).unwrap_or_else(|| {
             eprintln!("blit: --tcp requires HOST:PORT");
             std::process::exit(1);
         });
+        remote_host = Some(addr.split(':').next().unwrap_or(addr).to_string());
         BrowserConnector::Tcp(addr.clone())
     } else if flag == Some("--socket") || flag == Some("-s") {
         let path = args.get(2).unwrap_or_else(|| {
@@ -607,9 +610,13 @@ async fn run_browser(args: Vec<String>) {
         BrowserConnector::Unix(path.clone())
     } else if flag == Some("--ssh") || flag == Some("ssh") {
         // Explicit --ssh: remaining args are SSH args
+        if let Some(target) = args.get(2) {
+            remote_host = Some(target.to_string());
+        }
         setup_ssh_forward(&args[2..]).await
     } else if flag.is_some() && !flag.unwrap().starts_with('-') {
         // Bare hostname: treat as SSH target
+        remote_host = Some(flag.unwrap().to_string());
         setup_ssh_forward(&args[1..]).await
     } else {
         // No args: local Unix socket
@@ -643,10 +650,14 @@ async fn run_browser(args: Vec<String>) {
         connector,
     });
 
+    let host_injection = match &remote_host {
+        Some(h) => format!("localStorage.setItem('blit.host','{h}');"),
+        None => String::new(),
+    };
     let injected_html = WEB_INDEX_HTML.replacen(
         "<script",
         &format!(
-            "<script>localStorage.setItem('blit.passphrase','{token}');</script>\n<script"
+            "<script>localStorage.setItem('blit.passphrase','{token}');{host_injection}</script>\n<script"
         ),
         1,
     );

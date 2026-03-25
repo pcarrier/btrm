@@ -732,6 +732,11 @@ impl Terminal {
         html
     }
 
+    /// Returns true if the given row wraps to the next (is part of a longer logical line).
+    pub fn is_wrapped(&self, row: u16) -> bool {
+        self.inner.is_wrapped(row)
+    }
+
     pub fn get_text(&self, start_row: u16, start_col: u16, end_row: u16, end_col: u16) -> String {
         let mut result = String::new();
         for row in start_row..=end_row.min(self.inner.rows().saturating_sub(1)) {

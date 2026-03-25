@@ -535,15 +535,3 @@ nix run .#browser-publish
 nix run .#react-publish -- --dry-run      # blit-react
 nix run .#react-publish
 ```
-
-## Verification
-
-The current branch passes:
-
-- `nix develop -c cargo check --workspace`
-- `nix develop -c cargo test -p blit-remote`
-- `cd react && npx vitest run` (210 tests)
-
-## License
-
-MIT

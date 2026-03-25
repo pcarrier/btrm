@@ -20,7 +20,7 @@ import type {
   SearchResult,
 } from "blit-react";
 import { useMetrics } from "./useMetrics";
-import { PALETTE_KEY, FONT_KEY, writeStorage, preferredPalette, preferredFont } from "./storage";
+import { PALETTE_KEY, FONT_KEY, writeStorage, preferredPalette, preferredFont, blitHost } from "./storage";
 import { styles } from "./styles";
 import { StatusBar } from "./StatusBar";
 import { ExposeOverlay } from "./ExposeOverlay";
@@ -128,7 +128,12 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
     const focused = sessions.sessions.find(
       (s) => s.ptyId === sessions.focusedPtyId,
     );
-    document.title = focused?.title ? `${focused.title} — blit` : "blit";
+    const host = blitHost();
+    const parts: string[] = [];
+    if (focused?.title) parts.push(focused.title);
+    if (host && host !== "localhost" && host !== "127.0.0.1") parts.push(host);
+    parts.push("blit");
+    document.title = parts.join(" — ");
   }, [sessions.focusedPtyId, sessions.sessions]);
 
   const focusTerminal = useCallback(() => {

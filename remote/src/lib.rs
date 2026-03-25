@@ -7,7 +7,11 @@ pub const CELL_SIZE: usize = 12;
 const TITLE_PRESENT: u16 = 1 << 15;
 const OPS_PRESENT: u16 = 1 << 14;
 const STRINGS_PRESENT: u16 = 1 << 13;
-const TITLE_LEN_MASK: u16 = STRINGS_PRESENT - 1;
+const LINE_FLAGS_PRESENT: u16 = 1 << 12;
+const TITLE_LEN_MASK: u16 = LINE_FLAGS_PRESENT - 1;
+
+/// Per-row flag: this row's content continues on the next row (line wrap).
+pub const ROW_FLAG_WRAPPED: u8 = 1 << 0;
 
 /// Sentinel value for content_len indicating the cell's text lives in the
 /// overflow string table.  Bytes 8-11 then hold an FNV-1a hash of the full
@@ -110,6 +114,8 @@ pub struct FrameState {
     /// Overflow strings for cells whose content exceeds 4 bytes.
     /// Keyed by flat cell index (row * cols + col).
     overflow: BTreeMap<usize, String>,
+    /// Per-row flags. `ROW_FLAG_WRAPPED` means the row continues on the next.
+    line_flags: Vec<u8>,
 }
 
 impl FrameState {
@@ -124,6 +130,7 @@ impl FrameState {
             mode: 0,
             title: String::new(),
             overflow: BTreeMap::new(),
+            line_flags: vec![0; rows as usize],
         }
     }
 
@@ -187,6 +194,28 @@ impl FrameState {
         &mut self.overflow
     }
 
+    pub fn line_flags(&self) -> &[u8] {
+        &self.line_flags
+    }
+
+    pub fn line_flags_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.line_flags
+    }
+
+    pub fn is_wrapped(&self, row: u16) -> bool {
+        self.line_flags.get(row as usize).copied().unwrap_or(0) & ROW_FLAG_WRAPPED != 0
+    }
+
+    pub fn set_wrapped(&mut self, row: u16, wrapped: bool) {
+        if let Some(flags) = self.line_flags.get_mut(row as usize) {
+            if wrapped {
+                *flags |= ROW_FLAG_WRAPPED;
+            } else {
+                *flags &= !ROW_FLAG_WRAPPED;
+            }
+        }
+    }
+
     /// Returns the text content of a cell, resolving overflow if needed.
     pub fn cell_content(&self, row: u16, col: u16) -> &str {
         if row >= self.rows || col >= self.cols {
@@ -219,6 +248,7 @@ impl FrameState {
         self.cols = cols;
         self.cells = vec![0; rows as usize * cols as usize * CELL_SIZE];
         self.overflow.clear();
+        self.line_flags = vec![0; rows as usize];
         self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
         self.cursor_col = self.cursor_col.min(cols.saturating_sub(1));
     }
@@ -452,6 +482,10 @@ impl TerminalState {
         self.frame.cols()
     }
 
+    pub fn is_wrapped(&self, row: u16) -> bool {
+        self.frame.is_wrapped(row)
+    }
+
     pub fn cursor_row(&self) -> u16 {
         self.frame.cursor_row()
     }
@@ -525,6 +559,7 @@ impl TerminalState {
         let title_present = title_field & TITLE_PRESENT != 0;
         let ops_present = title_field & OPS_PRESENT != 0;
         let strings_present = title_field & STRINGS_PRESENT != 0;
+        let line_flags_present = title_field & LINE_FLAGS_PRESENT != 0;
         let title_len = (title_field & TITLE_LEN_MASK) as usize;
 
         let title_start = 12usize;
@@ -564,9 +599,30 @@ impl TerminalState {
             (changed, title_end + consumed)
         };
 
+        let mut after_strings = ops_end;
         if strings_present {
-            self.apply_overflow_strings(&payload[ops_end..]);
+            after_strings = self.apply_overflow_strings(&payload[ops_end..]);
+            after_strings += ops_end;
         }
+
+        let line_flags_changed = if line_flags_present {
+            let lf_start = after_strings;
+            let lf_end = lf_start + new_rows as usize;
+            if payload.len() >= lf_end {
+                let new_flags = &payload[lf_start..lf_end];
+                let changed = self.frame.line_flags != new_flags;
+                self.frame.line_flags.clear();
+                self.frame.line_flags.extend_from_slice(new_flags);
+                changed
+            } else {
+                false
+            }
+        } else if resized {
+            // On resize without line_flags, reset to all-unwrapped.
+            false
+        } else {
+            false
+        };
 
         self.frame.cursor_row = new_cursor_row;
         self.frame.cursor_col = new_cursor_col;
@@ -574,6 +630,7 @@ impl TerminalState {
         resized
             || title_changed
             || content_changed
+            || line_flags_changed
             || new_cursor_row != old_cursor_row
             || new_cursor_col != old_cursor_col
             || new_mode != old_mode
@@ -774,9 +831,9 @@ impl TerminalState {
         true
     }
 
-    fn apply_overflow_strings(&mut self, data: &[u8]) {
+    fn apply_overflow_strings(&mut self, data: &[u8]) -> usize {
         if data.len() < 2 {
-            return;
+            return 0;
         }
         let count = u16::from_le_bytes([data[0], data[1]]) as usize;
         let mut off = 2usize;
@@ -795,6 +852,7 @@ impl TerminalState {
             }
             off += len;
         }
+        off
     }
 
 }
@@ -1335,6 +1393,10 @@ pub fn build_update_msg(
         Vec::new()
     };
 
+    let line_flags_changed = current.line_flags != previous.line_flags
+        || current.rows != previous.rows;
+    let has_line_flags = line_flags_changed && !current.line_flags.iter().all(|&f| f == 0);
+
     let title_bytes = if title_changed {
         current.title.as_bytes()
     } else {
@@ -1343,6 +1405,7 @@ pub fn build_update_msg(
     let title_len = title_bytes.len().min(TITLE_LEN_MASK as usize);
     let title_field = OPS_PRESENT
         | if has_overflow { STRINGS_PRESENT } else { 0 }
+        | if has_line_flags { LINE_FLAGS_PRESENT } else { 0 }
         | if title_changed {
             TITLE_PRESENT | title_len as u16
         } else {
@@ -1350,7 +1413,7 @@ pub fn build_update_msg(
         };
 
     let mut payload =
-        Vec::with_capacity(12 + title_len + 2 + ops.len() + overflow_section.len());
+        Vec::with_capacity(12 + title_len + 2 + ops.len() + overflow_section.len() + if has_line_flags { current.rows as usize } else { 0 });
     payload.extend_from_slice(&current.rows.to_le_bytes());
     payload.extend_from_slice(&current.cols.to_le_bytes());
     payload.extend_from_slice(&current.cursor_row.to_le_bytes());
@@ -1363,6 +1426,9 @@ pub fn build_update_msg(
     payload.extend_from_slice(&op_count.to_le_bytes());
     payload.extend_from_slice(&ops);
     payload.extend_from_slice(&overflow_section);
+    if has_line_flags {
+        payload.extend_from_slice(&current.line_flags);
+    }
 
     let compressed = compress_prepend_size(&payload);
     let mut msg = Vec::with_capacity(3 + compressed.len());

@@ -783,6 +783,11 @@ fn frame_from_lines(
         cells,
     );
     *frame.overflow_mut() = overflow;
+    for (row, line) in lines.iter().enumerate().take(rows) {
+        if line.last_cell_was_wrapped() {
+            frame.set_wrapped(row as u16, true);
+        }
+    }
     frame
 }
 

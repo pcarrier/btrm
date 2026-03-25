@@ -5,8 +5,14 @@ import {
 import type { TerminalPalette } from "blit-react";
 
 export const PASS_KEY = "blit.passphrase";
+export const HOST_KEY = "blit.host";
 export const PALETTE_KEY = "blit.palette";
 export const FONT_KEY = "blit.fontFamily";
+
+/** Remote hostname: injected by CLI, or falls back to location.hostname for gateway. */
+export function blitHost(): string {
+  return readStorage(HOST_KEY) || location.hostname;
+}
 
 export function readStorage(key: string): string | null {
   try {

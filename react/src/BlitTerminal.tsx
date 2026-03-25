@@ -94,6 +94,12 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
 
     const selStartRef = useRef<{ row: number; col: number } | null>(null);
     const selEndRef = useRef<{ row: number; col: number } | null>(null);
+    const hoveredUrlRef = useRef<{
+      row: number;
+      startCol: number;
+      endCol: number;
+      url: string;
+    } | null>(null);
 
     const predictedRef = useRef("");
     const predictedFromRowRef = useRef(0);
@@ -466,6 +472,21 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
                 }
               }
 
+              // URL hover underline
+              const hurl = hoveredUrlRef.current;
+              if (hurl) {
+                const [fgR, fgG, fgB] = paletteRef.current?.fg ?? [204, 204, 204];
+                ctx.strokeStyle = `rgba(${fgR},${fgG},${fgB},0.6)`;
+                ctx.lineWidth = Math.max(1, Math.round(cell.ph * 0.06));
+                const y = hurl.row * cell.ph + cell.ph - ctx.lineWidth;
+                const x1 = hurl.startCol * cell.pw;
+                const x2 = (hurl.endCol + 1) * cell.pw;
+                ctx.beginPath();
+                ctx.moveTo(x1, y);
+                ctx.lineTo(x2, y);
+                ctx.stroke();
+              }
+
               if (overflowCount > 0) {
                 const cw = cell.pw;
                 const ch = cell.ph;
@@ -675,6 +696,11 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       }
 
       let selecting = false;
+      // 1=char, 2=word, 3=line — set by click detail
+      let selGranularity: 1 | 2 | 3 = 1;
+      // Anchor word/line boundaries for drag-extending
+      let selAnchorStart: { row: number; col: number } | null = null;
+      let selAnchorEnd: { row: number; col: number } | null = null;
 
       function clearSelection() {
         selStartRef.current = selEndRef.current = null;
@@ -683,6 +709,66 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
 
       function drawSelection() {
         needsRenderRef.current = true;
+      }
+
+      function getRowText(row: number): string {
+        const t = terminalRef.current;
+        if (!t) return "";
+        return t.get_text(row, 0, row, colsRef.current - 1);
+      }
+
+      const WORD_CHARS = /[A-Za-z0-9_\-./~:@]/;
+
+      function wordBoundsAt(row: number, col: number): { start: number; end: number } {
+        const text = getRowText(row);
+        if (col >= text.length || !WORD_CHARS.test(text[col])) {
+          return { start: col, end: col };
+        }
+        let start = col;
+        while (start > 0 && WORD_CHARS.test(text[start - 1])) start--;
+        let end = col;
+        while (end < text.length - 1 && WORD_CHARS.test(text[end + 1])) end++;
+        return { start, end };
+      }
+
+      function isWrapped(row: number): boolean {
+        const t = terminalRef.current as Record<string, unknown> | null;
+        if (t && typeof t.is_wrapped === "function") {
+          return !!(t.is_wrapped as (row: number) => boolean)(row);
+        }
+        // Fallback for older WASM builds without is_wrapped
+        const text = getRowText(row);
+        return text.length >= colsRef.current;
+      }
+
+      function logicalLineRange(row: number): { startRow: number; endRow: number } {
+        const maxRow = rowsRef.current - 1;
+        let startRow = row;
+        while (startRow > 0 && isWrapped(startRow - 1)) startRow--;
+        let endRow = row;
+        while (endRow < maxRow && isWrapped(endRow)) endRow++;
+        return { startRow, endRow };
+      }
+
+      function applyGranularity(cell: { row: number; col: number }): {
+        start: { row: number; col: number };
+        end: { row: number; col: number };
+      } {
+        if (selGranularity === 3) {
+          const { startRow, endRow } = logicalLineRange(cell.row);
+          return {
+            start: { row: startRow, col: 0 },
+            end: { row: endRow, col: colsRef.current - 1 },
+          };
+        }
+        if (selGranularity === 2) {
+          const wb = wordBoundsAt(cell.row, cell.col);
+          return {
+            start: { row: cell.row, col: wb.start },
+            end: { row: cell.row, col: wb.end },
+          };
+        }
+        return { start: cell, end: cell };
       }
 
       function copySelection() {
@@ -714,8 +800,23 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         if (e.button === 0) {
           clearSelection();
           selecting = true;
-          selStartRef.current = mouseToCell(e);
-          selEndRef.current = selStartRef.current;
+          const cell = mouseToCell(e);
+          const detail = Math.min(e.detail, 3) as 1 | 2 | 3;
+          selGranularity = detail;
+
+          if (detail >= 2) {
+            const { start, end } = applyGranularity(cell);
+            selStartRef.current = start;
+            selEndRef.current = end;
+            selAnchorStart = start;
+            selAnchorEnd = end;
+            drawSelection();
+          } else {
+            selStartRef.current = cell;
+            selEndRef.current = cell;
+            selAnchorStart = null;
+            selAnchorEnd = null;
+          }
         }
       };
 
@@ -735,7 +836,24 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
           }
         }
         if (selecting) {
-          selEndRef.current = mouseToCell(e);
+          const cell = mouseToCell(e);
+          if (selGranularity >= 2 && selAnchorStart && selAnchorEnd) {
+            // Extend selection by word/line granularity from the anchor
+            const { start: dragStart, end: dragEnd } = applyGranularity(cell);
+            // Compare drag position vs anchor to determine direction
+            const dragBefore =
+              dragStart.row < selAnchorStart.row ||
+              (dragStart.row === selAnchorStart.row && dragStart.col < selAnchorStart.col);
+            if (dragBefore) {
+              selStartRef.current = dragStart;
+              selEndRef.current = selAnchorEnd;
+            } else {
+              selStartRef.current = selAnchorStart;
+              selEndRef.current = dragEnd;
+            }
+          } else {
+            selEndRef.current = cell;
+          }
           drawSelection();
         }
       };
@@ -747,7 +865,9 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         }
         if (selecting) {
           selecting = false;
-          selEndRef.current = mouseToCell(e);
+          if (selGranularity === 1) {
+            selEndRef.current = mouseToCell(e);
+          }
           drawSelection();
           if (
             selStartRef.current &&
@@ -778,17 +898,73 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         }
       };
 
+      // --- URL detection ---
+
+      const URL_RE = /https?:\/\/[^\s<>"'`)\]},;]+/g;
+
+      function urlAt(
+        row: number,
+        col: number,
+      ): { url: string; startCol: number; endCol: number } | null {
+        const text = getRowText(row);
+        URL_RE.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = URL_RE.exec(text)) !== null) {
+          const startCol = m.index;
+          const raw = m[0].replace(/[.),:;]+$/, "");
+          const endCol = startCol + raw.length - 1;
+          if (col >= startCol && col <= endCol) {
+            return { url: raw, startCol, endCol };
+          }
+        }
+        return null;
+      }
+
       const handleContextMenu = (e: MouseEvent) => {
         const t = terminalRef.current;
         if (t && t.mouse_mode() > 0) e.preventDefault();
       };
 
-      const handleClick = () => {
+      const handleClick = (e: MouseEvent) => {
+        if (e.altKey && e.button === 0) {
+          const cell = mouseToCell(e);
+          const hit = urlAt(cell.row, cell.col);
+          if (hit) {
+            e.preventDefault();
+            window.open(hit.url, "_blank", "noopener");
+            return;
+          }
+        }
         inputRef.current?.focus();
+      };
+
+      let lastHoverUrl: string | null = null;
+      const handleHoverMove = (e: MouseEvent) => {
+        if (selecting) {
+          if (hoveredUrlRef.current) {
+            hoveredUrlRef.current = null;
+            needsRenderRef.current = true;
+            canvas.style.cursor = "text";
+            lastHoverUrl = null;
+          }
+          return;
+        }
+        const cell = mouseToCell(e);
+        const hit = urlAt(cell.row, cell.col);
+        const url = hit?.url ?? null;
+        if (url !== lastHoverUrl) {
+          lastHoverUrl = url;
+          canvas.style.cursor = hit ? "pointer" : "text";
+          hoveredUrlRef.current = hit
+            ? { row: cell.row, startCol: hit.startCol, endCol: hit.endCol, url: hit.url }
+            : null;
+          needsRenderRef.current = true;
+        }
       };
 
       canvas.addEventListener("mousedown", handleMouseDown);
       canvas.addEventListener("mousemove", handleMouseMove);
+      canvas.addEventListener("mousemove", handleHoverMove);
       window.addEventListener("mouseup", handleMouseUp);
       canvas.addEventListener("wheel", handleWheel, { passive: false });
       canvas.addEventListener("contextmenu", handleContextMenu);
@@ -797,6 +973,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       return () => {
         canvas.removeEventListener("mousedown", handleMouseDown);
         canvas.removeEventListener("mousemove", handleMouseMove);
+        canvas.removeEventListener("mousemove", handleHoverMove);
         window.removeEventListener("mouseup", handleMouseUp);
         canvas.removeEventListener("wheel", handleWheel);
         canvas.removeEventListener("contextmenu", handleContextMenu);

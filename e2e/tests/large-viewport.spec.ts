@@ -1,0 +1,81 @@
+import { test, expect } from "@playwright/test";
+
+async function authenticate(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.clear());
+  await page.goto("/");
+  const passInput = page.locator('input[type="password"]');
+  await expect(passInput).toBeVisible();
+  await passInput.fill("test-secret");
+  await passInput.press("Enter");
+  await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 });
+}
+
+const VIEWPORTS = [
+  { name: "1080p-8px", width: 1920, height: 1080, dpr: 1, fontSize: 8 },
+  { name: "4K-8px", width: 3840, height: 2160, dpr: 1, fontSize: 8 },
+  { name: "4K-2x-8px", width: 1920, height: 1080, dpr: 2, fontSize: 8 },
+  { name: "4K-2x-13px", width: 1920, height: 1080, dpr: 2, fontSize: 13 },
+];
+
+for (const vp of VIEWPORTS) {
+  test(`renders at ${vp.name} (${vp.width}x${vp.height} @${vp.dpr}x, ${vp.fontSize}px)`, async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      viewport: { width: vp.width, height: vp.height },
+      deviceScaleFactor: vp.dpr,
+    });
+    const page = await context.newPage();
+
+    await page.goto("/");
+    await page.evaluate((fs) => localStorage.setItem("blit.fontSize", String(fs)), vp.fontSize);
+    await authenticate(page);
+    await page.waitForTimeout(3000);
+
+    // Measure cell metrics in the browser
+    const info = await page.evaluate((fs) => {
+      const c = document.querySelector("canvas");
+      const canvas2 = document.createElement("canvas");
+      const ctx = canvas2.getContext("2d")!;
+      ctx.font = `${fs}px PragmataPro, ui-monospace, monospace`;
+      const m = ctx.measureText("M");
+      return {
+        canvasW: c?.width ?? 0,
+        canvasH: c?.height ?? 0,
+        cellW: m.width,
+        cellH: m.fontBoundingBoxAscent + m.fontBoundingBoxDescent,
+        dpr: window.devicePixelRatio,
+        totalCells: c ? Math.floor(c.width / Math.max(1, Math.round(m.width * window.devicePixelRatio)))
+          * Math.floor(c.height / Math.max(1, Math.round((m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) * window.devicePixelRatio))) : 0,
+      };
+    }, vp.fontSize);
+    console.log(`${vp.name}: canvas=${info.canvasW}x${info.canvasH} cell=${info.cellW}x${info.cellH} cells=${info.totalCells}`);
+
+    // Check the canvas has non-blank pixels (rendering is working)
+    const hasPixels = await page.evaluate(() => {
+      const c = document.querySelector("canvas") as HTMLCanvasElement | null;
+      if (!c || c.width === 0 || c.height === 0) return false;
+      const tmp = document.createElement("canvas");
+      tmp.width = Math.min(c.width, 200);
+      tmp.height = Math.min(c.height, 200);
+      const ctx = tmp.getContext("2d");
+      if (!ctx) return false;
+      ctx.drawImage(c, 0, 0, tmp.width, tmp.height);
+      const data = ctx.getImageData(0, 0, tmp.width, tmp.height).data;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 0) return true;
+      }
+      return false;
+    });
+
+    await page.screenshot({
+      path: `test-results/viewport-${vp.name}.png`,
+      fullPage: false,
+    });
+
+    expect(hasPixels).toBe(true);
+
+    await context.close();
+  });
+}

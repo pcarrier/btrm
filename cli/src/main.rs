@@ -516,6 +516,7 @@ async fn main() {
         println!();
         println!("OPTIONS:");
         println!("  --console           Render to terminal instead of opening browser");
+        println!("  --port PORT         Bind browser UI to a specific port (default: random)");
         println!("  --socket PATH       Connect to a specific Unix socket");
         println!("  --tcp HOST:PORT     Connect via raw TCP");
         println!("  --help, -h          Print this help");
@@ -589,6 +590,31 @@ async fn run_browser(args: Vec<String>) {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         (0..32).map(|_| rng.sample(rand::distributions::Alphanumeric) as char).collect()
+    };
+
+    // Extract --port before connector parsing.
+    let mut bind_port: u16 = 0;
+    let args: Vec<String> = {
+        let mut filtered = Vec::new();
+        let mut skip_next = false;
+        for (i, arg) in args.iter().enumerate() {
+            if skip_next { skip_next = false; continue; }
+            if arg == "--port" {
+                if let Some(p) = args.get(i + 1) {
+                    bind_port = p.parse().unwrap_or_else(|_| {
+                        eprintln!("blit: --port requires a valid port number");
+                        std::process::exit(1);
+                    });
+                    skip_next = true;
+                } else {
+                    eprintln!("blit: --port requires a port number");
+                    std::process::exit(1);
+                }
+            } else {
+                filtered.push(arg.clone());
+            }
+        }
+        filtered
     };
 
     let flag = args.get(1).map(|s| s.as_str());
@@ -667,7 +693,10 @@ async fn run_browser(args: Vec<String>) {
         .fallback(get(move |state, request| browser_root_handler(state, request, injected_html)))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{bind_port}")).await.unwrap_or_else(|e| {
+        eprintln!("blit: cannot bind to port {bind_port}: {e}");
+        std::process::exit(1);
+    });
     let addr = listener.local_addr().unwrap();
     let url = format!("http://{addr}");
     eprintln!("blit: serving browser UI at {url}");

@@ -20,7 +20,7 @@ import type {
   SearchResult,
 } from "blit-react";
 import { useMetrics } from "./useMetrics";
-import { PALETTE_KEY, FONT_KEY, writeStorage, preferredPalette, preferredFont, blitHost } from "./storage";
+import { PALETTE_KEY, FONT_KEY, FONT_SIZE_KEY, writeStorage, preferredPalette, preferredFont, preferredFontSize, blitHost } from "./storage";
 import { styles } from "./styles";
 import { StatusBar } from "./StatusBar";
 import { ExposeOverlay } from "./ExposeOverlay";
@@ -33,7 +33,7 @@ export type Overlay = "expose" | "palette" | "font" | "help" | null;
 export function Workspace({ transport, wasm, onAuthError }: { transport: WebSocketTransport; wasm: BlitWasmModule; onAuthError: () => void }) {
   const [palette, setPalette] = useState<TerminalPalette>(preferredPalette);
   const [font, setFont] = useState(preferredFont);
-  const [fontSize] = useState(13);
+  const [fontSize, setFontSize] = useState(preferredFontSize);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const termRef = useRef<BlitTerminalHandle>(null);
   const overlayRef = useRef<Overlay>(null);
@@ -77,8 +77,16 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
     store.setFontFamily(font);
   }, [store, font]);
 
+  // LRU order: most recently focused PTY first.
+  const lruRef = useRef<number[]>([]);
+
   useEffect(() => {
     store.setLead(sessions.focusedPtyId);
+    if (sessions.focusedPtyId !== null) {
+      const lru = lruRef.current.filter((id) => id !== sessions.focusedPtyId);
+      lru.unshift(sessions.focusedPtyId);
+      lruRef.current = lru;
+    }
   }, [store, sessions.focusedPtyId]);
 
   useEffect(() => {
@@ -161,10 +169,12 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
     closeOverlay();
   }, [closeOverlay]);
 
-  const changeFont = useCallback((f: string) => {
+  const changeFont = useCallback((f: string, size: number) => {
     const value = f.trim() || DEFAULT_FONT;
     setFont(value);
+    setFontSize(size);
     writeStorage(FONT_KEY, value);
+    writeStorage(FONT_SIZE_KEY, String(size));
     closeOverlay();
   }, [closeOverlay]);
 
@@ -272,6 +282,7 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
         {overlay === "expose" && (
           <ExposeOverlay
             sessions={sessions}
+            lru={lruRef.current}
             onSelect={switchPty}
             onClose={closeOverlay}
             onCreate={createAndFocus}
@@ -289,7 +300,8 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
         )}
         {overlay === "font" && (
           <FontOverlay
-            current={font}
+            currentFamily={font}
+            currentSize={fontSize}
             onSelect={changeFont}
             onClose={closeOverlay}
             dark={dark}

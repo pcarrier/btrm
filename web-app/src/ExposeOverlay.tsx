@@ -22,22 +22,27 @@ const SOURCE_LABEL: Record<number, string> = {
 
 export function ExposeOverlay({
   sessions,
+  lru,
   onSelect,
   onClose,
   onCreate,
   searchResultsCbRef,
 }: {
   sessions: UseBlitSessionsReturn;
+  lru: number[];
   onSelect: (id: number) => void;
   onClose: () => void;
   onCreate: (command?: string) => void;
   searchResultsCbRef: React.RefObject<((reqId: number, results: SearchResult[]) => void) | null>;
 }) {
-  // Show active first, then exited at the end
-  const visible = [
-    ...sessions.sessions.filter((s) => s.state === "active"),
-    ...sessions.sessions.filter((s) => s.state === "exited"),
-  ];
+  // Sort by LRU: most recently focused first, then any not in LRU.
+  const notClosed = sessions.sessions.filter((s) => s.state !== "closed");
+  const lruIndex = new Map(lru.map((id, i) => [id, i]));
+  const visible = [...notClosed].sort((a, b) => {
+    const ai = lruIndex.get(a.ptyId) ?? Infinity;
+    const bi = lruIndex.get(b.ptyId) ?? Infinity;
+    return ai - bi;
+  });
   const { palette, fontFamily: font } = useBlitContext();
   const dark = palette?.dark ?? true;
   const [query, setQuery] = useState("");
@@ -97,11 +102,17 @@ export function ExposeOverlay({
       }));
 
   const itemCount = isCommand ? 1 : items.length + 1;
-  const initialIdx = items.findIndex((it) => it.ptyId === sessions.focusedPtyId);
-  const [selectedIdx, setSelectedIdx] = useState(initialIdx >= 0 ? initialIdx : 0);
+  // Default to the most recent PTY that isn't the currently focused one,
+  // so Cmd+K Enter switches back — like Alt-Tab.
+  const defaultIdx = items.findIndex((it) => it.ptyId !== sessions.focusedPtyId);
+  const [selectedIdx, setSelectedIdx] = useState(defaultIdx >= 0 ? defaultIdx : 0);
+  const prevQueryRef = useRef(query);
 
   useEffect(() => {
-    setSelectedIdx(0);
+    if (prevQueryRef.current !== query) {
+      prevQueryRef.current = query;
+      setSelectedIdx(0);
+    }
   }, [query]);
 
   useEffect(() => {

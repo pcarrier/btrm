@@ -8,6 +8,7 @@ export const PASS_KEY = "blit.passphrase";
 export const HOST_KEY = "blit.host";
 export const PALETTE_KEY = "blit.palette";
 export const FONT_KEY = "blit.fontFamily";
+export const FONT_SIZE_KEY = "blit.fontSize";
 
 /** Remote hostname: injected by CLI, or falls back to location.hostname for gateway. */
 export function blitHost(): string {
@@ -44,6 +45,20 @@ export function preferredPalette(): TerminalPalette {
     if (p) return p;
   }
   return PALETTES[0];
+}
+
+export function preferredFontSize(): number {
+  const q = new URLSearchParams(location.search).get("fontSize");
+  if (q) {
+    const n = parseInt(q, 10);
+    if (n > 0) return n;
+  }
+  const s = readStorage(FONT_SIZE_KEY);
+  if (s) {
+    const n = parseInt(s, 10);
+    if (n > 0) return n;
+  }
+  return 13;
 }
 
 export function preferredFont(): string {

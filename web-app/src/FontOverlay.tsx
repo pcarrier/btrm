@@ -7,17 +7,20 @@ import { DEFAULT_FONT } from "blit-react";
 import { styles } from "./styles";
 
 export function FontOverlay({
-  current,
+  currentFamily,
+  currentSize,
   onSelect,
   onClose,
   dark,
 }: {
-  current: string;
-  onSelect: (font: string) => void;
+  currentFamily: string;
+  currentSize: number;
+  onSelect: (font: string, size: number) => void;
   onClose: () => void;
   dark: boolean;
 }) {
-  const [value, setValue] = useState(current);
+  const [family, setFamily] = useState(currentFamily);
+  const [size, setSize] = useState(currentSize);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -25,8 +28,14 @@ export function FontOverlay({
     inputRef.current?.select();
   }, []);
 
+  const inputStyle = {
+    ...styles.exposeSearch,
+    backgroundColor: dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+    color: "inherit",
+  };
+
   return (
-    <div open style={styles.overlay} onClick={onClose}>
+    <div style={styles.overlay} onClick={onClose}>
       <section
         style={{
           ...styles.helpBox,
@@ -39,24 +48,42 @@ export function FontOverlay({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            onSelect(value);
+            onSelect(family, size);
           }}
           style={{ display: "flex", flexDirection: "column", gap: 10 }}
         >
           <input
             ref={inputRef}
             type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={family}
+            onChange={(e) => setFamily(e.target.value)}
             placeholder="Font family (CSS value)"
-            style={{
-              ...styles.exposeSearch,
-              backgroundColor: dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
-              color: "inherit",
-            }}
+            style={inputStyle}
           />
-          <span style={{ fontSize: 13, opacity: 0.6 }}>
-            Preview: <span style={{ fontFamily: value || DEFAULT_FONT }}>The quick brown fox jumps over the lazy dog</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <label style={{ fontSize: 13, opacity: 0.7, flexShrink: 0 }}>Size</label>
+            <input
+              type="range"
+              min={8}
+              max={32}
+              value={size}
+              onChange={(e) => setSize(Number(e.target.value))}
+              style={{ flex: 1 }}
+            />
+            <input
+              type="number"
+              min={6}
+              max={72}
+              value={size}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (n > 0) setSize(n);
+              }}
+              style={{ ...inputStyle, width: 52, flex: "none", textAlign: "center" }}
+            />
+          </div>
+          <span style={{ fontSize: size, fontFamily: family || DEFAULT_FONT, opacity: 0.6 }}>
+            The quick brown fox
           </span>
           <button
             type="submit"
@@ -65,7 +92,6 @@ export function FontOverlay({
               alignSelf: "flex-end",
               padding: "4px 12px",
               border: "1px solid rgba(128,128,128,0.3)",
-
             }}
           >
             Apply

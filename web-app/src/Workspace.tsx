@@ -80,14 +80,28 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
   // LRU order: most recently focused PTY first.
   const lruRef = useRef<number[]>([]);
 
+  // Sync focused PTY to URL hash and LRU.
   useEffect(() => {
     store.setLead(sessions.focusedPtyId);
     if (sessions.focusedPtyId !== null) {
       const lru = lruRef.current.filter((id) => id !== sessions.focusedPtyId);
       lru.unshift(sessions.focusedPtyId);
       lruRef.current = lru;
+      history.replaceState(null, "", `#${sessions.focusedPtyId}`);
     }
   }, [store, sessions.focusedPtyId]);
+
+  // On first LIST, focus the PTY from the URL hash if it exists.
+  const restoredHashRef = useRef(false);
+  useEffect(() => {
+    if (restoredHashRef.current || !sessions.ready) return;
+    restoredHashRef.current = true;
+    const hash = location.hash.substring(1);
+    const id = parseInt(hash, 10);
+    if (id >= 0 && sessions.sessions.some((s) => s.ptyId === id && s.state !== "closed")) {
+      sessions.focusPty(id);
+    }
+  }, [sessions.ready, sessions.sessions, sessions.focusPty]);
 
   useEffect(() => {
     const desired = new Set<number>();

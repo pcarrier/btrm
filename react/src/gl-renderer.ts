@@ -158,6 +158,16 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
   const glyphResLoc = gl.getUniformLocation(glyphProgram, "u_resolution");
   const glyphTexLoc = gl.getUniformLocation(glyphProgram, "u_texture");
 
+  const maxDim = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number || 4096;
+
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    console.warn("blit: WebGL context lost");
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    console.warn("blit: WebGL context restored");
+  });
+
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.CULL_FACE);
   gl.enable(gl.BLEND);
@@ -365,8 +375,10 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
   return {
     supported: true,
     resize(width: number, height: number) {
-      if (canvas.width !== width) canvas.width = width;
-      if (canvas.height !== height) canvas.height = height;
+      const w = Math.min(width, maxDim);
+      const h = Math.min(height, maxDim);
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
     },
     render(
       bgOps: Uint32Array,
@@ -380,6 +392,7 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
       cell: CellMetrics,
       bgColor: [number, number, number],
     ) {
+      if (gl!.isContextLost()) return;
       gl!.viewport(0, 0, canvas.width, canvas.height);
       gl!.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
       gl!.clear(gl!.COLOR_BUFFER_BIT);

@@ -121,13 +121,9 @@ pub struct FrameState {
     line_flags: Vec<u8>,
 }
 
-const MAX_FRAME_ROWS: u16 = 500;
-const MAX_FRAME_COLS: u16 = 500;
 
 impl FrameState {
     pub fn new(rows: u16, cols: u16) -> Self {
-        let rows = rows.min(MAX_FRAME_ROWS);
-        let cols = cols.min(MAX_FRAME_COLS);
         let total = rows as usize * cols as usize;
         Self {
             rows,
@@ -249,8 +245,6 @@ impl FrameState {
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {
-        let rows = rows.min(MAX_FRAME_ROWS);
-        let cols = cols.min(MAX_FRAME_COLS);
         if rows == self.rows && cols == self.cols {
             return;
         }

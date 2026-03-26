@@ -631,7 +631,9 @@ CTRL
           buildInputs = [
             rustToolchain
             pkgs.binaryen
+            pkgs.cargo-flamegraph
             pkgs.cargo-llvm-cov
+            pkgs.samply
             pkgs.cargo-watch
             pkgs.nodejs
             pkgs.pkgsStatic.stdenv.cc
@@ -649,6 +651,7 @@ CTRL
             echo "  run server:         cargo run -p blit-server"
             echo "  run gateway:        BLIT_PASS=secret cargo run -p blit-gateway  # http://localhost:3264"
             echo "  run cli:            cargo run -p blit-cli"
+            echo "  flamegraph:         flamegraph -- target/release/blit-server"
           '';
         };
       }

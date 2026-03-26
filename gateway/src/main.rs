@@ -154,7 +154,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     for (x, y) in a.iter().zip(b.iter()) {
         diff |= x ^ y;
     }
-    diff == 0
+    std::hint::black_box(diff) == 0
 }
 
 async fn handle_ws(mut ws: WebSocket, state: AppState) {

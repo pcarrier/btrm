@@ -315,7 +315,7 @@ impl FrameState {
             }
             let width = self.set_cell(row, cur_col, ch, style);
             if width == 0 {
-                break;
+                continue;
             }
             cur_col = cur_col.saturating_add(width);
         }

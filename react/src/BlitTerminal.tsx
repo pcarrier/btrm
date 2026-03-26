@@ -878,7 +878,9 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
           }
           clearSelection();
         }
-        inputRef.current?.focus();
+        if (canvas.contains(e.target as Node)) {
+          inputRef.current?.focus();
+        }
       };
 
       const handleWheel = (e: WheelEvent) => {

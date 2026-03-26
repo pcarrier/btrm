@@ -1756,23 +1756,30 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
         if let Some(c) = sess.clients.get(&client_id) {
             let _ = c.tx.try_send(msg_hello(1, FEATURE_CREATE_NONCE));
         }
-        let list = sess.pty_list_msg();
-        if let Some(c) = sess.clients.get(&client_id) {
-            let _ = c.tx.try_send(list);
-            for (&id, pty) in &sess.ptys {
-                let title = pty.driver.title();
-                if !title.is_empty() {
-                    let title_bytes = title.as_bytes();
-                    let mut msg = Vec::with_capacity(3 + title_bytes.len());
-                    msg.push(S2C_TITLE);
-                    msg.extend_from_slice(&id.to_le_bytes());
-                    msg.extend_from_slice(title_bytes);
-                    let _ = c.tx.try_send(msg);
-                }
-                if pty.exited {
-                    let mut msg = vec![S2C_EXITED];
-                    msg.extend_from_slice(&id.to_le_bytes());
-                    let _ = c.tx.try_send(msg);
+        let mut initial_msgs = Vec::new();
+        initial_msgs.push(sess.pty_list_msg());
+        for (&id, pty) in &sess.ptys {
+            let title = pty.driver.title();
+            if !title.is_empty() {
+                let title_bytes = title.as_bytes();
+                let mut msg = Vec::with_capacity(3 + title_bytes.len());
+                msg.push(S2C_TITLE);
+                msg.extend_from_slice(&id.to_le_bytes());
+                msg.extend_from_slice(title_bytes);
+                initial_msgs.push(msg);
+            }
+            if pty.exited {
+                let mut msg = vec![S2C_EXITED];
+                msg.extend_from_slice(&id.to_le_bytes());
+                initial_msgs.push(msg);
+            }
+        }
+        let tx = sess.clients.get(&client_id).map(|c| c.tx.clone());
+        drop(sess);
+        if let Some(tx) = tx {
+            for msg in initial_msgs {
+                if tx.send(msg).await.is_err() {
+                    break;
                 }
             }
         }

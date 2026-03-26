@@ -27,6 +27,23 @@ struct Config {
     socket_path: String,
 }
 
+fn pty_write_all(fd: libc::c_int, mut data: &[u8]) {
+    while !data.is_empty() {
+        let ret = unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
+        if ret > 0 {
+            data = &data[ret as usize..];
+        } else if ret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            break;
+        } else {
+            break;
+        }
+    }
+}
+
 struct OwnedFd(RawFd);
 impl AsRawFd for OwnedFd {
     fn as_raw_fd(&self) -> RawFd {
@@ -1105,9 +1122,7 @@ fn respond_to_queries(fd: libc::c_int, data: &[u8], size: (u16, u16), cursor: (u
             _ => None,
         };
         if let Some(r) = resp {
-            unsafe {
-                libc::write(fd, r.as_ptr().cast(), r.len());
-            }
+            pty_write_all(fd, r.as_bytes());
         }
     }
 }
@@ -1210,6 +1225,7 @@ async fn cleanup_pty(pty_id: u16, state: &AppState) {
         unsafe {
             libc::kill(pty.child_pid, libc::SIGHUP);
             libc::close(pty.master_fd);
+            libc::waitpid(pty.child_pid, std::ptr::null_mut(), libc::WNOHANG);
         }
         pty.dirty = true;
         // Broadcast S2C_EXITED — PTY stays in the list, clients can still read it.
@@ -1434,6 +1450,15 @@ async fn main() {
         }
     });
 
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            unsafe {
+                while libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) > 0 {}
+            }
+        }
+    });
+
     // systemd socket activation: if LISTEN_FDS is set, use fd 3.
     // LISTEN_PID is checked but not required to match — some container runtimes
     // and service managers don't set it to the final process PID.
@@ -1453,7 +1478,14 @@ async fn main() {
     };
 
     loop {
-        let (stream, _) = listener.accept().await.unwrap();
+        let (stream, _) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("accept error: {e}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
         let state = state.clone();
         tokio::spawn(handle_client(stream, state));
     }
@@ -1948,9 +1980,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 nudge_delivery(&state);
             }
             if let Some(&fd) = state.2.read().unwrap().get(&pid) {
-                unsafe {
-                    libc::write(fd, data[3..].as_ptr().cast(), data.len() - 3);
-                }
+                pty_write_all(fd, &data[3..]);
             }
             continue;
         }

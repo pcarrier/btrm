@@ -266,7 +266,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.7.1";
+        version = "0.7.2";
 
         weztermHash = "sha256-V6WvkNZryYofarsyfcmsuvtpNJ/c3O+DmOKNvoYPbmA=";
         finlUnicodeHash = "sha256-38S6XH4hldbkb6NP+s7lXa/NR49PI0w3KYqd+jPHND0=";

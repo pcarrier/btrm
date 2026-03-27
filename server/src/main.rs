@@ -90,12 +90,14 @@ impl PtyDriver for WeztermDriver {
     }
 
     fn search_result(&self, query: &str) -> Option<PtySearchResult> {
-        WeztermDriver::search_result(self, query).map(|result: WeztermSearchResult| PtySearchResult {
-            score: result.score,
-            primary_source: result.primary_source as u8,
-            matched_sources: result.matched_sources,
-            context: result.context,
-            scroll_offset: result.scroll_offset,
+        WeztermDriver::search_result(self, query).map(|result: WeztermSearchResult| {
+            PtySearchResult {
+                score: result.score,
+                primary_source: result.primary_source as u8,
+                matched_sources: result.matched_sources,
+                context: result.context,
+                scroll_offset: result.scroll_offset,
+            }
         })
     }
 
@@ -132,7 +134,6 @@ const OUTBOX_SOFT_QUEUE_LIMIT_FRAMES: usize = 2;
 const PTY_READ_DRAIN_MAX_BYTES: usize = 256 * 1024;
 const PREVIEW_FPS_CAP: f32 = 30.0;
 const PREVIEW_FRAME_RESERVE: usize = 1;
-const LOCAL_FAST_PATH_MIN_WINDOW_FRAMES: usize = 8;
 /// Maximum time to defer a snapshot when the kernel PTY buffer has
 /// unread data.  Prevents starvation under continuous output (e.g.
 /// cat /dev/random) where the buffer never empties.
@@ -273,38 +274,9 @@ fn display_need_bps(client: &ClientState) -> f32 {
     client.avg_paced_frame_bytes.max(256.0) * client.display_fps.max(1.0)
 }
 
-fn fast_path_bandwidth_ready(client: &ClientState) -> bool {
-    let need_bps = display_need_bps(client);
-    let observed_bps = client
-        .goodput_bps
-        .max(client.delivery_bps)
-        .max(client.last_goodput_sample_bps);
-    observed_bps >= need_bps * 0.9
-}
-
-fn local_fast_path(client: &ClientState) -> bool {
-    path_rtt_ms(client) <= 2.0
-        && client.rtt_ms <= 12.0
-        && client.browser_backlog_frames <= 2
-        && client.browser_ack_ahead_frames <= 1
-        && client.browser_apply_ms <= 1.0
-        && fast_path_bandwidth_ready(client)
-}
-
-fn cadence_fps(client: &ClientState) -> f32 {
-    if local_fast_path(client) {
-        client.display_fps.max(1.0)
-    } else {
-        browser_pacing_fps(client)
-    }
-}
-
 fn effective_rtt_ms(client: &ClientState) -> f32 {
     let path_rtt = path_rtt_ms(client);
-    if local_fast_path(client) {
-        return path_rtt;
-    }
-    let frame_ms = 1_000.0 / cadence_fps(client).max(1.0);
+    let frame_ms = 1_000.0 / browser_pacing_fps(client).max(1.0);
     let queue_allowance = frame_ms
         * if throughput_limited(client) {
             4.0
@@ -316,38 +288,30 @@ fn effective_rtt_ms(client: &ClientState) -> f32 {
 
 fn window_rtt_ms(client: &ClientState) -> f32 {
     let effective = effective_rtt_ms(client);
-    if local_fast_path(client) || !throughput_limited(client) {
+    if !throughput_limited(client) {
         effective
     } else {
         client.rtt_ms.clamp(effective, effective * 2.0)
     }
 }
 
-fn window_fps(client: &ClientState) -> f32 {
-    if throughput_limited(client) {
+fn target_frame_window(client: &ClientState) -> usize {
+    let window_fps = if throughput_limited(client) {
         pacing_fps(client)
     } else {
-        cadence_fps(client)
-    }
-}
-
-fn target_frame_window(client: &ClientState) -> usize {
-    let frames = frame_window(window_rtt_ms(client), window_fps(client))
-        .saturating_add(client.probe_frames.round().max(0.0) as usize);
-    if local_fast_path(client) {
-        frames.max(LOCAL_FAST_PATH_MIN_WINDOW_FRAMES)
-    } else {
-        frames
-    }
+        browser_pacing_fps(client)
+    };
+    frame_window(window_rtt_ms(client), window_fps)
+        .saturating_add(client.probe_frames.round().max(0.0) as usize)
 }
 
 fn base_queue_ms(client: &ClientState) -> f32 {
-    let frame_ms = 1_000.0 / cadence_fps(client).max(1.0);
+    let frame_ms = 1_000.0 / browser_pacing_fps(client).max(1.0);
     frame_ms * if throughput_limited(client) { 2.0 } else { 8.0 }
 }
 
 fn target_queue_ms(client: &ClientState) -> f32 {
-    let frame_ms = 1_000.0 / cadence_fps(client).max(1.0);
+    let frame_ms = 1_000.0 / browser_pacing_fps(client).max(1.0);
     let probe_scale = if throughput_limited(client) {
         0.25
     } else {
@@ -384,13 +348,10 @@ fn bandwidth_floor_bps(client: &ClientState) -> f32 {
 }
 
 fn pacing_fps(client: &ClientState) -> f32 {
-    if local_fast_path(client) {
-        return client.display_fps.max(1.0);
-    }
     let frame_bytes = client.avg_paced_frame_bytes.max(256.0);
     let sustainable = bandwidth_floor_bps(client) / frame_bytes;
     sustainable
-        .min(cadence_fps(client))
+        .min(browser_pacing_fps(client))
         .clamp(1.0, client.display_fps.max(1.0))
 }
 
@@ -399,7 +360,7 @@ fn throughput_limited(client: &ClientState) -> bool {
     // Consider total demand: lead at cadence rate plus previews at their cap.
     // The old check (pacing_fps < cadence * 0.9) only saw lead bandwidth,
     // which is often tiny, so previews could starve the lead undetected.
-    let lead_bps = client.avg_paced_frame_bytes.max(256.0) * cadence_fps(client);
+    let lead_bps = client.avg_paced_frame_bytes.max(256.0) * browser_pacing_fps(client);
     let preview_bps = client.avg_preview_frame_bytes.max(256.0)
         * client.display_fps.min(PREVIEW_FPS_CAP).max(1.0);
     (lead_bps + preview_bps) > floor * 0.9
@@ -459,17 +420,17 @@ fn target_byte_window(client: &ClientState) -> usize {
 }
 
 fn send_interval(client: &ClientState) -> Duration {
-    Duration::from_secs_f64(1.0 / cadence_fps(client).max(1.0) as f64)
+    Duration::from_secs_f64(1.0 / browser_pacing_fps(client).max(1.0) as f64)
 }
 
 fn preview_fps(client: &ClientState) -> f32 {
     let mut fps = client.display_fps.min(PREVIEW_FPS_CAP).max(1.0);
-    if client.lead.is_some() && !local_fast_path(client) {
+    if client.lead.is_some() {
         // Always budget preview bandwidth: available minus lead's share.
         // Without this, large preview frames (e.g. 12 KB) at 30 fps consume
         // 360 KB/s, starving the lead even when lead frames are tiny.
         let avail = bandwidth_floor_bps(client);
-        let lead_bps = client.avg_paced_frame_bytes.max(256.0) * cadence_fps(client);
+        let lead_bps = client.avg_paced_frame_bytes.max(256.0) * browser_pacing_fps(client);
         let preview_budget = (avail - lead_bps).max(avail * 0.25).max(0.0);
         let bw_cap = preview_budget / client.avg_preview_frame_bytes.max(256.0);
         fps = fps.min(bw_cap.max(1.0));
@@ -499,7 +460,7 @@ fn preview_deadline(client: &ClientState, pid: u16, now: Instant) -> Instant {
 }
 
 fn client_has_due_preview(sess: &Session, client: &ClientState, now: Instant) -> bool {
-    if client.lead.is_none() || local_fast_path(client) {
+    if client.lead.is_none() {
         return false;
     }
     client.subscriptions.iter().copied().any(|pid| {
@@ -517,12 +478,8 @@ fn outbox_backpressured(client: &ClientState) -> bool {
     outbox_queued_frames(client) >= OUTBOX_SOFT_QUEUE_LIMIT_FRAMES
 }
 
-fn preview_window_open(client: &ClientState) -> bool {
-    window_open(client)
-}
-
 fn can_send_preview(client: &ClientState, pid: u16, now: Instant) -> bool {
-    preview_window_open(client) && now >= preview_deadline(client, pid, now)
+    window_open(client) && now >= preview_deadline(client, pid, now)
 }
 
 fn record_preview_send(client: &mut ClientState, pid: u16, now: Instant) {
@@ -543,7 +500,7 @@ fn window_open(client: &ClientState) -> bool {
 }
 
 fn lead_window_open(client: &ClientState, reserve_preview_slot: bool) -> bool {
-    if !reserve_preview_slot || client.lead.is_none() || local_fast_path(client) {
+    if !reserve_preview_slot || client.lead.is_none() {
         return window_open(client);
     }
     if browser_backlog_blocked(client) || outbox_backpressured(client) {
@@ -619,7 +576,7 @@ fn record_ack(client: &mut ClientState) {
                 0.125,
             );
         }
-        let frame_ms = 1_000.0 / cadence_fps(client).max(1.0);
+        let frame_ms = 1_000.0 / browser_pacing_fps(client).max(1.0);
         let path_rtt = path_rtt_ms(client);
         let likely_window_limited =
             window_saturated(client, prev_inflight_frames, prev_inflight_bytes);
@@ -646,12 +603,8 @@ fn record_ack(client: &mut ClientState) {
                 // bandwidth_floor_bps and causes pacing to stall.
                 let min_reliable = (client.avg_paced_frame_bytes.max(256.0) * 2.0) as usize;
                 if client.goodput_window_bytes >= min_reliable {
-                    client.goodput_jitter_bps = ewma_with_direction(
-                        client.goodput_jitter_bps,
-                        jitter_sample,
-                        0.5,
-                        0.125,
-                    );
+                    client.goodput_jitter_bps =
+                        ewma_with_direction(client.goodput_jitter_bps, jitter_sample, 0.5, 0.125);
                     client.max_goodput_jitter_bps =
                         (client.max_goodput_jitter_bps * 0.98).max(jitter_sample);
                     // Cap jitter at 45% of goodput so jitter_ratio can never
@@ -698,7 +651,7 @@ fn record_ack(client: &mut ClientState) {
             path_rtt
         };
         let queue_delay_ms = (sample_ms - queue_baseline_ms).max(0.0);
-        let max_probe_frames = (cadence_fps(client) * 0.125).max(4.0);
+        let max_probe_frames = (browser_pacing_fps(client) * 0.125).max(4.0);
         let jitter_ratio = client.max_goodput_jitter_bps / client.goodput_bps.max(1.0);
         let low_delay_frames = if throughput_limited(client) { 2.0 } else { 8.0 };
         let high_delay_frames = if throughput_limited(client) {
@@ -929,7 +882,8 @@ fn pty_cwd(pid: libc::pid_t) -> Option<String> {
             return None;
         }
         let info = unsafe { &*(buf.as_ptr() as *const libc::proc_vnodepathinfo) };
-        let cstr = unsafe { CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const libc::c_char) };
+        let cstr =
+            unsafe { CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const libc::c_char) };
         cstr.to_str().ok().map(|s| s.to_owned())
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -999,7 +953,9 @@ fn spawn_pty(
         let effective_dir = dir.map(String::from);
         if let Some(d) = effective_dir {
             if let Ok(dir_c) = CString::new(d) {
-                unsafe { libc::chdir(dir_c.as_ptr()); }
+                unsafe {
+                    libc::chdir(dir_c.as_ptr());
+                }
             }
         }
         std::env::set_var("TERM", "xterm-256color");
@@ -1448,9 +1404,7 @@ async fn main() {
     tokio::spawn(async {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
-            unsafe {
-                while libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) > 0 {}
-            }
+            unsafe { while libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) > 0 {} }
         }
     });
 
@@ -1496,7 +1450,7 @@ async fn tick(state: &AppState) -> TickOutcome {
     let max_fps = sess
         .clients
         .values()
-        .map(|c| cadence_fps(c))
+        .map(browser_pacing_fps)
         .fold(1.0_f32, f32::max);
     let title_interval = Duration::from_secs_f64(1.0 / max_fps as f64);
     let ids: Vec<u16> = sess.ptys.keys().copied().collect();
@@ -1551,7 +1505,8 @@ async fn tick(state: &AppState) -> TickOutcome {
         // priority over pending-data checks since the app is explicitly
         // telling us the screen is incomplete.
         if pty.driver.synced_output() {
-            let sync_capped = pty.dirty_since
+            let sync_capped = pty
+                .dirty_since
                 .map(|since| since + SNAPSHOT_SYNC_DEFER <= now)
                 .unwrap_or(false);
             if !sync_capped {
@@ -1563,7 +1518,8 @@ async fn tick(state: &AppState) -> TickOutcome {
         // Cap the defer so continuous output (cat /dev/random) still gets
         // periodic snapshots.
         if !pty.exited && pty_has_pending_data(pty.master_fd) {
-            let capped = pty.dirty_since
+            let capped = pty
+                .dirty_since
                 .map(|since| since + SNAPSHOT_PENDING_CAP <= now)
                 .unwrap_or(false);
             if !capped {
@@ -1606,7 +1562,7 @@ async fn tick(state: &AppState) -> TickOutcome {
                 c.scroll_offset,
                 can_send_frame(c, now, reserve_preview_slot),
                 lead_window_open(c, reserve_preview_slot),
-                lead_window_open(c, reserve_preview_slot) || preview_window_open(c),
+                lead_window_open(c, reserve_preview_slot) || window_open(c),
                 c.next_send_at,
             )
         };
@@ -1695,7 +1651,7 @@ async fn tick(state: &AppState) -> TickOutcome {
                     Some(c) => (
                         can_send_preview(c, pid, now),
                         preview_deadline(c, pid, now),
-                        preview_window_open(c),
+                        window_open(c),
                     ),
                     None => (false, now, false),
                 };
@@ -1775,7 +1731,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 min_rtt_ms: 0.0,
                 display_fps: 60.0,
                 // Conservative seed — the rise alpha (0.5) converges up to
-                // multi-MB/s in a handful of samples on fast paths. Starting
+                // multi-MB/s in a handful of samples on low-latency paths. Starting
                 // high causes catastrophic bufferbloat on slow links because
                 // target_byte_window scales with the goodput estimate.
                 delivery_bps: 262_144.0,
@@ -1984,14 +1940,16 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 sess.ptys
                     .iter()
                     .filter_map(|(&pty_id, pty)| {
-                        pty.driver.search_result(query).map(|result| SearchResultRow {
-                            pty_id,
-                            score: result.score,
-                            primary_source: result.primary_source,
-                            matched_sources: result.matched_sources,
-                            context: result.context,
-                            scroll_offset: result.scroll_offset,
-                        })
+                        pty.driver
+                            .search_result(query)
+                            .map(|result| SearchResultRow {
+                                pty_id,
+                                score: result.score,
+                                primary_source: result.primary_source,
+                                matched_sources: result.matched_sources,
+                                context: result.context,
+                                scroll_offset: result.scroll_offset,
+                            })
                     })
                     .collect()
             };
@@ -2077,7 +2035,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                             .collect::<Vec<_>>()
                     })
                     .filter(|args| !args.is_empty());
-                let Some(id) = sess.allocate_pty_id() else { continue; };
+                let Some(id) = sess.allocate_pty_id() else {
+                    continue;
+                };
                 if let Some(pty) = spawn_pty(
                     &config.shell,
                     rows,
@@ -2149,7 +2109,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                             .collect::<Vec<_>>()
                     })
                     .filter(|args| !args.is_empty());
-                let Some(id) = sess.allocate_pty_id() else { continue; };
+                let Some(id) = sess.allocate_pty_id() else {
+                    continue;
+                };
                 if let Some(pty) = spawn_pty(
                     &config.shell,
                     rows,
@@ -2216,7 +2178,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 } else {
                     None
                 };
-                let Some(id) = sess.allocate_pty_id() else { continue; };
+                let Some(id) = sess.allocate_pty_id() else {
+                    continue;
+                };
                 if let Some(pty) = spawn_pty(
                     &config.shell,
                     rows,
@@ -2247,7 +2211,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             }
             C2S_CREATE2 => {
                 // Generic create: [0x18][nonce:2][rows:2][cols:2][features:1][tag_len:2][tag:N][...fields]
-                if data.len() < 10 { continue; }
+                if data.len() < 10 {
+                    continue;
+                }
                 let nonce = u16::from_le_bytes([data[1], data[2]]);
                 let rows = u16::from_le_bytes([data[3], data[4]]);
                 let cols = u16::from_le_bytes([data[5], data[6]]);
@@ -2279,10 +2245,20 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     .filter(|p| p.contains('\0'))
                     .map(|p| p.split('\0').filter(|a| !a.is_empty()).collect::<Vec<_>>())
                     .filter(|a| !a.is_empty());
-                let Some(id) = sess.allocate_pty_id() else { continue; };
+                let Some(id) = sess.allocate_pty_id() else {
+                    continue;
+                };
                 if let Some(pty) = spawn_pty(
-                    &config.shell, rows, cols, id, tag, command, argv.as_deref(),
-                    dir.as_deref(), config.scrollback, state.clone(),
+                    &config.shell,
+                    rows,
+                    cols,
+                    id,
+                    tag,
+                    command,
+                    argv.as_deref(),
+                    dir.as_deref(),
+                    config.scrollback,
+                    state.clone(),
                 ) {
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
@@ -2498,7 +2474,7 @@ mod tests {
         assert!(window_open(&client));
         assert!(lead_window_open(&client, false));
         assert!(!lead_window_open(&client, true));
-        assert!(preview_window_open(&client));
+        assert!(can_send_preview(&client, 2, Instant::now()));
     }
 
     #[test]
@@ -2666,43 +2642,10 @@ mod tests {
         assert!(!outbox_backpressured(&client));
     }
 
-    // ── local_fast_path ──
+    // ── browser_pacing_fps baseline ──
 
     #[test]
-    fn local_fast_path_true_for_low_latency() {
-        let mut client = test_client();
-        client.rtt_ms = 1.0;
-        client.min_rtt_ms = 1.0;
-        client.browser_backlog_frames = 0;
-        client.browser_ack_ahead_frames = 0;
-        client.browser_apply_ms = 0.0;
-        // Need high goodput for bandwidth check
-        client.goodput_bps = 1_000_000.0;
-        client.delivery_bps = 1_000_000.0;
-        assert!(local_fast_path(&client));
-    }
-
-    #[test]
-    fn local_fast_path_false_for_high_rtt() {
-        let mut client = test_client();
-        client.rtt_ms = 50.0;
-        client.min_rtt_ms = 50.0;
-        assert!(!local_fast_path(&client));
-    }
-
-    #[test]
-    fn local_fast_path_false_for_high_backlog() {
-        let mut client = test_client();
-        client.rtt_ms = 1.0;
-        client.min_rtt_ms = 1.0;
-        client.browser_backlog_frames = 10;
-        assert!(!local_fast_path(&client));
-    }
-
-    // ── cadence_fps ──
-
-    #[test]
-    fn cadence_fps_returns_display_fps_on_fast_path() {
+    fn browser_pacing_fps_matches_display_fps_when_browser_ready() {
         let mut client = test_client();
         client.rtt_ms = 1.0;
         client.min_rtt_ms = 1.0;
@@ -2712,21 +2655,22 @@ mod tests {
         client.goodput_bps = 1_000_000.0;
         client.delivery_bps = 1_000_000.0;
         client.display_fps = 144.0;
-        assert!((cadence_fps(&client) - 144.0).abs() < 0.01);
+        assert!((browser_pacing_fps(&client) - 144.0).abs() < 0.01);
     }
 
     #[test]
-    fn cadence_fps_uses_browser_pacing_off_fast_path() {
-        let client = test_client(); // default RTT=50ms, not fast path
-        let fps = cadence_fps(&client);
+    fn browser_pacing_fps_drops_below_display_fps_when_backlogged() {
+        let mut client = test_client();
+        client.browser_backlog_frames = 20;
+        let fps = browser_pacing_fps(&client);
         assert!(fps >= 1.0);
-        assert!(fps <= client.display_fps);
+        assert!(fps < client.display_fps);
     }
 
     // ── effective_rtt_ms ──
 
     #[test]
-    fn effective_rtt_ms_equals_path_on_fast_path() {
+    fn effective_rtt_ms_equals_path_when_queue_is_empty() {
         let mut client = test_client();
         client.rtt_ms = 1.0;
         client.min_rtt_ms = 1.0;
@@ -2750,19 +2694,6 @@ mod tests {
     fn target_frame_window_at_least_two() {
         let client = test_client();
         assert!(target_frame_window(&client) >= 2);
-    }
-
-    #[test]
-    fn target_frame_window_min_on_fast_path() {
-        let mut client = test_client();
-        client.rtt_ms = 1.0;
-        client.min_rtt_ms = 1.0;
-        client.browser_backlog_frames = 0;
-        client.browser_ack_ahead_frames = 0;
-        client.browser_apply_ms = 0.0;
-        client.goodput_bps = 1_000_000.0;
-        client.delivery_bps = 1_000_000.0;
-        assert!(target_frame_window(&client) >= LOCAL_FAST_PATH_MIN_WINDOW_FRAMES);
     }
 
     #[test]
@@ -2808,7 +2739,7 @@ mod tests {
     }
 
     #[test]
-    fn pacing_fps_equals_display_fps_on_fast_path() {
+    fn pacing_fps_reaches_display_fps_when_not_bandwidth_limited() {
         let mut client = test_client();
         client.rtt_ms = 1.0;
         client.min_rtt_ms = 1.0;
@@ -2933,10 +2864,10 @@ mod tests {
     // ── send_interval ──
 
     #[test]
-    fn send_interval_matches_cadence() {
+    fn send_interval_matches_browser_pacing() {
         let client = test_client();
         let interval = send_interval(&client);
-        let expected = Duration::from_secs_f64(1.0 / cadence_fps(&client) as f64);
+        let expected = Duration::from_secs_f64(1.0 / browser_pacing_fps(&client) as f64);
         let diff = if interval > expected {
             interval - expected
         } else {
@@ -3182,26 +3113,15 @@ mod tests {
         assert!(msg_str.contains("build"));
     }
 
-    // ── preview_window_open / can_send_preview / record_preview_send ──
-
-    #[test]
-    fn preview_window_open_delegates_to_window_open() {
-        let client = test_client();
-        assert_eq!(preview_window_open(&client), window_open(&client));
-    }
-
-    #[test]
-    fn preview_window_open_false_when_blocked() {
-        let mut client = test_client();
-        client.browser_backlog_frames = 20;
-        assert!(!preview_window_open(&client));
-    }
+    // ── can_send_preview / record_preview_send ──
 
     #[test]
     fn can_send_preview_true_when_due() {
         let mut client = test_client();
         let now = Instant::now();
-        client.preview_next_send_at.insert(5, now - Duration::from_millis(100));
+        client
+            .preview_next_send_at
+            .insert(5, now - Duration::from_millis(100));
         assert!(can_send_preview(&client, 5, now));
     }
 
@@ -3209,7 +3129,9 @@ mod tests {
     fn can_send_preview_false_when_not_due() {
         let mut client = test_client();
         let now = Instant::now();
-        client.preview_next_send_at.insert(5, now + Duration::from_secs(10));
+        client
+            .preview_next_send_at
+            .insert(5, now + Duration::from_secs(10));
         assert!(!can_send_preview(&client, 5, now));
     }
 
@@ -3252,16 +3174,17 @@ mod tests {
     // ── congestion control end-to-end properties ──
     //
     // These tests encode the two goals of the congestion controller:
-    //   1. Fast pipe  → full display FPS, minimal added latency
-    //   2. Bottleneck → lowest sustainable FPS, fast recovery when pipe clears
+    //   1. Browser-ready, well-provisioned path → full display FPS, minimal added latency
+    //   2. Bottleneck                           → lowest sustainable FPS, fast recovery when pipe clears
     //
     // Some tests assert desired future behaviour and currently FAIL due to
     // known issues (min_rtt contamination, lead_floor dominating byte window).
     // They are marked with a comment so they are easy to find when fixing.
 
-    /// Return a client in ideal fast-pipe conditions: sub-2ms RTT, abundant
-    /// bandwidth.  The local fast-path should fire and pacing_fps = display_fps.
-    fn fast_pipe_client() -> ClientState {
+    /// Return a client in ideal low-latency, high-bandwidth conditions:
+    /// browser ready, abundant bandwidth, and tiny RTT. The normal pacing path
+    /// should still reach display_fps.
+    fn browser_ready_high_bandwidth_client() -> ClientState {
         let mut c = test_client();
         c.display_fps = 120.0;
         c.rtt_ms = 1.0;
@@ -3307,8 +3230,7 @@ mod tests {
             paced: true,
         });
         // Age the goodput window so record_ack always emits a sample.
-        client.goodput_window_start =
-            Instant::now() - Duration::from_millis(25);
+        client.goodput_window_start = Instant::now() - Duration::from_millis(25);
         record_ack(client);
     }
 
@@ -3318,42 +3240,27 @@ mod tests {
         }
     }
 
-    // ── property: full FPS on a fast pipe ──
+    // ── property: full FPS on a browser-ready path ──
 
     #[test]
-    fn fast_pipe_uses_full_display_fps() {
-        let client = fast_pipe_client();
-        assert!(
-            local_fast_path(&client),
-            "expected local_fast_path for sub-2ms, high-bandwidth client"
-        );
+    fn browser_ready_high_bandwidth_client_uses_full_display_fps() {
+        let client = browser_ready_high_bandwidth_client();
         assert!(
             (pacing_fps(&client) - client.display_fps).abs() < 0.01,
-            "pacing_fps {} should equal display_fps {} on fast pipe",
+            "pacing_fps {} should equal display_fps {} when browser is ready and bandwidth is abundant",
             pacing_fps(&client),
             client.display_fps,
         );
     }
 
     #[test]
-    fn fast_pipe_send_interval_within_one_frame() {
-        let client = fast_pipe_client();
+    fn browser_ready_high_bandwidth_client_send_interval_within_one_frame() {
+        let client = browser_ready_high_bandwidth_client();
         let interval_ms = send_interval(&client).as_secs_f32() * 1000.0;
         let frame_ms = 1000.0 / client.display_fps;
         assert!(
             interval_ms <= frame_ms + 0.1,
-            "send_interval {interval_ms:.2}ms exceeds one frame ({frame_ms:.2}ms) on fast pipe"
-        );
-    }
-
-    #[test]
-    fn fast_pipe_window_stays_open_under_normal_load() {
-        let mut client = fast_pipe_client();
-        // A handful of frames in flight should not close the window.
-        fill_inflight(&mut client, 4, 30_000);
-        assert!(
-            window_open(&client),
-            "window should remain open with light inflight on a fast pipe"
+            "send_interval {interval_ms:.2}ms exceeds one frame ({frame_ms:.2}ms) when browser is ready"
         );
     }
 
@@ -3659,29 +3566,18 @@ mod tests {
         );
     }
 
-    // ── property: fast-path requires both low RTT and sufficient bandwidth ──
+    // ── property: preview reservation applies uniformly ──
 
     #[test]
-    fn fast_path_blocked_by_high_rtt() {
-        let mut client = fast_pipe_client();
-        client.rtt_ms = 50.0;
-        client.min_rtt_ms = 50.0;
+    fn preview_reservation_applies_even_on_low_latency_high_bandwidth_links() {
+        let mut client = browser_ready_high_bandwidth_client();
+        client.lead = Some(1);
+        client.subscriptions.insert(1);
+        let target = target_frame_window(&client);
+        fill_inflight(&mut client, target.saturating_sub(1), 512);
         assert!(
-            !local_fast_path(&client),
-            "fast path must not fire when rtt_ms=50ms"
-        );
-    }
-
-    #[test]
-    fn fast_path_blocked_by_insufficient_bandwidth() {
-        let mut client = fast_pipe_client();
-        // Drop goodput below what's needed to sustain display_fps.
-        client.goodput_bps = 100_000.0;
-        client.delivery_bps = 100_000.0;
-        client.last_goodput_sample_bps = 100_000.0;
-        assert!(
-            !local_fast_path(&client),
-            "fast path must not fire when bandwidth is insufficient"
+            !lead_window_open(&client, true),
+            "preview reservation should apply uniformly for lead clients"
         );
     }
 }

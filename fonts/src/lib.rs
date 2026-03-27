@@ -2,6 +2,15 @@ use std::collections::BTreeSet;
 
 pub fn font_dirs() -> Vec<String> {
     let mut dirs = Vec::new();
+    // BLIT_FONT_DIRS: colon-separated list of extra directories to search first
+    if let Ok(extra) = std::env::var("BLIT_FONT_DIRS") {
+        for d in extra.split(':') {
+            let d = d.trim();
+            if !d.is_empty() {
+                dirs.push(d.to_owned());
+            }
+        }
+    }
     if let Some(home) = std::env::var_os("HOME") {
         let home = home.to_string_lossy();
         dirs.push(format!("{home}/Library/Fonts"));

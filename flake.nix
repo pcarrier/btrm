@@ -59,6 +59,12 @@
                     type = types.path;
                     description = "File containing BLIT_PASS=<passphrase>.";
                   };
+                  fontDirs = mkOption {
+                    type = types.listOf types.str;
+                    default = [];
+                    example = [ "/Library/Fonts" "~/Library/Fonts" ];
+                    description = "Extra font directories to search.";
+                  };
                   package = mkOption {
                     type = types.package;
                     default = self.packages.${pkgs.system}.blit-gateway;
@@ -105,6 +111,8 @@
                   EnvironmentVariables = {
                     BLIT_SOCK = cfg.socketPath;
                     BLIT_ADDR = "${gw.addr}:${toString gw.port}";
+                  } // lib.optionalAttrs (gw.fontDirs != []) {
+                    BLIT_FONT_DIRS = lib.concatStringsSep ":" gw.fontDirs;
                   };
                   RunAtLoad = true;
                   KeepAlive = true;
@@ -176,6 +184,12 @@
                     type = types.path;
                     description = "File containing the gateway passphrase.";
                   };
+                  fontDirs = mkOption {
+                    type = types.listOf types.str;
+                    default = [];
+                    example = [ "/usr/share/fonts" "/home/alice/.local/share/fonts" ];
+                    description = "Extra font directories to search.";
+                  };
                   package = mkOption {
                     type = types.package;
                     default = self.packages.${pkgs.system}.blit-gateway;
@@ -216,12 +230,14 @@
                 wantedBy = [ "multi-user.target" ];
                 serviceConfig = {
                   Type = "simple";
+                  User = gw.user;
                   ExecStart = "${gw.package}/bin/blit-gateway";
                   Environment = [
                     "BLIT_SOCK=/run/blit/${gw.user}.sock"
                     "BLIT_ADDR=${gw.addr}:${toString gw.port}"
-                  ];
+                  ] ++ lib.optional (gw.fontDirs != []) "BLIT_FONT_DIRS=${lib.concatStringsSep ":" gw.fontDirs}";
                   EnvironmentFile = gw.passFile;
+                  AmbientCapabilities = lib.mkIf (gw.port < 1024) [ "CAP_NET_BIND_SERVICE" ];
                 };
               };
             }) cfg.gateways);

@@ -81,9 +81,10 @@ async fn main() {
             println!("blit-gateway {} — terminal streaming WebSocket gateway", env!("CARGO_PKG_VERSION"));
             println!();
             println!("All configuration is via environment variables:");
-            println!("  BLIT_PASS    Browser passphrase (required)");
-            println!("  BLIT_ADDR    Listen address (default: 0.0.0.0:3264)");
-            println!("  BLIT_SOCK    Upstream server socket");
+            println!("  BLIT_PASS       Browser passphrase (required)");
+            println!("  BLIT_ADDR       Listen address (default: 0.0.0.0:3264)");
+            println!("  BLIT_SOCK       Upstream server socket");
+            println!("  BLIT_FONT_DIRS  Colon-separated extra font directories");
             std::process::exit(0);
         }
         if arg == "--version" || arg == "-V" {
@@ -159,6 +160,18 @@ async fn font_handler(
 }
 
 async fn root_handler(State(state): State<AppState>, request: axum::extract::Request) -> Response {
+    let path = request.uri().path();
+
+    // Handle font routes at any prefix (e.g. /vt/fonts, /vt/font/Name)
+    if path == "/fonts" || path.ends_with("/fonts") {
+        return fonts_list_handler().await;
+    }
+    if let Some(name) = path.rsplit_once("/font/").map(|(_, n)| n.to_owned()) {
+        if !name.contains('/') && !name.is_empty() {
+            return font_handler(axum::extract::Path(name)).await;
+        }
+    }
+
     let is_ws = request
         .headers()
         .get("upgrade")
@@ -320,6 +333,23 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
         assert!(ct.contains("text/html"));
+    }
+
+    #[tokio::test]
+    async fn prefixed_fonts_returns_json() {
+        let app = test_app();
+        let resp = app
+            .oneshot(
+                axum::extract::Request::builder()
+                    .uri("/vt/fonts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("application/json"), "expected application/json, got {ct}");
     }
 
 }

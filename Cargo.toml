@@ -8,6 +8,7 @@ members = [
     "browser",
     "demo",
     "cli",
+    "fonts",
 ]
 
 [profile.release]

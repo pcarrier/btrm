@@ -125,8 +125,37 @@ async fn main() {
 
 fn build_app(state: AppState) -> axum::Router {
     axum::Router::new()
+        .route("/fonts", get(fonts_list_handler))
+        .route("/font/{name}", get(font_handler))
         .fallback(get(root_handler))
         .with_state(state)
+}
+
+async fn fonts_list_handler() -> Response {
+    let families = blit_fonts::list_font_families();
+    let json = format!("[{}]", families.iter().map(|f| format!("\"{}\"", f.replace('"', "\\\""))).collect::<Vec<_>>().join(","));
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/json"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        json,
+    ).into_response()
+}
+
+async fn font_handler(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Response {
+    match blit_fonts::font_face_css(&name) {
+        Some(css) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "text/css"),
+                (axum::http::header::CACHE_CONTROL, "public, max-age=86400, immutable"),
+            ],
+            css,
+        ).into_response(),
+        None => (axum::http::StatusCode::NOT_FOUND, "font not found").into_response(),
+    }
 }
 
 async fn root_handler(State(state): State<AppState>, request: axum::extract::Request) -> Response {

@@ -11,6 +11,7 @@ import {
   WebSocketTransport,
   TerminalStore,
   DEFAULT_FONT,
+  CSS_GENERIC,
 } from "blit-react";
 import type {
   BlitTerminalHandle,
@@ -35,6 +36,14 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
   const [font, setFont] = useState(preferredFont);
   const [fontSize, setFontSize] = useState(preferredFontSize);
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [serverFonts, setServerFonts] = useState<string[]>([]);
+
+  // Always append fallback so the terminal is usable while custom fonts load.
+  const fontWithFallback = font === DEFAULT_FONT ? font : `${font}, ${DEFAULT_FONT}`;
+
+  useEffect(() => {
+    fetch("/fonts").then((r) => r.ok ? r.json() : []).then(setServerFonts).catch(() => {});
+  }, []);
   const termRef = useRef<BlitTerminalHandle>(null);
   const overlayRef = useRef<Overlay>(null);
   overlayRef.current = overlay;
@@ -80,7 +89,25 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
   }, [store, palette]);
 
   useEffect(() => {
-    store.setFontFamily(font);
+    store.setFontFamily(fontWithFallback);
+    // Try to load custom fonts from the server's system fonts.
+    const families = font.split(",").map((f) => f.trim().replace(/^['"]|['"]$/g, ""));
+    for (const f of families) {
+      if (!f || CSS_GENERIC.has(f.toLowerCase())) continue;
+      const id = `blit-font-${f.replace(/\s+/g, "-").toLowerCase()}`;
+      if (document.getElementById(id)) continue;
+      fetch(`/font/${encodeURIComponent(f)}`).then((res) => {
+        if (!res.ok) return;
+        return res.text().then(async (css) => {
+          if (document.getElementById(id)) return;
+          const style = document.createElement("style");
+          style.id = id;
+          style.textContent = css;
+          document.head.appendChild(style);
+          await document.fonts.ready;
+        });
+      }).catch(() => {});
+    }
   }, [store, font]);
 
   // LRU order: most recently focused PTY first.
@@ -267,13 +294,13 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
   const bg = `rgb(${palette.bg[0]},${palette.bg[1]},${palette.bg[2]})`;
 
   return (
-    <BlitProvider transport={transport} store={store} palette={palette} fontFamily={font} fontSize={fontSize}>
+    <BlitProvider transport={transport} store={store} palette={palette} fontFamily={fontWithFallback} fontSize={fontSize}>
       <main
         style={{
           ...styles.workspace,
           backgroundColor: bg,
           color: dark ? "#e0e0e0" : "#333",
-          fontFamily: font,
+          fontFamily: fontWithFallback,
         }}
       >
         <section style={styles.termContainer}>
@@ -312,7 +339,9 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
           <FontOverlay
             currentFamily={font}
             currentSize={fontSize}
+            serverFonts={serverFonts}
             onSelect={changeFont}
+            onPreview={(f, s) => { setFont(f); setFontSize(s); }}
             onClose={closeOverlay}
             dark={dark}
           />

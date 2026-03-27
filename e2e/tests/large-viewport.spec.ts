@@ -38,7 +38,7 @@ for (const vp of VIEWPORTS) {
       const c = document.querySelector("canvas");
       const canvas2 = document.createElement("canvas");
       const ctx = canvas2.getContext("2d")!;
-      ctx.font = `${fs}px PragmataPro, ui-monospace, monospace`;
+      ctx.font = `${fs}px ui-monospace, monospace`;
       const m = ctx.measureText("M");
       return {
         canvasW: c?.width ?? 0,

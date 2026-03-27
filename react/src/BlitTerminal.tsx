@@ -267,19 +267,26 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     }, [dpr]);
 
     useEffect(() => {
-      const cell = measureCell(fontFamily, fontSize);
-      cellRef.current = cell;
-      if (!readOnly) {
-        const t = terminalRef.current;
-        if (t) {
-          t.set_cell_size(cell.pw, cell.ph);
-          t.set_font_family(fontFamily);
+      const apply = () => {
+        const cell = measureCell(fontFamily, fontSize);
+        cellRef.current = cell;
+        if (!readOnly) {
+          const t = terminalRef.current;
+          if (t) {
+            t.set_cell_size(cell.pw, cell.ph);
+            t.set_font_family(fontFamily);
+            t.invalidate_render_cache();
+          }
+          store.setCellSize(cell.pw, cell.ph);
         }
-        store.setCellSize(cell.pw, cell.ph);
-      }
-      contentDirtyRef.current = true;
-      scheduleRender();
-    }, [fontFamily, fontSize, dpr, store, readOnly]);
+        contentDirtyRef.current = true;
+        scheduleRender();
+      };
+      apply();
+      // Re-measure when fonts finish loading (e.g. server-provided @font-face).
+      document.fonts.addEventListener("loadingdone", apply);
+      return () => document.fonts.removeEventListener("loadingdone", apply);
+    }, [fontFamily, fontSize, dpr, store, readOnly, scheduleRender]);
 
     // -----------------------------------------------------------------------
     // Cursor blink timer

@@ -91,7 +91,7 @@ export interface BlitTerminalProps {
   onRender?: () => void;
 }
 
-export const DEFAULT_FONT = "PragmataPro, ui-monospace, monospace";
+export const DEFAULT_FONT = "ui-monospace, monospace";
 export const DEFAULT_FONT_SIZE = 13;
 
 /** Wire protocol constants: client-to-server message types. */

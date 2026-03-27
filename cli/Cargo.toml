@@ -1,6 +1,6 @@
 [package]
 name = "blit-cli"
-version = "0.6.6"
+version = "0.7.0"
 edition = "2021"
 
 [[bin]]
@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 blit-remote = { path = "../remote" }
+blit-fonts = { path = "../fonts" }
 tokio = { version = "1", features = ["full"] }
 libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }

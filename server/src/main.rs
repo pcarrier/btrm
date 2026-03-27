@@ -1003,6 +1003,7 @@ fn spawn_pty(
             }
         }
         std::env::set_var("TERM", "xterm-256color");
+        std::env::set_var("COLORTERM", "truecolor");
         // Don't set COLUMNS/LINES — ncurses apps prioritize these over
         // TIOCGWINSZ and won't resize properly if they're set to stale values.
         std::env::remove_var("COLUMNS");

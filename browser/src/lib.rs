@@ -31,7 +31,31 @@ extern "C" {
     fn blitFillText(ctx: &CanvasRenderingContext2d, text: &str, x: f64, y: f64);
 }
 
-const DEFAULT_FONT_FAMILY: &str = r#"PragmataPro, ui-monospace, monospace"#;
+const DEFAULT_FONT_FAMILY: &str = r#"ui-monospace, monospace"#;
+
+/// Quote font families in a CSS font-family list so that names with spaces
+/// or non-generic names work correctly in canvas `ctx.font` assignments.
+fn css_quote_font_family(family: &str) -> String {
+    const GENERIC: &[&str] = &[
+        "serif", "sans-serif", "monospace", "cursive", "fantasy",
+        "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded",
+        "math", "emoji", "fangsong",
+    ];
+    family
+        .split(',')
+        .map(|f| {
+            let f = f.trim();
+            if GENERIC.iter().any(|g| g.eq_ignore_ascii_case(f)) {
+                f.to_owned()
+            } else if f.starts_with('"') || f.starts_with('\'') {
+                f.to_owned()
+            } else {
+                format!("'{f}'")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 const BG_OP_STRIDE: usize = 4;
 const MODE_ECHO: u16 = 1 << 9;
 const MODE_ICANON: u16 = 1 << 10;
@@ -847,7 +871,7 @@ impl Terminal {
         let rows = self.inner.rows() as usize;
         let cols = self.inner.cols() as usize;
         let total = rows * cols;
-        let normal_font = format!("{}px {}", ch.round().max(1.0) as u32, self.font_family);
+        let normal_font = format!("{}px {}", ch.round().max(1.0) as u32, css_quote_font_family(&self.font_family));
 
         self.bg_ops.clear();
         self.glyph_verts.clear();

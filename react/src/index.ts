@@ -23,7 +23,7 @@ export type {
   UseBlitSessionsFn,
 } from "./hooks/useBlitSessions";
 
-export { measureCell } from "./hooks/useBlitTerminal";
+export { measureCell, CSS_GENERIC } from "./hooks/useBlitTerminal";
 export type { CellMetrics } from "./hooks/useBlitTerminal";
 
 export { WebSocketTransport } from "./transports/websocket";

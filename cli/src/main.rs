@@ -707,6 +707,8 @@ async fn run_browser(args: Vec<String>) {
     let injected_html: &'static str = Box::leak(injected_html.into_boxed_str());
 
     let app = axum::Router::new()
+        .route("/fonts", get(fonts_list_handler))
+        .route("/font/{name}", get(font_handler))
         .fallback(get(move |state, request| browser_root_handler(state, request, injected_html)))
         .with_state(state);
 
@@ -1615,6 +1617,35 @@ async fn handle_server_msg(
         }
 
         _ => {}
+    }
+}
+
+async fn fonts_list_handler() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let families = blit_fonts::list_font_families();
+    let json = format!("[{}]", families.iter().map(|f| format!("\"{}\"", f.replace('"', "\\\""))).collect::<Vec<_>>().join(","));
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/json"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        json,
+    ).into_response()
+}
+
+async fn font_handler(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match blit_fonts::font_face_css(&name) {
+        Some(css) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "text/css"),
+                (axum::http::header::CACHE_CONTROL, "public, max-age=86400, immutable"),
+            ],
+            css,
+        ).into_response(),
+        None => (axum::http::StatusCode::NOT_FOUND, "font not found").into_response(),
     }
 }
 

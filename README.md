@@ -352,7 +352,7 @@ Renders a single PTY. Owns RESIZE, INPUT, SCROLL, mouse/keyboard encoding, and W
 | `ptyId`      | `number \| null`  | **Required.** PTY to display. `null` = waiting for a PTY.             |
 | `transport`  | `BlitTransport`   | Falls back to context, then `store.transport`.                        |
 | `store`      | `TerminalStore`   | Falls back to context. Required via one or the other.                 |
-| `fontFamily` | `string`          | CSS font family. Default: `"PragmataPro, ui-monospace, monospace"`    |
+| `fontFamily` | `string`          | CSS font family. Default: `"ui-monospace, monospace"`    |
 | `fontSize`   | `number`          | Font size in CSS pixels. Default: `13`                                |
 | `className`  | `string`          | CSS class for the container div.                                      |
 | `style`      | `CSSProperties`   | Inline styles for the container div.                                  |

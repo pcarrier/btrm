@@ -148,6 +148,12 @@ export class TerminalStore {
     }
   }
 
+  invalidateAtlas(): void {
+    for (const t of this.terminals.values()) {
+      t.invalidate_render_cache();
+    }
+  }
+
   setPalette(palette: TerminalPalette): void {
     this.palette = palette;
     for (const t of this.terminals.values()) {

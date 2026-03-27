@@ -266,7 +266,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.7.2";
+        version = "0.7.3";
 
         weztermHash = "sha256-V6WvkNZryYofarsyfcmsuvtpNJ/c3O+DmOKNvoYPbmA=";
         finlUnicodeHash = "sha256-38S6XH4hldbkb6NP+s7lXa/NR49PI0w3KYqd+jPHND0=";
@@ -486,7 +486,7 @@ PKGJSON
 
         reactNpmDeps = pkgs.fetchNpmDeps {
           src = ./react;
-          hash = "sha256-fWpzPYKa7miYdta+uzq2QEIRyB8C7z8ajhS3s82VEYc=";
+          hash = "sha256-jVyvXSLzuV8Hl4gFdCgj5q5A2Aq91V0Nq7SIMRXBWM8=";
         };
 
         webAppNpmDeps = pkgs.fetchNpmDeps {

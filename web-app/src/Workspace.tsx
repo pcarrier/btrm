@@ -21,7 +21,7 @@ import type {
   SearchResult,
 } from "blit-react";
 import { useMetrics } from "./useMetrics";
-import { PALETTE_KEY, FONT_KEY, FONT_SIZE_KEY, writeStorage, preferredPalette, preferredFont, preferredFontSize, blitHost } from "./storage";
+import { PALETTE_KEY, FONT_KEY, FONT_SIZE_KEY, writeStorage, preferredPalette, preferredFont, preferredFontSize, blitHost, basePath } from "./storage";
 import { themeFor, layout, ui } from "./theme";
 import { StatusBar } from "./StatusBar";
 import { ExposeOverlay } from "./ExposeOverlay";
@@ -42,7 +42,7 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
   const fontWithFallback = font === DEFAULT_FONT ? font : `${font}, ${DEFAULT_FONT}`;
 
   useEffect(() => {
-    fetch("/fonts").then((r) => r.ok ? r.json() : []).then(setServerFonts).catch(() => {});
+    fetch(`${basePath}fonts`).then((r) => r.ok ? r.json() : []).then(setServerFonts).catch(() => {});
   }, []);
   const termRef = useRef<BlitTerminalHandle>(null);
   const overlayRef = useRef<Overlay>(null);
@@ -97,7 +97,7 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: WebSock
       if (!f || CSS_GENERIC.has(f.toLowerCase())) continue;
       const id = `blit-font-${f.replace(/\s+/g, "-").toLowerCase()}`;
       if (document.getElementById(id)) continue;
-      fetch(`/font/${encodeURIComponent(f)}`).then((res) => {
+      fetch(`${basePath}font/${encodeURIComponent(f)}`).then((res) => {
         if (!res.ok) return;
         return res.text().then(async (css) => {
           if (document.getElementById(id)) return;

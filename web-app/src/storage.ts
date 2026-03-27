@@ -28,6 +28,9 @@ export function writeStorage(key: string, value: string) {
   } catch {}
 }
 
+/** Base path for API requests, derived from the page URL. Handles reverse proxy prefixes like /vt/. */
+export const basePath = location.pathname.endsWith("/") ? location.pathname : location.pathname + "/";
+
 export function wsUrl(): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return proto + "//" + location.host + location.pathname;

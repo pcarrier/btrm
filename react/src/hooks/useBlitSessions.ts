@@ -337,6 +337,13 @@ export function useBlitSessions(
         if (hasConnectedRef.current) {
           lifecycleRef.current?.onReconnect?.();
         }
+        // Re-send focus to get a fresh PTY list from the server
+        // (the initial S2C_LIST may have been missed if the transport
+        // connected before the message listener was registered).
+        const fid = focusedPtyIdRef.current;
+        if (fid !== null) {
+          sendFocusRef.current(fid);
+        }
         hasConnectedRef.current = true;
       }
     }

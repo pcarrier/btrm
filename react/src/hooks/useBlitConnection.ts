@@ -214,10 +214,8 @@ export function useBlitConnection(
     transport.addEventListener("message", onMessage);
     transport.addEventListener("statuschange", onStatus);
 
-    if (statusRef.current !== transport.status) {
-      statusRef.current = transport.status;
-      for (const listener of listenersRef.current) listener();
-    }
+    // Connect after listeners are registered so no messages are missed.
+    transport.connect();
 
     return () => {
       transport.removeEventListener("message", onMessage);

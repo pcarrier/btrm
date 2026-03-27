@@ -12,6 +12,9 @@ export function StatusBar({
   metrics,
   palette,
   termSize,
+  fontLoading,
+  debug,
+  toggleDebug,
   store,
   timelineRef,
   netRef,
@@ -23,6 +26,9 @@ export function StatusBar({
   metrics: Metrics;
   palette: TerminalPalette;
   termSize: string | null;
+  fontLoading: boolean;
+  debug: boolean;
+  toggleDebug: () => void;
   store: TerminalStore;
   timelineRef: TimelineRef;
   netRef: NetRef;
@@ -34,8 +40,6 @@ export function StatusBar({
   const visible = sessions.sessions.filter((s) => s.state !== "closed");
   const exited = visible.filter((s) => s.state === "exited").length;
   const focused = sessions.sessions.find((s) => s.ptyId === sessions.focusedPtyId);
-  const [debug, setDebug] = useState(false);
-  const toggleDebug = useCallback(() => setDebug((d) => !d), []);
   return (
     <>
       <button onClick={onExpose} style={ui.btn} title="Expose (Cmd+K)">
@@ -53,7 +57,7 @@ export function StatusBar({
           <>
             {focused.title ?? `PTY ${focused.ptyId}`}
             {focused.state === "exited" && (
-              <span style={{ color: theme.error, marginLeft: 6, fontSize: 11 }}>[exited]</span>
+              <mark style={{ ...ui.badge, backgroundColor: "rgba(255,100,100,0.3)", marginLeft: 6 }}>Exited</mark>
             )}
           </>
         )}
@@ -68,7 +72,7 @@ export function StatusBar({
         {palette.dark ? "\u25D1" : "\u25D0"}
       </button>
       <button onClick={onFont} style={ui.btn} title="Font (Cmd+Shift+F)">
-        Aa
+        {fontLoading ? <span style={{ opacity: 0.5, fontSize: 10 }}>Loading font…</span> : "Aa"}
       </button>
       <span
         role="status"
@@ -92,14 +96,14 @@ function DebugPanel({ metrics, store, dark, timelineRef, netRef, focusedPtyId }:
   return (
     <div style={{
       position: "fixed",
-      bottom: 28,
-      right: 4,
-      backgroundColor: dark ? "rgba(30,30,30,0.85)" : "rgba(240,240,240,0.85)",
-      backdropFilter: "blur(8px)",
-      WebkitBackdropFilter: "blur(8px)",
+      top: 0,
+      right: 0,
+      backgroundColor: dark ? "rgba(20,20,20,0.7)" : "rgba(245,245,245,0.7)",
+      backdropFilter: "blur(6px)",
+      WebkitBackdropFilter: "blur(6px)",
       color: theme.fg,
-      border: `1px solid ${dark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}`,
-      borderRadius: 6,
+      borderLeft: `1px solid ${dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"}`,
+      borderBottom: `1px solid ${dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"}`,
       padding: "6px 10px",
       fontSize: 11,
       fontFamily: "ui-monospace, monospace",

@@ -28,10 +28,18 @@ for (const vp of VIEWPORTS) {
     });
     const page = await context.newPage();
 
-    await page.goto("/");
-    await page.evaluate((fs) => localStorage.setItem("blit.fontSize", String(fs)), vp.fontSize);
     await authenticate(page);
-    await page.waitForTimeout(3000);
+
+    // Wait for the canvas to be resized beyond the default 300x150
+    // (indicates WASM loaded and terminal rendered).
+    await page.waitForFunction(
+      () => {
+        const c = document.querySelector("canvas");
+        return c && c.width > 300 && c.height > 150;
+      },
+      { timeout: 15_000 },
+    );
+    await page.waitForTimeout(1000);
 
     // Measure cell metrics in the browser
     const info = await page.evaluate((fs) => {
@@ -52,19 +60,22 @@ for (const vp of VIEWPORTS) {
     }, vp.fontSize);
     console.log(`${vp.name}: canvas=${info.canvasW}x${info.canvasH} cell=${info.cellW}x${info.cellH} cells=${info.totalCells}`);
 
-    // Check the canvas has non-blank pixels (rendering is working)
+    // Check any canvas has non-blank pixels (rendering is working).
+    // The display canvas (2D) is reliable; the GL canvas may be cleared
+    // by the compositor (preserveDrawingBuffer is false).
     const hasPixels = await page.evaluate(() => {
-      const c = document.querySelector("canvas") as HTMLCanvasElement | null;
-      if (!c || c.width === 0 || c.height === 0) return false;
-      const tmp = document.createElement("canvas");
-      tmp.width = Math.min(c.width, 200);
-      tmp.height = Math.min(c.height, 200);
-      const ctx = tmp.getContext("2d");
-      if (!ctx) return false;
-      ctx.drawImage(c, 0, 0, tmp.width, tmp.height);
-      const data = ctx.getImageData(0, 0, tmp.width, tmp.height).data;
-      for (let i = 3; i < data.length; i += 4) {
-        if (data[i] > 0) return true;
+      for (const c of document.querySelectorAll("canvas")) {
+        if (c.width === 0 || c.height === 0) continue;
+        const tmp = document.createElement("canvas");
+        tmp.width = Math.min(c.width, 200);
+        tmp.height = Math.min(c.height, 200);
+        const ctx = tmp.getContext("2d");
+        if (!ctx) continue;
+        ctx.drawImage(c, 0, 0, tmp.width, tmp.height);
+        const data = ctx.getImageData(0, 0, tmp.width, tmp.height).data;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] > 0) return true;
+        }
       }
       return false;
     });

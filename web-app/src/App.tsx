@@ -47,6 +47,12 @@ function createBestTransport(
     }
   };
   wt.addEventListener("statuschange", onStatus);
+  // Don't connect yet — useBlitConnection will call connect() after
+  // registering the message listener. But WT needs to connect for the
+  // fallback status listener to fire. We connect the WT transport here;
+  // if it succeeds, useBlitConnection will be a no-op reconnect.
+  // If it fails, the fallback creates a WS transport that useBlitConnection connects.
+  wt.connect();
   return wt;
 }
 
@@ -77,9 +83,11 @@ export function App({ wasm }: { wasm: BlitWasmModule }) {
           t.removeEventListener("statuschange", onStatus);
           t.close();
           setTransport(
-            createBestTransport(pass, () =>
-              setTransport(new WebSocketTransport(wsUrl(), pass)),
-            ),
+            createBestTransport(pass, () => {
+              const ws = new WebSocketTransport(wsUrl(), pass);
+              setTransport(ws);
+              // connect() will be called by useBlitConnection
+            }),
           );
         } else if (status === "error") {
           setAuthError("Authentication failed");
@@ -88,6 +96,7 @@ export function App({ wasm }: { wasm: BlitWasmModule }) {
         }
       };
       t.addEventListener("statuschange", onStatus);
+      t.connect();
     },
     [transport],
   );
@@ -104,6 +113,7 @@ export function App({ wasm }: { wasm: BlitWasmModule }) {
 
   return <Workspace transport={transport} wasm={wasm} onAuthError={() => {
     transport.close();
+    writeStorage(PASS_KEY, "");
     setTransport(null);
     setAuthError("Authentication failed");
   }} />;

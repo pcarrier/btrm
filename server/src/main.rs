@@ -2544,6 +2544,12 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             }
             C2S_FOCUS if data.len() >= 3 => {
                 let pid = u16::from_le_bytes([data[1], data[2]]);
+                // Always re-send the PTY list on focus — the client may have
+                // missed the initial S2C_LIST if the transport connected before
+                // the message listener was registered.
+                if let Some(c) = sess.clients.get(&client_id) {
+                    let _ = c.tx.try_send(sess.pty_list_msg());
+                }
                 if sess.ptys.contains_key(&pid) {
                     let old_pid = sess.clients.get(&client_id).and_then(|c| c.lead);
                     if let Some(c) = sess.clients.get_mut(&client_id) {

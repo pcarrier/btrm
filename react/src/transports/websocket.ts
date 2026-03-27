@@ -39,7 +39,6 @@ export class WebSocketTransport implements BlitTransport {
     this.maxDelay = options?.maxReconnectDelay ?? 10000;
     this.backoff = options?.reconnectBackoff ?? 1.5;
     this.currentDelay = this.initialDelay;
-    this.connect();
   }
 
   get status(): ConnectionStatus {
@@ -131,7 +130,7 @@ export class WebSocketTransport implements BlitTransport {
     );
   }
 
-  private connect(): void {
+  connect(): void {
     if (this.disposed) return;
     this.setStatus("connecting");
 

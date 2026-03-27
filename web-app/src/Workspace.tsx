@@ -37,6 +37,8 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: BlitTra
   const [font, setFont] = useState(preferredFont);
   const [fontSize, setFontSize] = useState(preferredFontSize);
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [debugPanel, setDebugPanel] = useState(false);
+  const toggleDebug = useCallback(() => setDebugPanel((d) => !d), []);
   const [serverFonts, setServerFonts] = useState<string[]>([]);
   const [offlineVisible, setOfflineVisible] = useState(
     transport.status === "disconnected" || transport.status === "error",
@@ -54,11 +56,12 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: BlitTra
   const sessionsRef = useRef<UseBlitSessionsReturn | null>(null);
   const searchResultsCbRef = useRef<((reqId: number, results: SearchResult[]) => void) | null>(null);
 
-  const storeRef = useRef<TerminalStore | null>(null);
-  if (!storeRef.current) {
-    storeRef.current = new TerminalStore(transport, wasm);
+  const storeRef = useRef<{ transport: BlitTransport; store: TerminalStore } | null>(null);
+  if (!storeRef.current || storeRef.current.transport !== transport) {
+    storeRef.current?.store.dispose();
+    storeRef.current = { transport, store: new TerminalStore(transport, wasm) };
   }
-  const store = storeRef.current;
+  const store = storeRef.current.store;
 
   const onSearchResults = useCallback(
     (reqId: number, results: SearchResult[]) => {
@@ -94,14 +97,18 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: BlitTra
     store.setPalette(palette);
   }, [store, palette]);
 
+  const [fontLoading, setFontLoading] = useState(false);
   useEffect(() => {
     store.setFontFamily(fontWithFallback);
     // Try to load custom fonts from the server's system fonts.
     const families = font.split(",").map((f) => f.trim().replace(/^['"]|['"]$/g, ""));
+    let pending = 0;
     for (const f of families) {
       if (!f || CSS_GENERIC.has(f.toLowerCase())) continue;
       const id = `blit-font-${f.replace(/\s+/g, "-").toLowerCase()}`;
       if (document.getElementById(id)) continue;
+      pending++;
+      setFontLoading(true);
       fetch(`${basePath}font/${encodeURIComponent(f)}`).then((res) => {
         if (!res.ok) return;
         return res.text().then(async (css) => {
@@ -112,8 +119,12 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: BlitTra
           document.head.appendChild(style);
           await document.fonts.ready;
         });
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => {
+        pending--;
+        if (pending <= 0) setFontLoading(false);
+      });
     }
+    if (pending === 0) setFontLoading(false);
   }, [store, font]);
 
   // LRU order: most recently focused PTY first.
@@ -273,6 +284,11 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: BlitTra
         toggleOverlay("help");
         return;
       }
+      if (e.ctrlKey && e.shiftKey && (e.key === "~" || e.key === "`")) {
+        e.preventDefault();
+        toggleDebug();
+        return;
+      }
       if (mod && e.shiftKey && e.key === "Enter") {
         e.preventDefault();
         createAndFocus();
@@ -382,6 +398,9 @@ export function Workspace({ transport, wasm, onAuthError }: { transport: BlitTra
             metrics={metrics}
             palette={palette}
             termSize={termRef.current ? `${termRef.current.cols}x${termRef.current.rows}` : null}
+            fontLoading={fontLoading}
+            debug={debugPanel}
+            toggleDebug={toggleDebug}
             store={store}
             timelineRef={timelineRef}
             netRef={netRef}

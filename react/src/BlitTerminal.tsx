@@ -102,6 +102,13 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     const scrollOffsetRef = useRef(0);
     const scrollFadeRef = useRef(0);
     const scrollFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    /** Scrollbar geometry in canvas pixels, updated each render. */
+    const scrollbarGeoRef = useRef<{
+      barX: number; barY: number; barW: number; barH: number;
+      canvasH: number; totalLines: number; viewportRows: number;
+    } | null>(null);
+    const scrollDraggingRef = useRef(false);
+    const scrollDragOffsetRef = useRef(0);
     const cursorBlinkOnRef = useRef(true);
     const cursorBlinkTimerRef = useRef<ReturnType<typeof setInterval> | null>(
       null,
@@ -610,8 +617,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
                 }
               }
 
-              // Scrollbar indicator
-              if (scrollFadeRef.current > 0 && scrollOffsetRef.current > 0) {
+              // Scrollbar — always compute geometry for hit testing
+              {
                 const t2 = terminalRef.current;
                 if (t2) {
                   const totalLines = t2.scrollback_lines() + rowsRef.current;
@@ -621,13 +628,20 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
                     const canvasH = viewportRows * ch;
                     const barW = scrollbarWidth;
                     const barH = Math.max(barW, (viewportRows / totalLines) * canvasH);
-                    const scrollFraction = scrollOffsetRef.current / (totalLines - viewportRows);
+                    const maxScroll = totalLines - viewportRows;
+                    const scrollFraction = Math.min(scrollOffsetRef.current, maxScroll) / maxScroll;
                     const barY = (1 - scrollFraction) * (canvasH - barH);
                     const barX = colsRef.current * cell.pw - barW - 2;
-                    ctx.fillStyle = scrollbarColor;
-                    ctx.beginPath();
-                    ctx.roundRect(barX, barY, barW, barH, barW / 2);
-                    ctx.fill();
+                    scrollbarGeoRef.current = { barX, barY, barW, barH, canvasH, totalLines, viewportRows };
+                    const show = scrollFadeRef.current > 0 || scrollDraggingRef.current || scrollOffsetRef.current > 0;
+                    if (show) {
+                      ctx.fillStyle = scrollbarColor;
+                      ctx.beginPath();
+                      ctx.roundRect(barX, barY, barW, barH, barW / 2);
+                      ctx.fill();
+                    }
+                  } else {
+                    scrollbarGeoRef.current = null;
                   }
                 }
               }
@@ -662,6 +676,38 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         if (ptyId === null || status !== "connected") return;
         if (e.isComposing) return;
         if (e.key === "Dead") return;
+
+        // Ctrl+PageUp/PageDown: scroll the scrollback
+        if (e.ctrlKey && (e.key === "PageUp" || e.key === "PageDown")) {
+          const t2 = terminalRef.current;
+          const maxScroll = t2 ? t2.scrollback_lines() : 0;
+          if (maxScroll > 0 || scrollOffsetRef.current > 0) {
+            e.preventDefault();
+            const delta = e.key === "PageUp" ? rowsRef.current : -rowsRef.current;
+            scrollOffsetRef.current = Math.max(0, Math.min(maxScroll, scrollOffsetRef.current + delta));
+            sendScroll(ptyId, scrollOffsetRef.current);
+            scrollFadeRef.current = 1;
+            if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
+            scrollFadeTimerRef.current = setTimeout(() => { scrollFadeRef.current = 0; scheduleRender(); }, 1000);
+            scheduleRender();
+          }
+          return;
+        }
+        // Ctrl+Home/End: jump to top/bottom of scrollback
+        if (e.ctrlKey && (e.key === "Home" || e.key === "End")) {
+          const t2 = terminalRef.current;
+          const maxScroll = t2 ? t2.scrollback_lines() : 0;
+          if (maxScroll > 0 || scrollOffsetRef.current > 0) {
+            e.preventDefault();
+            scrollOffsetRef.current = e.key === "Home" ? maxScroll : 0;
+            sendScroll(ptyId, scrollOffsetRef.current);
+            scrollFadeRef.current = 1;
+            if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
+            scrollFadeTimerRef.current = setTimeout(() => { scrollFadeRef.current = 0; scheduleRender(); }, 1000);
+            scheduleRender();
+          }
+          return;
+        }
 
         const t = terminalRef.current;
         const appCursor = t ? t.app_cursor() : false;
@@ -755,6 +801,32 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             colsRef.current - 1,
           ),
         };
+      }
+
+      // --- Scrollbar interaction helpers ---
+      const SCROLLBAR_HIT_PX = 20; // CSS px hit zone from right edge
+
+      function canvasYFromEvent(e: MouseEvent): number {
+        const rect = canvas!.getBoundingClientRect();
+        const dpr = cellRef.current.pw / cellRef.current.w;
+        return (e.clientY - rect.top) * dpr;
+      }
+
+      function isNearScrollbar(e: MouseEvent): boolean {
+        const rect = canvas!.getBoundingClientRect();
+        return e.clientX >= rect.right - SCROLLBAR_HIT_PX;
+      }
+
+      function scrollToCanvasY(y: number) {
+        const geo = scrollbarGeoRef.current;
+        if (!geo || ptyId === null || status !== "connected") return;
+        const fraction = 1 - y / (geo.canvasH - geo.barH);
+        const maxScroll = geo.totalLines - geo.viewportRows;
+        const offset = Math.round(Math.max(0, Math.min(maxScroll, fraction * maxScroll)));
+        scrollOffsetRef.current = offset;
+        sendScroll(ptyId, offset);
+        scrollFadeRef.current = 1;
+        scheduleRender();
       }
 
       /** Send a structured mouse event to the server (C2S_MOUSE).
@@ -880,6 +952,23 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       let mouseDownButton = -1;
       let lastMouseCell = { row: -1, col: -1 };
       const handleMouseDown = (e: MouseEvent) => {
+        // Scrollbar click/drag
+        if (e.button === 0 && scrollbarGeoRef.current && isNearScrollbar(e)) {
+          e.preventDefault();
+          const geo = scrollbarGeoRef.current;
+          const y = canvasYFromEvent(e);
+          scrollDraggingRef.current = true;
+          canvas.style.cursor = "grabbing";
+          if (y >= geo.barY && y <= geo.barY + geo.barH) {
+            // Clicked on thumb — anchor for relative drag
+            scrollDragOffsetRef.current = y - geo.barY;
+          } else {
+            // Clicked on track — jump thumb center to click
+            scrollDragOffsetRef.current = geo.barH / 2;
+            scrollToCanvasY(y - geo.barH / 2);
+          }
+          return;
+        }
         if (!e.shiftKey && sendMouseEvent("down", e, e.button)) {
           mouseDownButton = e.button;
           e.preventDefault();
@@ -912,6 +1001,10 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       };
 
       const handleMouseMove = (e: MouseEvent) => {
+        if (scrollDraggingRef.current) {
+          scrollToCanvasY(canvasYFromEvent(e) - scrollDragOffsetRef.current);
+          return;
+        }
         // Only forward mouse events when a button is held (drag in progress)
         // or the cursor is actually over the terminal canvas.
         const overCanvas = mouseDownButton >= 0 || canvas.contains(e.target as Node);
@@ -964,6 +1057,12 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       };
 
       const handleMouseUp = (e: MouseEvent) => {
+        if (scrollDraggingRef.current) {
+          scrollDraggingRef.current = false;
+          canvas.style.cursor = "text";
+          scheduleRender();
+          return;
+        }
         if (mouseDownButton >= 0) {
           sendMouseEvent("up", e, mouseDownButton);
           mouseDownButton = -1;
@@ -994,25 +1093,33 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
 
       const handleWheel = (e: WheelEvent) => {
         const t = terminalRef.current;
-        if (t && t.mouse_mode() > 0) {
+        // Shift+wheel always scrolls the scrollback (like ghostty/alacritty).
+        // Without Shift, forward to the application if mouse mode is active.
+        if (t && t.mouse_mode() > 0 && !e.shiftKey) {
           e.preventDefault();
           const button = e.deltaY < 0 ? 64 : 65;
           sendMouseEvent("down", e, button);
         } else if (ptyId !== null && status === "connected") {
+          const t2 = terminalRef.current;
+          const maxScroll = t2 ? t2.scrollback_lines() : 0;
+          if (maxScroll === 0 && scrollOffsetRef.current === 0) return; // nothing to scroll
           e.preventDefault();
-          const lines = Math.round(-e.deltaY / 20) || (e.deltaY > 0 ? -3 : 3);
+          // macOS swaps deltaX/deltaY when Shift is held
+          const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+          const lines = Math.round(-delta / 20) || (delta > 0 ? -3 : 3);
           scrollOffsetRef.current = Math.max(
             0,
-            scrollOffsetRef.current + lines,
+            Math.min(maxScroll, scrollOffsetRef.current + lines),
           );
           sendScroll(ptyId, scrollOffsetRef.current);
-          // Show scrollbar, fade after 1s of inactivity
-          scrollFadeRef.current = 1;
-          if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
-          scrollFadeTimerRef.current = setTimeout(() => {
-            scrollFadeRef.current = 0;
-            scheduleRender();
-          }, 1000);
+          if (scrollOffsetRef.current > 0) {
+            scrollFadeRef.current = 1;
+            if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
+            scrollFadeTimerRef.current = setTimeout(() => {
+              scrollFadeRef.current = 0;
+              scheduleRender();
+            }, 1000);
+          }
           scheduleRender();
         }
       };
@@ -1059,6 +1166,16 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
 
       let lastHoverUrl: string | null = null;
       const handleHoverMove = (e: MouseEvent) => {
+        // Scrollbar cursor
+        if (scrollDraggingRef.current) {
+          canvas.style.cursor = "grabbing";
+          return;
+        }
+        if (scrollbarGeoRef.current && isNearScrollbar(e)) {
+          canvas.style.cursor = "default";
+          return;
+        }
+
         if (selecting) {
           if (hoveredUrlRef.current) {
             hoveredUrlRef.current = null;

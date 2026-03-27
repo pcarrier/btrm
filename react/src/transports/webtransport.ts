@@ -55,7 +55,6 @@ export class WebTransportTransport implements BlitTransport {
     if (options?.serverCertificateHash) {
       this.certHash = hexToBytes(options.serverCertificateHash);
     }
-    this.connect();
   }
 
   get status(): ConnectionStatus {
@@ -154,7 +153,7 @@ export class WebTransportTransport implements BlitTransport {
     }
   }
 
-  private async connect(): Promise<void> {
+  async connect(): Promise<void> {
     if (this.disposed) return;
     this.setStatus("connecting");
 

@@ -33,6 +33,8 @@ export type BlitTransportEventMap = {
 };
 
 export interface BlitTransport {
+  /** Start connecting. Call after registering listeners. */
+  connect(): void;
   /** Send binary data to the server. */
   send(data: Uint8Array): void;
   /** Close the transport connection. */

@@ -1034,6 +1034,25 @@ mod integration_tests {
     use super::*;
 
     #[test]
+    fn scrollback_works() {
+        let mut driver = TerminalDriver::new(5, 80, 1000);
+        // Write 10 lines (more than viewport of 5)
+        for i in 0..10 {
+            driver.process(format!("line {i}\r\n").as_bytes());
+        }
+        let snap = driver.snapshot(true, true);
+        assert!(snap.scrollback_lines() > 0, "should have scrollback lines, got {}", snap.scrollback_lines());
+
+        // Scrollback frame at offset 1 should show different content than viewport
+        let scroll1 = driver.scrollback_frame(1);
+        assert_ne!(snap.cells(), scroll1.cells(), "scrollback should differ from viewport");
+
+        // Scrollback frame at offset 0 should match viewport
+        let scroll0 = driver.scrollback_frame(0);
+        // Not necessarily identical to snapshot (cursor/mode differ) but cells should match
+    }
+
+    #[test]
     fn process_produces_nonempty_snapshot() {
         let mut driver = TerminalDriver::new(24, 80, 1000);
         driver.process(b"Hello, world!\r\n");

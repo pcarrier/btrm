@@ -25,11 +25,30 @@ export function createWebRtcDataChannelTransport(
   let syncReject: ((err: Error) => void) | null = null;
   let readBuf = new Uint8Array(0);
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let started = false;
+  let earlyMessages: ArrayBuffer[] = [];
 
   const messageListeners = new Set<(data: ArrayBuffer) => void>();
   const statusListeners = new Set<(status: ConnectionStatus) => void>();
 
+  function dispatch(data: ArrayBuffer) {
+    if (!started) {
+      earlyMessages.push(data);
+    } else {
+      for (const l of messageListeners) l(data);
+    }
+  }
+
   const transport: BlitTransport & { waitForSync(): Promise<void> } = {
+    connect() {
+      if (started) return;
+      started = true;
+      for (const msg of earlyMessages) {
+        for (const l of messageListeners) l(msg);
+      }
+      earlyMessages = [];
+    },
+
     get status() {
       return _status;
     },
@@ -151,7 +170,7 @@ export function createWebRtcDataChannelTransport(
       if (readBuf.length < 4 + len) break;
       const payload = readBuf.slice(4, 4 + len);
       readBuf = readBuf.slice(4 + len);
-      for (const l of messageListeners) l(payload.buffer as ArrayBuffer);
+      dispatch(payload.buffer as ArrayBuffer);
     }
   };
 

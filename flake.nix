@@ -305,7 +305,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.8.1";
+        version = "0.9.0";
 
         cargoLockConfig = {
           lockFile = ./Cargo.lock;
@@ -484,12 +484,12 @@ PKGJSON
 
         reactNpmDeps = pkgs.fetchNpmDeps {
           src = ./react;
-          hash = "sha256-O71c1VVn2ypFZZpgzlQTjtEbTA5bRw5GfNkJbZ/u7kM=";
+          hash = "sha256-QU4WGyuRC37bBUZERD3HICXmF3m+JxPc4HcLv1vG5U4=";
         };
 
         webAppNpmDeps = pkgs.fetchNpmDeps {
           src = ./web-app;
-          hash = "sha256-UtiMxzhbfmQQ/e09EAcvqUJ1GRdmyodmckCYnB3jojA=";
+          hash = "sha256-LluQX9Lpmt9nlJRJRByr0HWHTa4QEoe72Wz1hAiFeeQ=";
         };
 
         webAppDist = pkgs.stdenv.mkDerivation {
@@ -622,6 +622,26 @@ CTRL
           description = "blit WebSocket gateway";
         };
 
+        packages.e2e = pkgs.writeShellApplication {
+          name = "blit-e2e";
+          runtimeInputs = [ pkgs.nodejs pkgs.pnpm ];
+          text = ''
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+            echo "=== Setting up binaries ==="
+            mkdir -p target/debug
+            ln -sf "${blit-server}/bin/blit-server" target/debug/blit-server
+            ln -sf "${blit-gateway}/bin/blit-gateway" target/debug/blit-gateway
+
+            echo "=== Installing e2e deps ==="
+            (cd e2e && pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
+
+            echo "=== Running Playwright ==="
+            (cd e2e && npx playwright test)
+          '';
+        };
+
         packages.lint = pkgs.writeShellApplication {
           name = "blit-lint";
           runtimeInputs = [ rustToolchain ];
@@ -648,8 +668,12 @@ CTRL
             echo ""
             echo "=== React tests ==="
             mkdir -p browser/pkg
-            echo '{"name":"blit-browser","version":"0.0.0","main":"blit_browser.js"}' > browser/pkg/package.json
-            touch browser/pkg/blit_browser.js
+            if [ ! -f browser/pkg/package.json ]; then
+              echo '{"name":"blit-browser","version":"0.0.0","main":"blit_browser.js"}' > browser/pkg/package.json
+            fi
+            if [ ! -f browser/pkg/blit_browser.js ]; then
+              touch browser/pkg/blit_browser.js
+            fi
             (cd react && pnpm install --frozen-lockfile 2>/dev/null || pnpm install && pnpm vitest run)
           '';
         };
@@ -657,16 +681,18 @@ CTRL
         devShells.default = pkgs.mkShell {
           buildInputs = [
             rustToolchain
-            pkgs.curl
             pkgs.binaryen
+            pkgs.bun
             pkgs.cargo-flamegraph
             pkgs.cargo-llvm-cov
-            pkgs.samply
             pkgs.cargo-watch
+            pkgs.curl
             pkgs.nodejs
             pkgs.pkgsStatic.stdenv.cc
             pkgs.pnpm
+            pkgs.prefetch-npm-deps
             pkgs.process-compose
+            pkgs.samply
             pkgs.scdoc
             pkgs.wasm-bindgen-cli
             pkgs.wasm-pack

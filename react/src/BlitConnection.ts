@@ -517,7 +517,7 @@ export class BlitConnection {
           this.pendingCreates.delete(firstNonce);
           pending.resolve(toPublicSession(session));
         }
-        this.ensureFocusedSession(session.id);
+
         return;
       }
       case S2C_CREATED_N: {
@@ -531,7 +531,7 @@ export class BlitConnection {
           this.pendingCreates.delete(nonce);
           pending.resolve(toPublicSession(session));
         }
-        this.ensureFocusedSession(session.id);
+
         return;
       }
       case S2C_CLOSED: {
@@ -683,7 +683,7 @@ export class BlitConnection {
       this.snapshot.focusedSessionId &&
       this.sessionsById.get(this.snapshot.focusedSessionId)?.state !== "closed"
         ? this.snapshot.focusedSessionId
-        : this.firstLiveSessionId();
+        : null;
 
     this.snapshot = {
       ...this.snapshot,
@@ -872,10 +872,6 @@ export class BlitConnection {
     }
   }
 
-  private ensureFocusedSession(sessionId: SessionId): void {
-    if (this.snapshot.focusedSessionId) return;
-    this.focusSession(sessionId);
-  }
 
   private firstLiveSessionId(): SessionId | null {
     const session = this.sessions.find((entry) => entry.state !== "closed");

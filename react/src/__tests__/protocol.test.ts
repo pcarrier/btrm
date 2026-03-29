@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   buildAckMessage,
+  buildClearResizeBatchMessage,
+  buildClearResizeMessage,
+  buildResizeBatchMessage,
   buildClientMetricsMessage,
   buildInputMessage,
   buildResizeMessage,
@@ -65,6 +68,40 @@ describe("protocol message builders", () => {
     expect(msg[3] | (msg[4] << 8)).toBe(40);
     expect(msg[5] | (msg[6] << 8)).toBe(120);
     expect(msg.length).toBe(7);
+  });
+
+  it("buildResizeBatchMessage", () => {
+    const msg = buildResizeBatchMessage([
+      { ptyId: 3, rows: 40, cols: 120 },
+      { ptyId: 7, rows: 24, cols: 80 },
+    ]);
+    expect(msg[0]).toBe(C2S_RESIZE);
+    expect(msg[1] | (msg[2] << 8)).toBe(3);
+    expect(msg[3] | (msg[4] << 8)).toBe(40);
+    expect(msg[5] | (msg[6] << 8)).toBe(120);
+    expect(msg[7] | (msg[8] << 8)).toBe(7);
+    expect(msg[9] | (msg[10] << 8)).toBe(24);
+    expect(msg[11] | (msg[12] << 8)).toBe(80);
+    expect(msg.length).toBe(13);
+  });
+
+  it("buildClearResizeMessage", () => {
+    const msg = buildClearResizeMessage(3);
+    expect(msg[0]).toBe(C2S_RESIZE);
+    expect(msg[1] | (msg[2] << 8)).toBe(3);
+    expect(msg[3] | (msg[4] << 8)).toBe(0);
+    expect(msg[5] | (msg[6] << 8)).toBe(0);
+  });
+
+  it("buildClearResizeBatchMessage", () => {
+    const msg = buildClearResizeBatchMessage([3, 7]);
+    expect(msg[0]).toBe(C2S_RESIZE);
+    expect(msg[1] | (msg[2] << 8)).toBe(3);
+    expect(msg[3] | (msg[4] << 8)).toBe(0);
+    expect(msg[5] | (msg[6] << 8)).toBe(0);
+    expect(msg[7] | (msg[8] << 8)).toBe(7);
+    expect(msg[9] | (msg[10] << 8)).toBe(0);
+    expect(msg[11] | (msg[12] << 8)).toBe(0);
   });
 
   it("buildScrollMessage", () => {

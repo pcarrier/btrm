@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import {
   FEATURE_CREATE_NONCE,
+  FEATURE_RESIZE_BATCH,
   FEATURE_RESTART,
   PROTOCOL_VERSION,
   S2C_CLOSED,
@@ -23,10 +24,13 @@ import {
 } from "./types";
 import {
   buildCloseMessage,
+  buildClearResizeBatchMessage,
+  buildClearResizeMessage,
   buildCreate2Message,
   buildFocusMessage,
   buildInputMessage,
   buildMouseMessage,
+  buildResizeBatchMessage,
   buildResizeMessage,
   buildRestartMessage,
   buildScrollMessage,
@@ -57,6 +61,12 @@ export interface CreateSessionOptions {
   command?: string;
   cwdFromSessionId?: SessionId;
 }
+
+type ResizeSessionOptions = {
+  sessionId: SessionId;
+  rows: number;
+  cols: number;
+};
 
 type PendingCreate = {
   resolve: (session: BlitSession) => void;
@@ -299,11 +309,61 @@ export class BlitConnection {
   }
 
   resizeSession(sessionId: SessionId, rows: number, cols: number): void {
-    const session = this.sessionsById.get(sessionId);
-    if (!session || !isLiveSession(session) || this.transport.status !== "connected") {
+    this.resizeSessions([{ sessionId, rows, cols }]);
+  }
+
+  clearSessionSize(sessionId: SessionId): void {
+    this.clearSessionSizes([sessionId]);
+  }
+
+  clearSessionSizes(sessionIds: Iterable<SessionId>): void {
+    if (this.transport.status !== "connected") {
       return;
     }
-    this.transport.send(buildResizeMessage(session.ptyId, rows, cols));
+    const ptyIds: number[] = [];
+    for (const sessionId of sessionIds) {
+      const session = this.sessionsById.get(sessionId);
+      if (!session || !isLiveSession(session)) {
+        continue;
+      }
+      ptyIds.push(session.ptyId);
+    }
+    if (ptyIds.length === 0 || (this.features & FEATURE_RESIZE_BATCH) === 0) {
+      return;
+    }
+    if (ptyIds.length === 1) {
+      this.transport.send(buildClearResizeMessage(ptyIds[0]!));
+      return;
+    }
+    this.transport.send(buildClearResizeBatchMessage(ptyIds));
+  }
+
+  resizeSessions(entries: Iterable<ResizeSessionOptions>): void {
+    if (this.transport.status !== "connected") {
+      return;
+    }
+    const resolved: Array<{ ptyId: number; rows: number; cols: number }> = [];
+    for (const entry of entries) {
+      const session = this.sessionsById.get(entry.sessionId);
+      if (!session || !isLiveSession(session)) {
+        continue;
+      }
+      resolved.push({
+        ptyId: session.ptyId,
+        rows: entry.rows,
+        cols: entry.cols,
+      });
+    }
+    if (resolved.length === 0) {
+      return;
+    }
+    if ((this.features & FEATURE_RESIZE_BATCH) !== 0) {
+      this.transport.send(buildResizeBatchMessage(resolved));
+      return;
+    }
+    for (const entry of resolved) {
+      this.transport.send(buildResizeMessage(entry.ptyId, entry.rows, entry.cols));
+    }
   }
 
   scrollSession(sessionId: SessionId, offset: number): void {

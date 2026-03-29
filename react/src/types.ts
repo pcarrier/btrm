@@ -131,6 +131,7 @@ export const DEFAULT_FONT_SIZE = 13;
 
 /** Wire protocol constants: client-to-server message types. */
 export const C2S_INPUT = 0x00;
+/** Desired viewport size(s): repeated [pty_id:2][rows:2][cols:2] entries. `0x0` clears one. */
 export const C2S_RESIZE = 0x01;
 export const C2S_SCROLL = 0x02;
 export const C2S_ACK = 0x03;
@@ -164,3 +165,4 @@ export const S2C_EXITED = 0x08;
 export const PROTOCOL_VERSION = 1;
 export const FEATURE_CREATE_NONCE = 1 << 0;
 export const FEATURE_RESTART = 1 << 1;
+export const FEATURE_RESIZE_BATCH = 1 << 2;

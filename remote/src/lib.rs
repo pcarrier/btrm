@@ -28,6 +28,10 @@ const OP_FILL_RECT: u8 = 0x02;
 const OP_PATCH_CELLS: u8 = 0x03;
 
 pub const C2S_INPUT: u8 = 0x00;
+/// Desired viewport size(s): [0x01][pty_id:2][rows:2][cols:2]...
+/// Clients may batch multiple PTY resize entries in one message. The server
+/// mediates these per-client desired sizes into each PTY's effective size.
+/// A `rows, cols` pair of `0, 0` clears this client's desired size for that PTY.
 pub const C2S_RESIZE: u8 = 0x01;
 pub const C2S_SCROLL: u8 = 0x02;
 pub const C2S_ACK: u8 = 0x03;
@@ -70,6 +74,7 @@ pub const S2C_EXITED: u8 = 0x08;
 
 pub const FEATURE_CREATE_NONCE: u32 = 1 << 0;
 pub const FEATURE_RESTART: u32 = 1 << 1;
+pub const FEATURE_RESIZE_BATCH: u32 = 1 << 2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Color {
@@ -1329,6 +1334,17 @@ pub fn msg_resize(pty_id: u16, rows: u16, cols: u16) -> Vec<u8> {
     msg
 }
 
+pub fn msg_resize_batch(entries: &[(u16, u16, u16)]) -> Vec<u8> {
+    let mut msg = Vec::with_capacity(1 + entries.len() * 6);
+    msg.push(C2S_RESIZE);
+    for &(pty_id, rows, cols) in entries {
+        msg.extend_from_slice(&pty_id.to_le_bytes());
+        msg.extend_from_slice(&rows.to_le_bytes());
+        msg.extend_from_slice(&cols.to_le_bytes());
+    }
+    msg
+}
+
 pub fn msg_focus(pty_id: u16) -> Vec<u8> {
     let mut msg = Vec::with_capacity(3);
     msg.push(C2S_FOCUS);
@@ -2576,6 +2592,18 @@ mod tests {
         assert_eq!(u16::from_le_bytes([msg[1], msg[2]]), 3);
         assert_eq!(u16::from_le_bytes([msg[3], msg[4]]), 24);
         assert_eq!(u16::from_le_bytes([msg[5], msg[6]]), 80);
+    }
+
+    #[test]
+    fn msg_resize_batch_format() {
+        let msg = msg_resize_batch(&[(3, 24, 80), (5, 40, 120)]);
+        assert_eq!(msg[0], C2S_RESIZE);
+        assert_eq!(u16::from_le_bytes([msg[1], msg[2]]), 3);
+        assert_eq!(u16::from_le_bytes([msg[3], msg[4]]), 24);
+        assert_eq!(u16::from_le_bytes([msg[5], msg[6]]), 80);
+        assert_eq!(u16::from_le_bytes([msg[7], msg[8]]), 5);
+        assert_eq!(u16::from_le_bytes([msg[9], msg[10]]), 40);
+        assert_eq!(u16::from_le_bytes([msg[11], msg[12]]), 120);
     }
 
     #[test]

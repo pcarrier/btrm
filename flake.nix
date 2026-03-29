@@ -305,7 +305,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.10.0";
+        version = "0.10.1";
 
         cargoLockConfig = {
           lockFile = ./Cargo.lock;
@@ -484,7 +484,7 @@ PKGJSON
 
         reactNpmDeps = pkgs.fetchNpmDeps {
           src = ./react;
-          hash = "sha256-Jun38OfJSL4OBj93dUJfztnz1dryMP58wJRHGmRhfWs=";
+          hash = "sha256-yj6dr76PtQt8h8dLhghLwwcNJrtzqPbob2cK0noN/a4=";
         };
 
         webAppNpmDeps = pkgs.fetchNpmDeps {

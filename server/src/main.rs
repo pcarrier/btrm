@@ -3,9 +3,9 @@ use blit_remote::{
     build_update_msg, msg_hello, FrameState, C2S_ACK, C2S_CLIENT_METRICS, C2S_CLOSE, C2S_CREATE,
     C2S_CREATE2, C2S_CREATE_AT, C2S_CREATE_N, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_MOUSE,
     C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH, C2S_SUBSCRIBE, C2S_UNSUBSCRIBE,
-    CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY, FEATURE_CREATE_NONCE, FEATURE_RESTART, S2C_CLOSED,
-    S2C_CREATED, S2C_CREATED_N, S2C_EXITED,
-    S2C_LIST, S2C_SEARCH_RESULTS, S2C_TITLE,
+    CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY, FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH,
+    FEATURE_RESTART, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_EXITED, S2C_LIST,
+    S2C_SEARCH_RESULTS, S2C_TITLE,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::CString;
@@ -227,7 +227,7 @@ struct ClientState {
     tx: mpsc::Sender<Vec<u8>>,
     lead: Option<u16>,
     subscriptions: HashSet<u16>,
-    size: Option<(u16, u16)>,
+    view_sizes: HashMap<u16, (u16, u16)>,
     scroll_offset: usize,
     scroll_cache: FrameState,
     last_sent: HashMap<u16, FrameState>,
@@ -804,6 +804,10 @@ fn reset_inflight(client: &mut ClientState) {
     client.inflight_frames.clear();
 }
 
+fn is_unset_view_size(rows: u16, cols: u16) -> bool {
+    rows == 0 && cols == 0
+}
+
 fn subscribe_client_to(client: &mut ClientState, pty_id: u16) {
     if client.subscriptions.insert(pty_id) {
         client.last_sent.remove(&pty_id);
@@ -811,15 +815,17 @@ fn subscribe_client_to(client: &mut ClientState, pty_id: u16) {
     }
 }
 
-fn unsubscribe_client_from(client: &mut ClientState, pty_id: u16) {
-    client.subscriptions.remove(&pty_id);
+fn unsubscribe_client_from(client: &mut ClientState, pty_id: u16) -> bool {
+    let removed_sub = client.subscriptions.remove(&pty_id);
     client.last_sent.remove(&pty_id);
     client.preview_next_send_at.remove(&pty_id);
+    let removed_view = client.view_sizes.remove(&pty_id).is_some();
     if client.lead == Some(pty_id) {
         client.lead = None;
         client.scroll_offset = 0;
         client.scroll_cache = FrameState::default();
     }
+    removed_sub || removed_view
 }
 
 fn update_client_scroll_state(client: &mut ClientState, pty_id: u16, next_offset: usize) -> bool {
@@ -889,15 +895,13 @@ impl Session {
         }
     }
 
-    fn min_size_for_pty(&self, pty_id: u16) -> Option<(u16, u16)> {
+    fn mediated_size_for_pty(&self, pty_id: u16) -> Option<(u16, u16)> {
         let mut min_rows: Option<u16> = None;
         let mut min_cols: Option<u16> = None;
         for c in self.clients.values() {
-            if c.lead == Some(pty_id) {
-                if let Some((r, cols)) = c.size {
-                    min_rows = Some(min_rows.map_or(r, |m: u16| m.min(r)));
-                    min_cols = Some(min_cols.map_or(cols, |m: u16| m.min(cols)));
-                }
+            if let Some((r, cols)) = c.view_sizes.get(&pty_id).copied() {
+                min_rows = Some(min_rows.map_or(r, |m: u16| m.min(r)));
+                min_cols = Some(min_cols.map_or(cols, |m: u16| m.min(cols)));
             }
         }
         match (min_rows, min_cols) {
@@ -906,14 +910,14 @@ impl Session {
         }
     }
 
-    fn resize_pty(&mut self, pty_id: u16, rows: u16, cols: u16) {
+    fn resize_pty(&mut self, pty_id: u16, rows: u16, cols: u16) -> bool {
         let pty = match self.ptys.get_mut(&pty_id) {
             Some(p) => p,
-            None => return,
+            None => return false,
         };
         let (cur_rows, cur_cols) = pty.driver.size();
         if cur_rows == rows && cur_cols == cols {
-            return;
+            return false;
         }
         pty.ready_frames.clear();
         pty.driver.resize(rows, cols);
@@ -944,6 +948,24 @@ impl Session {
                 libc::kill(-pty.child_pid, libc::SIGWINCH);
             }
         }
+        true
+    }
+
+    fn resize_ptys_to_mediated_sizes<I>(&mut self, pty_ids: I) -> bool
+    where
+        I: IntoIterator<Item = u16>,
+    {
+        let mut changed = false;
+        let mut seen = HashSet::new();
+        for pty_id in pty_ids {
+            if !seen.insert(pty_id) {
+                continue;
+            }
+            if let Some((rows, cols)) = self.mediated_size_for_pty(pty_id) {
+                changed |= self.resize_pty(pty_id, rows, cols);
+            }
+        }
+        changed
     }
 
     fn pty_list_msg(&self) -> Vec<u8> {
@@ -1167,16 +1189,25 @@ fn respawn_child(
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-        ) != 0 {
+        ) != 0
+        {
             return None;
         }
-        let ws = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+        let ws = libc::winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
         libc::ioctl(master, libc::TIOCSWINSZ, &ws);
     }
 
     let pid = unsafe { libc::fork() };
     if pid < 0 {
-        unsafe { libc::close(master); libc::close(slave); }
+        unsafe {
+            libc::close(master);
+            libc::close(slave);
+        }
         return None;
     }
     if pid == 0 {
@@ -1187,7 +1218,9 @@ fn respawn_child(
             libc::dup2(slave, 0);
             libc::dup2(slave, 1);
             libc::dup2(slave, 2);
-            if slave > 2 { libc::close(slave); }
+            if slave > 2 {
+                libc::close(slave);
+            }
         }
         std::env::set_var("TERM", "xterm-256color");
         std::env::set_var("COLORTERM", "truecolor");
@@ -1198,14 +1231,26 @@ fn respawn_child(
             let flag = CString::new("-lc").unwrap();
             let cmd_c = CString::new(cmd).unwrap();
             unsafe {
-                libc::execvp(shell_c.as_ptr(), [shell_c.as_ptr(), flag.as_ptr(), cmd_c.as_ptr(), std::ptr::null()].as_ptr());
+                libc::execvp(
+                    shell_c.as_ptr(),
+                    [
+                        shell_c.as_ptr(),
+                        flag.as_ptr(),
+                        cmd_c.as_ptr(),
+                        std::ptr::null(),
+                    ]
+                    .as_ptr(),
+                );
                 libc::_exit(1);
             }
         }
         let shell_c = CString::new(shell).unwrap();
         let login = CString::new("-l").unwrap();
         unsafe {
-            libc::execvp(shell_c.as_ptr(), [shell_c.as_ptr(), login.as_ptr(), std::ptr::null()].as_ptr());
+            libc::execvp(
+                shell_c.as_ptr(),
+                [shell_c.as_ptr(), login.as_ptr(), std::ptr::null()].as_ptr(),
+            );
             libc::_exit(1);
         }
     }
@@ -1719,7 +1764,9 @@ async fn tick(state: &AppState) -> TickOutcome {
     let title_interval = Duration::from_secs_f64(1.0 / max_fps as f64);
     let ids: Vec<u16> = sess.ptys.keys().copied().collect();
     for &id in &ids {
-        let Some(pty) = sess.ptys.get_mut(&id) else { continue };
+        let Some(pty) = sess.ptys.get_mut(&id) else {
+            continue;
+        };
         if pty.driver.take_title_dirty() {
             pty.mark_dirty();
             pty.title_pending = true;
@@ -1760,7 +1807,9 @@ async fn tick(state: &AppState) -> TickOutcome {
 
     let mut snapshots: HashMap<u16, FrameState> = HashMap::new();
     for &id in &ids {
-        let Some(pty) = sess.ptys.get_mut(&id) else { continue };
+        let Some(pty) = sess.ptys.get_mut(&id) else {
+            continue;
+        };
         if needful_ptys.contains(&id) {
             if let Some(frame) = pty.ready_frames.pop_front() {
                 snapshots.insert(id, frame);
@@ -1812,7 +1861,9 @@ async fn tick(state: &AppState) -> TickOutcome {
             any_send_window,
             lead_deadline,
         ) = {
-            let Some(c) = sess.clients.get(&cid) else { continue };
+            let Some(c) = sess.clients.get(&cid) else {
+                continue;
+            };
             let reserve_preview_slot = client_has_due_preview(&sess, c, now);
             (
                 c.lead,
@@ -1833,14 +1884,18 @@ async fn tick(state: &AppState) -> TickOutcome {
             if scroll_offset > 0 {
                 if can_send_lead {
                     let prev_frame = {
-                        let Some(c) = sess.clients.get(&cid) else { continue };
+                        let Some(c) = sess.clients.get(&cid) else {
+                            continue;
+                        };
                         c.scroll_cache.clone()
                     };
                     let outcome = if let Some(pty) = sess.ptys.get_mut(&pid) {
                         if let Some((msg, new_frame)) =
                             build_scrollback_update(pty, pid, scroll_offset, &prev_frame)
                         {
-                            let Some(c) = sess.clients.get_mut(&cid) else { break };
+                            let Some(c) = sess.clients.get_mut(&cid) else {
+                                break;
+                            };
                             let bytes = msg.len();
                             if c.tx.try_send(msg).is_ok() {
                                 c.scroll_cache = new_frame;
@@ -2022,7 +2077,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 tx: out_tx,
                 lead: None,
                 subscriptions: HashSet::new(),
-                size: None,
+                view_sizes: HashMap::new(),
                 scroll_offset: 0,
                 scroll_cache: FrameState::default(),
                 last_sent: HashMap::new(),
@@ -2059,7 +2114,10 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             },
         );
         if let Some(c) = sess.clients.get(&client_id) {
-            let _ = c.tx.try_send(msg_hello(1, FEATURE_CREATE_NONCE | FEATURE_RESTART));
+            let _ = c.tx.try_send(msg_hello(
+                1,
+                FEATURE_CREATE_NONCE | FEATURE_RESTART | FEATURE_RESIZE_BATCH,
+            ));
         }
         let mut initial_msgs = Vec::new();
         initial_msgs.push(sess.pty_list_msg());
@@ -2310,14 +2368,32 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 }
             }
             C2S_RESIZE if data.len() >= 7 => {
-                let pid = u16::from_le_bytes([data[1], data[2]]);
-                let rows = u16::from_le_bytes([data[3], data[4]]);
-                let cols = u16::from_le_bytes([data[5], data[6]]);
-                if let Some(c) = sess.clients.get_mut(&client_id) {
-                    c.size = Some((rows, cols));
+                let entries = data[1..].chunks_exact(6);
+                if !entries.remainder().is_empty() {
+                    continue;
                 }
-                if let Some((r, c)) = sess.min_size_for_pty(pid) {
-                    sess.resize_pty(pid, r, c);
+                let mut touched = Vec::new();
+                for entry in entries {
+                    let pid = u16::from_le_bytes([entry[0], entry[1]]);
+                    if !sess.ptys.contains_key(&pid) {
+                        continue;
+                    }
+                    let rows = u16::from_le_bytes([entry[2], entry[3]]);
+                    let cols = u16::from_le_bytes([entry[4], entry[5]]);
+                    if let Some(c) = sess.clients.get_mut(&client_id) {
+                        if is_unset_view_size(rows, cols) {
+                            if c.view_sizes.remove(&pid).is_some() {
+                                touched.push(pid);
+                            }
+                        } else if rows == 0 || cols == 0 {
+                            continue;
+                        } else {
+                            c.view_sizes.insert(pid, (rows, cols));
+                            touched.push(pid);
+                        }
+                    }
+                }
+                if sess.resize_ptys_to_mediated_sizes(touched) {
                     need_nudge = true;
                 }
             }
@@ -2381,6 +2457,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     sess.ptys.insert(id, pty);
                     if let Some(c) = sess.clients.get_mut(&client_id) {
                         c.lead = Some(id);
+                        c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
                         c.scroll_offset = 0;
                         c.scroll_cache = FrameState::default();
@@ -2461,6 +2538,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     sess.ptys.insert(id, pty);
                     if let Some(c) = sess.clients.get_mut(&client_id) {
                         c.lead = Some(id);
+                        c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
                         c.scroll_offset = 0;
                         c.scroll_cache = FrameState::default();
@@ -2524,6 +2602,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     sess.ptys.insert(id, pty);
                     if let Some(c) = sess.clients.get_mut(&client_id) {
                         c.lead = Some(id);
+                        c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
                         c.scroll_offset = 0;
                         c.scroll_cache = FrameState::default();
@@ -2597,6 +2676,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     sess.ptys.insert(id, pty);
                     if let Some(c) = sess.clients.get_mut(&client_id) {
                         c.lead = Some(id);
+                        c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
                         c.scroll_offset = 0;
                         c.scroll_cache = FrameState::default();
@@ -2630,17 +2710,6 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                         pty.mark_dirty();
                         need_nudge = true;
                     }
-                    if let Some((r, c)) = sess.min_size_for_pty(pid) {
-                        sess.resize_pty(pid, r, c);
-                        need_nudge = true;
-                    }
-                    if let Some(old) = old_pid {
-                        if old != pid {
-                            if let Some((r, c)) = sess.min_size_for_pty(old) {
-                                sess.resize_pty(old, r, c);
-                            }
-                        }
-                    }
                 }
             }
             C2S_SUBSCRIBE if data.len() >= 3 => {
@@ -2658,29 +2727,37 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             C2S_UNSUBSCRIBE if data.len() >= 3 => {
                 let pid = u16::from_le_bytes([data[1], data[2]]);
                 if sess.ptys.contains_key(&pid) {
-                    let old_lead = sess.clients.get(&client_id).and_then(|c| c.lead);
+                    let mut touched = Vec::new();
                     if let Some(c) = sess.clients.get_mut(&client_id) {
-                        unsubscribe_client_from(c, pid);
+                        if unsubscribe_client_from(c, pid) {
+                            touched.push(pid);
+                        }
                         reset_inflight(c);
                     }
-                    if old_lead == Some(pid) {
-                        if let Some((r, c)) = sess.min_size_for_pty(pid) {
-                            sess.resize_pty(pid, r, c);
-                            need_nudge = true;
-                        }
+                    if sess.resize_ptys_to_mediated_sizes(touched) {
+                        need_nudge = true;
                     }
                 }
             }
             C2S_RESTART if data.len() >= 3 => {
                 let pid = u16::from_le_bytes([data[1], data[2]]);
-                let restart_info = sess.ptys.get(&pid)
+                let restart_info = sess
+                    .ptys
+                    .get(&pid)
                     .filter(|p| p.exited)
                     .map(|p| (p.driver.size(), p.command.clone(), p.tag.clone()));
                 if let Some(((rows, cols), command, tag)) = restart_info {
                     if let Some((master, child, reader)) = respawn_child(
-                        &state.0.shell, rows, cols, pid, command.as_deref(), state.clone(),
+                        &state.0.shell,
+                        rows,
+                        cols,
+                        pid,
+                        command.as_deref(),
+                        state.clone(),
                     ) {
-                        let Some(pty) = sess.ptys.get_mut(&pid) else { break };
+                        let Some(pty) = sess.ptys.get_mut(&pid) else {
+                            break;
+                        };
                         pty.master_fd = master;
                         pty.child_pid = child;
                         pty.reader_handle = reader;
@@ -2734,13 +2811,13 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
     {
         let mut sess = state.1.lock().await;
         let mut need_nudge = false;
-        let old_lead = sess.clients.get(&client_id).and_then(|c| c.lead);
-        sess.clients.remove(&client_id);
-        if let Some(pid) = old_lead {
-            if let Some((r, c)) = sess.min_size_for_pty(pid) {
-                sess.resize_pty(pid, r, c);
-                need_nudge = true;
-            }
+        let affected_ptys = sess
+            .clients
+            .remove(&client_id)
+            .map(|client| client.view_sizes.keys().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if sess.resize_ptys_to_mediated_sizes(affected_ptys) {
+            need_nudge = true;
         }
         drop(sess);
         if need_nudge {
@@ -2761,7 +2838,7 @@ mod tests {
             tx,
             lead: None,
             subscriptions: HashSet::new(),
-            size: None,
+            view_sizes: HashMap::new(),
             scroll_offset: 0,
             scroll_cache: FrameState::default(),
             last_sent: HashMap::new(),
@@ -2816,6 +2893,35 @@ mod tests {
         let mut frame = FrameState::new(2, 8);
         frame.write_text(0, 0, text, blit_remote::CellStyle::default());
         frame
+    }
+
+    #[test]
+    fn unset_view_size_accepts_zero_pair_only() {
+        assert!(is_unset_view_size(0, 0));
+        assert!(!is_unset_view_size(0, 80));
+        assert!(!is_unset_view_size(u16::MAX, u16::MAX));
+    }
+
+    #[test]
+    fn unsubscribe_client_from_clears_view_size() {
+        let mut client = test_client();
+        client.subscriptions.insert(7);
+        client.view_sizes.insert(7, (24, 80));
+        assert!(unsubscribe_client_from(&mut client, 7));
+        assert!(!client.subscriptions.contains(&7));
+        assert!(!client.view_sizes.contains_key(&7));
+    }
+
+    #[test]
+    fn mediated_size_uses_per_pty_view_sizes_without_lead() {
+        let mut session = Session::new();
+        let mut c1 = test_client();
+        let mut c2 = test_client();
+        c1.view_sizes.insert(7, (30, 120));
+        c2.view_sizes.insert(7, (24, 100));
+        session.clients.insert(1, c1);
+        session.clients.insert(2, c2);
+        assert_eq!(session.mediated_size_for_pty(7), Some((24, 100)));
     }
 
     #[test]

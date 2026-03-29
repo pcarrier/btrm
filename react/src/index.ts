@@ -6,6 +6,7 @@ export type {
   AddBlitConnectionOptions,
   CreateBlitWorkspaceOptions,
   CreateWorkspaceSessionOptions,
+  ResizeWorkspaceSessionOptions,
 } from "./BlitWorkspace";
 export {
   SEARCH_SOURCE_TITLE,

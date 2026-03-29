@@ -64,12 +64,9 @@ fn table_slice<'a>(data: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
     for i in 0..num_tables {
         let rec = offset + 12 + i * 16;
         if &data[rec..rec + 4] == tag {
-            let table_offset = u32::from_be_bytes([
-                data[rec + 8],
-                data[rec + 9],
-                data[rec + 10],
-                data[rec + 11],
-            ]) as usize;
+            let table_offset =
+                u32::from_be_bytes([data[rec + 8], data[rec + 9], data[rec + 10], data[rec + 11]])
+                    as usize;
             let table_length = u32::from_be_bytes([
                 data[rec + 12],
                 data[rec + 13],

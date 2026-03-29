@@ -1046,16 +1046,28 @@ mod integration_tests {
             driver.process(format!("line {i}\r\n").as_bytes());
         }
         let snap = driver.snapshot(true, true);
-        assert!(snap.scrollback_lines() > 0, "should have scrollback lines, got {}", snap.scrollback_lines());
+        assert!(
+            snap.scrollback_lines() > 0,
+            "should have scrollback lines, got {}",
+            snap.scrollback_lines()
+        );
 
         // Scrollback frame at offset 1 should show different content than viewport
         let scroll1 = driver.scrollback_frame(1);
-        assert_ne!(snap.cells(), scroll1.cells(), "scrollback should differ from viewport");
+        assert_ne!(
+            snap.cells(),
+            scroll1.cells(),
+            "scrollback should differ from viewport"
+        );
 
         // Scrollback frame at offset 0 should match viewport
         let scroll0 = driver.scrollback_frame(0);
         // Not necessarily identical to snapshot (cursor/mode differ) but cells should match
-        assert_eq!(snap.cells(), scroll0.cells(), "offset 0 scrollback should match viewport cells");
+        assert_eq!(
+            snap.cells(),
+            scroll0.cells(),
+            "offset 0 scrollback should match viewport cells"
+        );
     }
 
     #[test]

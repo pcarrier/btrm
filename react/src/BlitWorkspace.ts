@@ -28,6 +28,12 @@ export interface CreateWorkspaceSessionOptions {
   cwdFromSessionId?: SessionId;
 }
 
+export interface ResizeWorkspaceSessionOptions {
+  sessionId: SessionId;
+  rows: number;
+  cols: number;
+}
+
 function workspaceError(message: string): Error {
   return new Error(message);
 }
@@ -175,9 +181,45 @@ export class BlitWorkspace {
   }
 
   resizeSession(sessionId: SessionId, rows: number, cols: number): void {
-    const session = this.getSession(sessionId);
-    if (!session) return;
-    this.requireConnection(session.connectionId).resizeSession(sessionId, rows, cols);
+    this.resizeSessions([{ sessionId, rows, cols }]);
+  }
+
+  clearSessionSize(sessionId: SessionId): void {
+    this.clearSessionSizes([sessionId]);
+  }
+
+  clearSessionSizes(sessionIds: Iterable<SessionId>): void {
+    const sessionIdsByConnection = new Map<ConnectionId, SessionId[]>();
+    for (const sessionId of sessionIds) {
+      const session = this.getSession(sessionId);
+      if (!session) continue;
+      let bucket = sessionIdsByConnection.get(session.connectionId);
+      if (!bucket) {
+        bucket = [];
+        sessionIdsByConnection.set(session.connectionId, bucket);
+      }
+      bucket.push(sessionId);
+    }
+    for (const [connectionId, bucket] of sessionIdsByConnection) {
+      this.requireConnection(connectionId).clearSessionSizes(bucket);
+    }
+  }
+
+  resizeSessions(entries: Iterable<ResizeWorkspaceSessionOptions>): void {
+    const entriesByConnection = new Map<ConnectionId, ResizeWorkspaceSessionOptions[]>();
+    for (const entry of entries) {
+      const session = this.getSession(entry.sessionId);
+      if (!session) continue;
+      let bucket = entriesByConnection.get(session.connectionId);
+      if (!bucket) {
+        bucket = [];
+        entriesByConnection.set(session.connectionId, bucket);
+      }
+      bucket.push(entry);
+    }
+    for (const [connectionId, bucket] of entriesByConnection) {
+      this.requireConnection(connectionId).resizeSessions(bucket);
+    }
   }
 
   scrollSession(sessionId: SessionId, offset: number): void {

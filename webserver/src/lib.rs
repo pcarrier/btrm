@@ -46,7 +46,8 @@ pub fn font_response(name: &str, cors_origin: Option<&str>) -> Response {
 fn add_cors(resp: &mut Response, origin: Option<&str>) {
     if let Some(origin) = origin {
         if let Ok(val) = origin.parse() {
-            resp.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+            resp.headers_mut()
+                .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
         }
     }
 }

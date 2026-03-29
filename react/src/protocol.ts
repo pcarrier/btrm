@@ -19,6 +19,14 @@ import {
 
 const textEncoder = new TextEncoder();
 
+type ResizeEntry = {
+  ptyId: number;
+  rows: number;
+  cols: number;
+};
+
+const UNSET_VIEW_SIZE = 0;
+
 export function buildAckMessage(): Uint8Array {
   return new Uint8Array([C2S_ACK]);
 }
@@ -64,15 +72,39 @@ export function buildResizeMessage(
   rows: number,
   cols: number,
 ): Uint8Array {
-  const msg = new Uint8Array(7);
+  return buildResizeBatchMessage([{ ptyId, rows, cols }]);
+}
+
+export function buildResizeBatchMessage(entries: ReadonlyArray<ResizeEntry>): Uint8Array {
+  const msg = new Uint8Array(1 + entries.length * 6);
   msg[0] = C2S_RESIZE;
-  msg[1] = ptyId & 0xff;
-  msg[2] = (ptyId >> 8) & 0xff;
-  msg[3] = rows & 0xff;
-  msg[4] = (rows >> 8) & 0xff;
-  msg[5] = cols & 0xff;
-  msg[6] = (cols >> 8) & 0xff;
+  let offset = 1;
+  for (const entry of entries) {
+    msg[offset] = entry.ptyId & 0xff;
+    msg[offset + 1] = (entry.ptyId >> 8) & 0xff;
+    msg[offset + 2] = entry.rows & 0xff;
+    msg[offset + 3] = (entry.rows >> 8) & 0xff;
+    msg[offset + 4] = entry.cols & 0xff;
+    msg[offset + 5] = (entry.cols >> 8) & 0xff;
+    offset += 6;
+  }
   return msg;
+}
+
+export function buildClearResizeMessage(ptyId: number): Uint8Array {
+  return buildResizeBatchMessage([
+    { ptyId, rows: UNSET_VIEW_SIZE, cols: UNSET_VIEW_SIZE },
+  ]);
+}
+
+export function buildClearResizeBatchMessage(ptyIds: ReadonlyArray<number>): Uint8Array {
+  return buildResizeBatchMessage(
+    ptyIds.map((ptyId) => ({
+      ptyId,
+      rows: UNSET_VIEW_SIZE,
+      cols: UNSET_VIEW_SIZE,
+    })),
+  );
 }
 
 export function buildScrollMessage(

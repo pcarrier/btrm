@@ -11,6 +11,7 @@ import {
   C2S_CREATE2,
   CREATE2_HAS_COMMAND,
   FEATURE_CREATE_NONCE,
+  FEATURE_RESIZE_BATCH,
   FEATURE_RESTART,
 } from "../types";
 
@@ -280,6 +281,66 @@ describe("BlitConnection", () => {
     expect(msg[1] | (msg[2] << 8)).toBe(1);
     expect(msg[3] | (msg[4] << 8)).toBe(24);
     expect(msg[5] | (msg[6] << 8)).toBe(80);
+  });
+
+  it("resizeSessions batches RESIZE entries when supported", () => {
+    transport.pushHello(1, FEATURE_RESIZE_BATCH);
+    transport.pushCreated(1, "");
+    transport.pushCreated(2, "");
+    const [first, second] = conn.getSnapshot().sessions;
+    conn.resizeSessions([
+      { sessionId: first.id, rows: 24, cols: 80 },
+      { sessionId: second.id, rows: 40, cols: 120 },
+    ]);
+    const msg = transport.sent[transport.sent.length - 1]!;
+    expect(msg[0]).toBe(C2S_RESIZE);
+    expect(msg.length).toBe(13);
+    expect(msg[1] | (msg[2] << 8)).toBe(1);
+    expect(msg[3] | (msg[4] << 8)).toBe(24);
+    expect(msg[5] | (msg[6] << 8)).toBe(80);
+    expect(msg[7] | (msg[8] << 8)).toBe(2);
+    expect(msg[9] | (msg[10] << 8)).toBe(40);
+    expect(msg[11] | (msg[12] << 8)).toBe(120);
+  });
+
+  it("resizeSessions falls back to single-entry RESIZE messages", () => {
+    transport.pushCreated(1, "");
+    transport.pushCreated(2, "");
+    const [first, second] = conn.getSnapshot().sessions;
+    const before = transport.sent.length;
+    conn.resizeSessions([
+      { sessionId: first.id, rows: 24, cols: 80 },
+      { sessionId: second.id, rows: 40, cols: 120 },
+    ]);
+    const sent = transport.sent.slice(before).filter((msg) => msg[0] === C2S_RESIZE);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]![1] | (sent[0]![2] << 8)).toBe(1);
+    expect(sent[1]![1] | (sent[1]![2] << 8)).toBe(2);
+  });
+
+  it("clearSessionSizes sends unset-view-size resize entries when supported", () => {
+    transport.pushHello(1, FEATURE_RESIZE_BATCH);
+    transport.pushCreated(1, "");
+    transport.pushCreated(2, "");
+    const [first, second] = conn.getSnapshot().sessions;
+    conn.clearSessionSizes([first.id, second.id]);
+    const msg = transport.sent[transport.sent.length - 1]!;
+    expect(msg[0]).toBe(C2S_RESIZE);
+    expect(msg.length).toBe(13);
+    expect(msg[1] | (msg[2] << 8)).toBe(1);
+    expect(msg[3] | (msg[4] << 8)).toBe(0);
+    expect(msg[5] | (msg[6] << 8)).toBe(0);
+    expect(msg[7] | (msg[8] << 8)).toBe(2);
+    expect(msg[9] | (msg[10] << 8)).toBe(0);
+    expect(msg[11] | (msg[12] << 8)).toBe(0);
+  });
+
+  it("clearSessionSizes is ignored when extended resize semantics are unavailable", () => {
+    transport.pushCreated(1, "");
+    const session = conn.getSnapshot().sessions[0];
+    const before = transport.sent.length;
+    conn.clearSessionSize(session.id);
+    expect(transport.sent).toHaveLength(before);
   });
 
   it("scrollSession sends SCROLL", () => {

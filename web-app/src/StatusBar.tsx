@@ -6,7 +6,7 @@ import type {
 } from "blit-react";
 import { formatBw } from "./useMetrics";
 import type { Metrics, RenderSample, NetSample } from "./useMetrics";
-import { themeFor, ui, z } from "./theme";
+import { sessionName, themeFor, ui, z } from "./theme";
 
 type TimelineRef = RefObject<RenderSample[]>;
 type NetRef = RefObject<NetSample[]>;
@@ -83,7 +83,7 @@ export function StatusBar({
       >
         {focusedSession && (
           <>
-            {focusedSession.title ?? focusedSession.tag ?? "Terminal"}
+            {sessionName(focusedSession)}
           </>
         )}
       </span>

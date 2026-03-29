@@ -311,8 +311,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             t.set_font_size(rasterFontSize);
             if (shouldInvalidate) t.invalidate_render_cache();
           }
-          blitConn.getStore().setFontFamily(fontFamily);
-          blitConn.getStore().setFontSize(rasterFontSize);
+          blitConn.setFontFamily(fontFamily);
+          blitConn.setFontSize(rasterFontSize);
           blitConn.setCellSize(cell.pw, cell.ph);
         }
         if (shouldInvalidate) {

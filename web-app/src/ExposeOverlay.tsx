@@ -18,7 +18,7 @@ import type {
   SessionId,
   TerminalPalette,
 } from "blit-react";
-import { overlayChromeStyles, themeFor, ui } from "./theme";
+import { overlayChromeStyles, sessionName, themeFor, ui } from "./theme";
 import { OverlayBackdrop, OverlayPanel } from "./Overlay";
 
 const SOURCE_LABEL: Record<number, string> = {
@@ -113,7 +113,7 @@ export function ExposeOverlay({
           return {
             sessionId: result.sessionId,
             connectionId: result.connectionId,
-            title: session.title ?? session.tag ?? "Terminal",
+            title: sessionName(session),
             exited: session.state === "exited",
             context: result.context,
             source: result.primarySource,

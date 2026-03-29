@@ -1,5 +1,9 @@
 import type React from "react";
-import type { TerminalPalette } from "blit-react";
+import type { BlitSession, TerminalPalette } from "blit-react";
+
+export function sessionName(s: BlitSession): string {
+  return s.title ?? s.tag ?? "Terminal";
+}
 
 export interface Theme {
   bg: string;

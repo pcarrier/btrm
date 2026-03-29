@@ -83,7 +83,7 @@ export function StatusBar({
       >
         {focusedSession && (
           <>
-            {focusedSession.title ?? focusedSession.tag ?? `PTY ${focusedSession.ptyId}`}
+            {focusedSession.title ?? focusedSession.tag ?? "Terminal"}
           </>
         )}
       </span>

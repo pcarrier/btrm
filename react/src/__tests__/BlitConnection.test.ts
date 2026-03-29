@@ -85,7 +85,6 @@ describe("BlitConnection", () => {
     transport.pushCreated(5, "editor");
     const sessions = conn.getSnapshot().sessions;
     expect(sessions.length).toBe(1);
-    expect(sessions[0].ptyId).toBe(5);
     expect(sessions[0].tag).toBe("editor");
     expect(sessions[0].state).toBe("active");
   });
@@ -139,9 +138,9 @@ describe("BlitConnection", () => {
       { ptyId: 3, tag: "c" },
     ]);
     const s = conn.getSnapshot().sessions;
-    expect(s.find((x) => x.ptyId === 1)?.state).toBe("closed");
-    expect(s.find((x) => x.ptyId === 2)?.state).toBe("active");
-    expect(s.find((x) => x.ptyId === 3)?.state).toBe("active");
+    expect(s.find((x) => x.tag === "a")?.state).toBe("closed");
+    expect(s.find((x) => x.tag === "b")?.state).toBe("active");
+    expect(s.find((x) => x.tag === "c")?.state).toBe("active");
   });
 
   it("preserves title across LIST reconciliation", () => {
@@ -156,8 +155,8 @@ describe("BlitConnection", () => {
     transport.pushCreated(1, "a");
     transport.pushCreated(2, "b");
     transport.pushCreated(3, "c");
-    expect(conn.getSnapshot().sessions.map((s) => s.ptyId)).toEqual([
-      1, 2, 3,
+    expect(conn.getSnapshot().sessions.map((s) => s.tag)).toEqual([
+      "a", "b", "c",
     ]);
   });
 
@@ -171,7 +170,7 @@ describe("BlitConnection", () => {
     const snap = conn.getSnapshot();
     expect(snap.focusedSessionId).not.toBeNull();
     const focused = snap.sessions.find((s) => s.id === snap.focusedSessionId);
-    expect(focused?.ptyId).toBe(5);
+    expect(focused?.tag).toBe("a");
   });
 
   it("focusedSessionId is null for empty LIST", () => {
@@ -180,13 +179,13 @@ describe("BlitConnection", () => {
   });
 
   it("focusedSessionId moves to next active on CLOSED", () => {
-    transport.pushList([{ ptyId: 1 }, { ptyId: 2 }]);
-    const s1 = conn.getSnapshot().sessions.find((s) => s.ptyId === 1)!;
+    transport.pushList([{ ptyId: 1, tag: "first" }, { ptyId: 2, tag: "second" }]);
+    const s1 = conn.getSnapshot().sessions.find((s) => s.tag === "first")!;
     conn.focusSession(s1.id);
     transport.pushClosed(1);
     const snap = conn.getSnapshot();
     const focused = snap.sessions.find((s) => s.id === snap.focusedSessionId);
-    expect(focused?.ptyId).toBe(2);
+    expect(focused?.tag).toBe("second");
   });
 
   it("focusedSessionId becomes null when all sessions close", () => {
@@ -218,14 +217,14 @@ describe("BlitConnection", () => {
     const nonce = msg[1] | (msg[2] << 8);
     transport.pushCreatedN(nonce, 42, "test");
     const session = await promise;
-    expect(session.ptyId).toBe(42);
+    expect(session.tag).toBe("test");
   });
 
   it("createSession falls back to FIFO via S2C_CREATED", async () => {
     const promise = conn.createSession({ rows: 24, cols: 80, tag: "test" });
     transport.pushCreated(42, "test");
     const session = await promise;
-    expect(session.ptyId).toBe(42);
+    expect(session.tag).toBe("test");
   });
 
   it("createSession rejects on disconnect", async () => {
@@ -383,18 +382,19 @@ describe("BlitConnection — advanced scenarios", () => {
     transport.pushClosed(1);
     transport.pushCreated(2, "b");
     const s = conn.getSnapshot().sessions;
-    expect(s.find((x) => x.ptyId === 1)?.state).toBe("closed");
-    expect(s.find((x) => x.ptyId === 2)?.state).toBe("active");
+    expect(s.find((x) => x.tag === "a")?.state).toBe("closed");
+    expect(s.find((x) => x.tag === "b")?.state).toBe("active");
   });
 
-  it("handles duplicate CREATED for same ptyId", () => {
+  it("handles duplicate CREATED for same pty", () => {
     const { conn, transport } = createConnection();
     transport.pushList([]);
     transport.pushCreated(1, "first");
     transport.pushCreated(1, "second");
-    const matches = conn.getSnapshot().sessions.filter((s) => s.ptyId === 1);
-    expect(matches.length).toBe(1);
-    expect(matches[0].state).toBe("active");
+    // Second CREATED updates the existing session's tag
+    const active = conn.getSnapshot().sessions.filter((s) => s.state === "active");
+    expect(active.length).toBe(1);
+    expect(active[0].tag).toBe("second");
   });
 
   it("handles CLOSED then re-CREATED with same ptyId", () => {
@@ -405,7 +405,7 @@ describe("BlitConnection — advanced scenarios", () => {
     transport.pushCreated(1, "v2");
     const active = conn
       .getSnapshot()
-      .sessions.filter((s) => s.ptyId === 1 && s.state === "active");
+      .sessions.filter((s) => s.tag === "v2" && s.state === "active");
     expect(active.length).toBe(1);
     expect(active[0].tag).toBe("v2");
   });
@@ -413,14 +413,14 @@ describe("BlitConnection — advanced scenarios", () => {
   it("title updates are independent per pty", () => {
     const { conn, transport } = createConnection();
     transport.pushList([
-      { ptyId: 1, tag: "" },
-      { ptyId: 2, tag: "" },
+      { ptyId: 1, tag: "s1" },
+      { ptyId: 2, tag: "s2" },
     ]);
     transport.pushTitle(1, "vim");
     transport.pushTitle(2, "bash");
     const s = conn.getSnapshot().sessions;
-    expect(s.find((x) => x.ptyId === 1)?.title).toBe("vim");
-    expect(s.find((x) => x.ptyId === 2)?.title).toBe("bash");
+    expect(s.find((x) => x.tag === "s1")?.title).toBe("vim");
+    expect(s.find((x) => x.tag === "s2")?.title).toBe("bash");
   });
 
   it("title can be updated multiple times", () => {
@@ -450,7 +450,7 @@ describe("BlitConnection — advanced scenarios", () => {
       { ptyId: 1, tag: "a" },
       { ptyId: 2, tag: "b" },
     ]);
-    expect(conn.getSnapshot().sessions.map((s) => s.ptyId)).toEqual([1, 2]);
+    expect(conn.getSnapshot().sessions.map((s) => s.tag)).toEqual(["a", "b"]);
     expect(conn.getSnapshot().sessions.every((s) => s.state === "active")).toBe(
       true,
     );
@@ -471,9 +471,9 @@ describe("BlitConnection — advanced scenarios", () => {
     transport.pushCreated(65535, "max");
     transport.pushCreated(256, "mid");
     expect(
-      conn.getSnapshot().sessions.find((s) => s.ptyId === 65535)?.tag,
+      conn.getSnapshot().sessions.find((s) => s.tag === "max")?.tag,
     ).toBe("max");
-    expect(conn.getSnapshot().sessions.find((s) => s.ptyId === 256)?.tag).toBe(
+    expect(conn.getSnapshot().sessions.find((s) => s.tag === "mid")?.tag).toBe(
       "mid",
     );
   });
@@ -511,10 +511,10 @@ describe("BlitConnection — advanced scenarios", () => {
       { ptyId: 3, tag: "c" },
     ]);
     const s = conn.getSnapshot().sessions;
-    expect(s.find((x) => x.ptyId === 1)?.state).toBe("closed");
-    expect(s.find((x) => x.ptyId === 2)?.state).toBe("active");
-    expect(s.find((x) => x.ptyId === 3)?.state).toBe("active");
-    expect(s.find((x) => x.ptyId === 1)?.title).toBe("vim");
+    expect(s.find((x) => x.tag === "a")?.state).toBe("closed");
+    expect(s.find((x) => x.tag === "b")?.state).toBe("active");
+    expect(s.find((x) => x.tag === "c")?.state).toBe("active");
+    expect(s.find((x) => x.tag === "a")?.title).toBe("vim");
   });
 
   it("handles emoji tags and titles", () => {
@@ -554,23 +554,23 @@ describe("BlitConnection — advanced scenarios", () => {
 
   it("focusedSessionId survives LIST reconciliation when pty still exists", () => {
     const { conn, transport } = createConnection();
-    transport.pushList([{ ptyId: 1 }, { ptyId: 2 }, { ptyId: 3 }]);
-    const s2 = conn.getSnapshot().sessions.find((s) => s.ptyId === 2)!;
+    transport.pushList([{ ptyId: 1, tag: "a" }, { ptyId: 2, tag: "b" }, { ptyId: 3, tag: "c" }]);
+    const s2 = conn.getSnapshot().sessions.find((s) => s.tag === "b")!;
     conn.focusSession(s2.id);
-    transport.pushList([{ ptyId: 2 }, { ptyId: 3 }]);
+    transport.pushList([{ ptyId: 2, tag: "b" }, { ptyId: 3, tag: "c" }]);
     const snap = conn.getSnapshot();
     const focused = snap.sessions.find((s) => s.id === snap.focusedSessionId);
-    expect(focused?.ptyId).toBe(2);
+    expect(focused?.tag).toBe("b");
   });
 
   it("focusedSessionId falls back when focused pty removed from LIST", () => {
     const { conn, transport } = createConnection();
-    transport.pushList([{ ptyId: 1 }, { ptyId: 2 }]);
-    const s1 = conn.getSnapshot().sessions.find((s) => s.ptyId === 1)!;
+    transport.pushList([{ ptyId: 1, tag: "a" }, { ptyId: 2, tag: "b" }]);
+    const s1 = conn.getSnapshot().sessions.find((s) => s.tag === "a")!;
     conn.focusSession(s1.id);
-    transport.pushList([{ ptyId: 2 }]);
+    transport.pushList([{ ptyId: 2, tag: "b" }]);
     const snap = conn.getSnapshot();
     const focused = snap.sessions.find((s) => s.id === snap.focusedSessionId);
-    expect(focused?.ptyId).toBe(2);
+    expect(focused?.tag).toBe("b");
   });
 });

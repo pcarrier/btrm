@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "blit-alacritty"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "alacritty_terminal",
  "blit-remote",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "blit-browser"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "blit-remote",
  "js-sys",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "blit-cli"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "axum",
  "blit-remote",
@@ -210,24 +210,24 @@ dependencies = [
 
 [[package]]
 name = "blit-demo"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "blit-remote",
  "libc",
- "netlink-packet-core 0.8.1",
+ "netlink-packet-core",
  "netlink-packet-sock-diag",
- "netlink-packet-utils 0.6.0",
+ "netlink-packet-utils",
  "netlink-sys",
  "vt100",
 ]
 
 [[package]]
 name = "blit-fonts"
-version = "0.9.2"
+version = "0.10.0"
 
 [[package]]
 name = "blit-gateway"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "axum",
  "blit-webserver",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "blit-remote"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "lz4_flex",
  "unicode-width",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "blit-server"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "blit-alacritty",
  "blit-remote",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "blit-webserver"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "axum",
  "blit-fonts",
@@ -1069,16 +1069,7 @@ checksum = "72724faf704479d67b388da142b186f916188505e7e0b26719019c525882eda4"
 dependencies = [
  "anyhow",
  "byteorder",
- "netlink-packet-utils 0.5.2",
-]
-
-[[package]]
-name = "netlink-packet-core"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3463cbb78394cb0141e2c926b93fc2197e473394b761986eca3b9da2c63ae0f4"
-dependencies = [
- "paste",
+ "netlink-packet-utils",
 ]
 
 [[package]]
@@ -1091,8 +1082,8 @@ dependencies = [
  "bitflags 1.3.2",
  "byteorder",
  "libc",
- "netlink-packet-core 0.7.0",
- "netlink-packet-utils 0.5.2",
+ "netlink-packet-core",
+ "netlink-packet-utils",
  "smallvec",
 ]
 
@@ -1106,17 +1097,6 @@ dependencies = [
  "byteorder",
  "paste",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "netlink-packet-utils"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3176f18d11a1ae46053e59ec89d46ba318ae1343615bd3f8c908bfc84edae35c"
-dependencies = [
- "byteorder",
- "pastey",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1223,12 +1203,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "pastey"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
 
 [[package]]
 name = "pem"
@@ -1538,9 +1512,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-hash"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
+checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
 
 [[package]]
 name = "rusticata-macros"
@@ -2781,18 +2755,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.47"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
+checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.47"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
+checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
 dependencies = [
  "proc-macro2",
  "quote",

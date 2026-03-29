@@ -308,9 +308,9 @@ This is the model the browser app uses, and it is the model to adopt everywhere.
 ```tsx
 import {
   BlitTerminal,
+  BlitWorkspace,
   BlitWorkspaceProvider,
   WebSocketTransport,
-  createBlitWorkspace,
   useBlitFocusedSession,
   useBlitSessions,
   useBlitWorkspace,
@@ -325,7 +325,7 @@ function EmbeddedBlit({ wasm, passphrase }: { wasm: any; passphrase: string }) {
 
   const workspace = useMemo(
     () =>
-      createBlitWorkspace({
+      new BlitWorkspace({
         wasm,
         connections: [{ id: "default", transport }],
       }),
@@ -368,14 +368,13 @@ function TerminalScreen() {
 
 | API | Purpose |
 | --- | --- |
-| `createBlitWorkspace({ wasm, connections })` | Create a workspace with one or more transports |
+| `new BlitWorkspace({ wasm, connections })` | Create a workspace with one or more transports |
 | `BlitWorkspaceProvider` | Put the workspace, palette, and font settings in context |
 | `useBlitWorkspace()` | Get the imperative workspace object |
 | `useBlitWorkspaceState()` | Read the full reactive workspace snapshot |
 | `useBlitConnection(connectionId?)` | Read one connection snapshot (status, retryCount, error, sessions) |
 | `useBlitSessions()` | Read all sessions across the workspace |
 | `useBlitFocusedSession()` | Read the currently focused session |
-| `useBlitContext()` | Read context values (workspace, palette, fontFamily, fontSize) |
 | `BlitTerminal` | Render one session by `sessionId` |
 
 ### Session creation and control
@@ -454,8 +453,6 @@ interface BlitTransport {
 ### Other useful exports
 
 - `PALETTES` for built-in terminal palettes
-- `measureCell()` for cell layout measurement
-- `CSS_GENERIC` for CSS generic font family detection
 - `SEARCH_SOURCE_TITLE`, `SEARCH_SOURCE_VISIBLE`, `SEARCH_SOURCE_SCROLLBACK` for search result filtering
 
 ## Lower-level crates

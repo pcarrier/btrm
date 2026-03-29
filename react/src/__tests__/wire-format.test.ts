@@ -50,20 +50,19 @@ describe("wire format parsing", () => {
 
   describe("S2C_UPDATE", () => {
     it("parses pty_id and creates terminal", () => {
-      // Need to register the ptyId first via CREATED
-      transport.pushCreated(0x0103, "");
-      // pty_id=0x0103, payload=[0xDE, 0xAD]
+      transport.pushCreated(0x0103, "test");
+      const sessionId = conn.getSnapshot().sessions[0].id;
       transport.push(
         new Uint8Array([S2C_UPDATE, 0x03, 0x01, 0xde, 0xad]),
       );
-      // Terminal was created for this ptyId
-      expect(conn.getTerminal(0x0103)).not.toBeNull();
+      expect(conn.getTerminal(sessionId)).not.toBeNull();
     });
 
     it("empty payload is valid", () => {
-      transport.pushCreated(0, "");
+      transport.pushCreated(0, "test");
+      const sessionId = conn.getSnapshot().sessions[0].id;
       transport.push(new Uint8Array([S2C_UPDATE, 0x00, 0x00]));
-      expect(conn.getTerminal(0)).not.toBeNull();
+      expect(conn.getTerminal(sessionId)).not.toBeNull();
     });
 
     it("rejects 2-byte message", () => {
@@ -80,7 +79,6 @@ describe("wire format parsing", () => {
         new Uint8Array([S2C_CREATED, 0xff, 0x00, 0x68, 0x69]),
       );
       const s = conn.getSnapshot().sessions;
-      expect(s[0].ptyId).toBe(0xff);
       expect(s[0].tag).toBe("hi");
     });
 
@@ -127,9 +125,7 @@ describe("wire format parsing", () => {
       );
       const s = conn.getSnapshot().sessions;
       expect(s.length).toBe(2);
-      expect(s[0].ptyId).toBe(1);
       expect(s[0].tag).toBe("ab");
-      expect(s[1].ptyId).toBe(2);
       expect(s[1].tag).toBe("");
     });
 
@@ -151,7 +147,6 @@ describe("wire format parsing", () => {
       );
       const s = conn.getSnapshot().sessions;
       expect(s.length).toBe(1);
-      expect(s[0].ptyId).toBe(1);
       expect(s[0].tag).toBe("");
     });
 

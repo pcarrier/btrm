@@ -10,7 +10,6 @@ import {
   SEARCH_SOURCE_TITLE,
   SEARCH_SOURCE_VISIBLE,
   SEARCH_SOURCE_SCROLLBACK,
-  useBlitContext,
   useBlitWorkspace,
 } from "blit-react";
 import type {
@@ -33,6 +32,7 @@ export function ExposeOverlay({
   focusedSessionId,
   lru,
   palette,
+  fontFamily,
   onSelect,
   onClose,
   onCreate,
@@ -41,6 +41,7 @@ export function ExposeOverlay({
   focusedSessionId: SessionId | null;
   lru: SessionId[];
   palette: TerminalPalette;
+  fontFamily?: string;
   onSelect: (sessionId: SessionId) => void;
   onClose: () => void;
   onCreate: (command?: string) => void;
@@ -54,7 +55,7 @@ export function ExposeOverlay({
     return leftIndex - rightIndex;
   });
 
-  const { fontFamily: font } = useBlitContext();
+  const font = fontFamily;
   const dark = palette.dark;
   const theme = themeFor(palette);
   const chrome = overlayChromeStyles(theme, dark);
@@ -99,7 +100,6 @@ export function ExposeOverlay({
   const sessionsById = new Map(visible.map((session) => [session.id, session]));
   const items: Array<{
     sessionId: SessionId;
-    ptyId: number;
     connectionId: string;
     title: string;
     exited: boolean;
@@ -112,9 +112,8 @@ export function ExposeOverlay({
           const session = sessionsById.get(result.sessionId)!;
           return {
             sessionId: result.sessionId,
-            ptyId: result.ptyId,
             connectionId: result.connectionId,
-            title: session.title ?? session.tag ?? `PTY ${result.ptyId}`,
+            title: session.title ?? session.tag ?? "Terminal",
             exited: session.state === "exited",
             context: result.context,
             source: result.primarySource,
@@ -122,9 +121,8 @@ export function ExposeOverlay({
         })
     : visible.map((session) => ({
         sessionId: session.id,
-        ptyId: session.ptyId,
         connectionId: session.connectionId,
-        title: session.title ?? session.tag ?? `PTY ${session.ptyId}`,
+        title: session.title ?? session.tag ?? "Terminal",
         exited: session.state === "exited",
       }));
 

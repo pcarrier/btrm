@@ -1,7 +1,7 @@
 export { BlitTerminal } from "./BlitTerminal";
 export type { BlitTerminalHandle } from "./BlitTerminal";
 
-export { createBlitWorkspace, BlitWorkspace } from "./BlitWorkspace";
+export { BlitWorkspace } from "./BlitWorkspace";
 export type {
   AddBlitConnectionOptions,
   CreateBlitWorkspaceOptions,
@@ -17,9 +17,6 @@ export { useBlitConnection } from "./hooks/useBlitConnection";
 export { useBlitSessions } from "./hooks/useBlitSessions";
 export { useBlitWorkspace, useBlitWorkspaceState } from "./hooks/useBlitWorkspace";
 export { useBlitFocusedSession } from "./hooks/useBlitSession";
-
-export { measureCell, CSS_GENERIC } from "./hooks/useBlitTerminal";
-export type { CellMetrics } from "./hooks/useBlitTerminal";
 
 export { WebSocketTransport } from "./transports/websocket";
 export type { WebSocketTransportOptions } from "./transports/websocket";
@@ -50,8 +47,4 @@ export { PALETTES } from "./palettes";
 
 export type { BlitWasmModule } from "./TerminalStore";
 
-export {
-  BlitWorkspaceProvider,
-  useBlitContext,
-} from "./BlitContext";
-export type { BlitContextValue, BlitProviderProps } from "./BlitContext";
+export { BlitWorkspaceProvider } from "./BlitContext";

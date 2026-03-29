@@ -55,7 +55,7 @@ export interface CreateSessionOptions {
   cols: number;
   tag?: string;
   command?: string;
-  cwdFromPtyId?: number;
+  cwdFromSessionId?: SessionId;
 }
 
 type PendingCreate = {
@@ -68,12 +68,20 @@ type PendingSearch = {
   reject: (error: Error) => void;
 };
 
+/** Internal session with ptyId — not exposed to consumers. */
+type InternalSession = BlitSession & { ptyId: number };
+
 function connectionError(message: string): Error {
   return new Error(message);
 }
 
-function isLiveSession(session: BlitSession): boolean {
+function isLiveSession(session: InternalSession): boolean {
   return session.state === "creating" || session.state === "active" || session.state === "exited";
+}
+
+function toPublicSession(s: InternalSession): BlitSession {
+  const { ptyId: _, ...pub } = s;
+  return pub;
 }
 
 export class BlitConnection {
@@ -83,7 +91,7 @@ export class BlitConnection {
   private readonly store: TerminalStore;
 
   private readonly listeners = new Set<() => void>();
-  private readonly sessionsById = new Map<SessionId, BlitSession>();
+  private readonly sessionsById = new Map<SessionId, InternalSession>();
   private readonly currentSessionIdByPtyId = new Map<number, SessionId>();
   private readonly pendingCreates = new Map<number, PendingCreate>();
   private readonly pendingCloses = new Map<SessionId, Array<() => void>>();
@@ -98,7 +106,7 @@ export class BlitConnection {
   private retryCount = 0;
 
   private snapshot: BlitConnectionSnapshot;
-  private sessions: BlitSession[] = [];
+  private sessions: InternalSession[] = [];
 
   constructor({
     id,
@@ -190,7 +198,8 @@ export class BlitConnection {
   }
 
   getSession(sessionId: SessionId): BlitSession | null {
-    return this.sessionsById.get(sessionId) ?? null;
+    const s = this.sessionsById.get(sessionId);
+    return s ? toPublicSession(s) : null;
   }
 
   getDebugStats(sessionId: SessionId | null): ReturnType<TerminalStore["getDebugStats"]> {
@@ -211,12 +220,18 @@ export class BlitConnection {
         nonce = (this.nonceCounter = (this.nonceCounter + 1) & 0xffff);
       } while (this.pendingCreates.has(nonce));
 
+      let srcPtyId: number | undefined;
+      if (options.cwdFromSessionId) {
+        const src = this.sessionsById.get(options.cwdFromSessionId);
+        if (src) srcPtyId = src.ptyId;
+      }
+
       this.pendingCreates.set(nonce, { resolve, reject });
       this.transport.send(
         buildCreate2Message(nonce, options.rows, options.cols, {
           tag: options.tag,
           command: options.command,
-          srcPtyId: options.cwdFromPtyId,
+          srcPtyId,
         }),
       );
     });
@@ -331,8 +346,71 @@ export class BlitConnection {
     });
   }
 
-  getTerminal(ptyId: number) {
-    return this.store.getTerminal(ptyId);
+  getTerminal(sessionId: SessionId) {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    return ptyId != null ? this.store.getTerminal(ptyId) : null;
+  }
+
+  retain(sessionId: SessionId): void {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    if (ptyId != null) this.store.retain(ptyId);
+  }
+
+  release(sessionId: SessionId): void {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    if (ptyId != null) this.store.release(ptyId);
+  }
+
+  freeze(sessionId: SessionId): void {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    if (ptyId != null) this.store.freeze(ptyId);
+  }
+
+  thaw(sessionId: SessionId): void {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    if (ptyId != null) this.store.thaw(ptyId);
+  }
+
+  isFrozen(sessionId: SessionId): boolean {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    return ptyId != null && this.store.isFrozen(ptyId);
+  }
+
+  addDirtyListener(sessionId: SessionId, listener: () => void): () => void {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    if (ptyId == null) return () => {};
+    return this.store.addDirtyListener((dirtyPtyId) => {
+      if (dirtyPtyId === ptyId) listener();
+    });
+  }
+
+  getSharedRenderer() {
+    return this.store.getSharedRenderer();
+  }
+
+  setCellSize(pw: number, ph: number): void {
+    this.store.setCellSize(pw, ph);
+  }
+
+  getCellSize() {
+    return this.store.getCellSize();
+  }
+
+  wasmMemory() {
+    return this.store.wasmMemory();
+  }
+
+  drainPending(sessionId: SessionId): boolean {
+    const ptyId = this.sessionsById.get(sessionId)?.ptyId;
+    return ptyId != null ? this.store.drainPending(ptyId) : false;
+  }
+
+  noteFrameRendered(): void {
+    this.store.noteFrameRendered();
+  }
+
+  invalidateAtlas(): void {
+    this.store.invalidateAtlas();
   }
 
   getStore(): TerminalStore {
@@ -375,7 +453,7 @@ export class BlitConnection {
             PendingCreate,
           ];
           this.pendingCreates.delete(firstNonce);
-          pending.resolve(session);
+          pending.resolve(toPublicSession(session));
         }
         this.ensureFocusedSession(session.id);
         return;
@@ -389,7 +467,7 @@ export class BlitConnection {
         const pending = this.pendingCreates.get(nonce);
         if (pending) {
           this.pendingCreates.delete(nonce);
-          pending.resolve(session);
+          pending.resolve(toPublicSession(session));
         }
         this.ensureFocusedSession(session.id);
         return;
@@ -589,7 +667,6 @@ export class BlitConnection {
       results.push({
         sessionId,
         connectionId: this.id,
-        ptyId,
         score,
         primarySource,
         matchedSources,
@@ -622,14 +699,14 @@ export class BlitConnection {
     ptyId: number,
     tag: string,
     state: BlitSession["state"],
-  ): BlitSession {
+  ): InternalSession {
     const currentId = this.currentSessionIdByPtyId.get(ptyId);
     const current = currentId ? this.sessionsById.get(currentId) ?? null : null;
     if (current && current.state !== "closed") {
       return this.updateSession(current.id, { tag, state });
     }
 
-    const session: BlitSession = {
+    const session: InternalSession = {
       id: `${this.id}:${++this.sessionCounter}`,
       connectionId: this.id,
       ptyId,
@@ -642,7 +719,7 @@ export class BlitConnection {
     this.sessions = [...this.sessions, session];
     this.snapshot = {
       ...this.snapshot,
-      sessions: this.sessions,
+      sessions: this.sessions.map(toPublicSession),
     };
     this.emit();
     return session;
@@ -650,22 +727,21 @@ export class BlitConnection {
 
   private updateSession(
     sessionId: SessionId,
-    patch: Partial<Omit<BlitSession, "id" | "connectionId" | "ptyId">> &
-      Partial<Pick<BlitSession, "ptyId">>,
-  ): BlitSession {
+    patch: Partial<Omit<InternalSession, "id" | "connectionId" | "ptyId">>,
+  ): InternalSession {
     const current = this.sessionsById.get(sessionId);
     if (!current) {
       throw connectionError(`Unknown session ${sessionId}`);
     }
 
-    const next: BlitSession = { ...current, ...patch };
+    const next: InternalSession = { ...current, ...patch };
     this.sessionsById.set(sessionId, next);
     this.sessions = this.sessions.map((session) =>
       session.id === sessionId ? next : session,
     );
     this.snapshot = {
       ...this.snapshot,
-      sessions: this.sessions,
+      sessions: this.sessions.map(toPublicSession),
     };
     this.emit();
     return next;
@@ -675,7 +751,7 @@ export class BlitConnection {
     const session = this.sessionsById.get(sessionId);
     if (!session || session.state === "closed") return;
 
-    const next: BlitSession = {
+    const next: InternalSession = {
       ...session,
       state: "closed",
     };
@@ -696,7 +772,7 @@ export class BlitConnection {
 
     this.snapshot = {
       ...this.snapshot,
-      sessions: this.sessions,
+      sessions: this.sessions.map(toPublicSession),
       focusedSessionId: nextFocus ?? null,
     };
     this.store.setLead(nextFocus ? this.sessionsById.get(nextFocus)?.ptyId ?? null : null);

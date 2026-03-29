@@ -7,14 +7,13 @@ import {
 import {
   BlitTerminal,
   BlitWorkspaceProvider,
-  createBlitWorkspace,
+  BlitWorkspace,
   useBlitConnection,
   useBlitFocusedSession,
   useBlitSessions,
   useBlitWorkspace,
   useBlitWorkspaceState,
   DEFAULT_FONT,
-  CSS_GENERIC,
 } from "blit-react";
 import type {
   BlitTransport,
@@ -48,6 +47,12 @@ export type Overlay = "expose" | "palette" | "font" | "help" | null;
 
 const PRIMARY_CONNECTION_ID = "default";
 
+const CSS_GENERIC = new Set([
+  "serif", "sans-serif", "monospace", "cursive", "fantasy",
+  "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded",
+  "math", "emoji", "fangsong",
+]);
+
 function splitFontFamilies(value: string): string[] {
   return value
     .split(",")
@@ -68,9 +73,9 @@ export function Workspace({
   wasm: BlitWasmModule;
   onAuthError: () => void;
 }) {
-  const workspaceRef = useRef<ReturnType<typeof createBlitWorkspace> | null>(null);
+  const workspaceRef = useRef<BlitWorkspace | null>(null);
   if (!workspaceRef.current) {
-    workspaceRef.current = createBlitWorkspace({ wasm });
+    workspaceRef.current = new BlitWorkspace({ wasm });
   }
   const workspace = workspaceRef.current;
 
@@ -163,30 +168,11 @@ function WorkspaceScreen({
   const dark = palette.dark;
   const theme = themeFor(palette);
 
-  const initialHashPtyIdRef = useRef<number | null>((() => {
-    const hash = location.hash.substring(1);
-    const id = parseInt(hash, 10);
-    return Number.isFinite(id) && id >= 0 ? id : null;
-  })());
   const initialHashAppliedRef = useRef(false);
 
   useEffect(() => {
     if (initialHashAppliedRef.current) return;
     if (!connection?.ready) return;
-    const initialPtyId = initialHashPtyIdRef.current;
-    if (initialPtyId == null) {
-      initialHashAppliedRef.current = true;
-      return;
-    }
-    const match = sessions.find(
-      (session) =>
-        session.connectionId === primaryConnectionId &&
-        session.ptyId === initialPtyId &&
-        session.state !== "closed",
-    );
-    if (match) {
-      workspace.focusSession(match.id);
-    }
     initialHashAppliedRef.current = true;
   }, [connection?.ready, primaryConnectionId, sessions, workspace]);
 
@@ -258,11 +244,7 @@ function WorkspaceScreen({
     const lru = lruRef.current.filter((id) => id !== workspaceState.focusedSessionId);
     lru.unshift(workspaceState.focusedSessionId);
     lruRef.current = lru;
-    const focused = sessions.find((session) => session.id === workspaceState.focusedSessionId);
-    if (focused) {
-      history.replaceState(null, "", `#${focused.ptyId}`);
-    }
-  }, [sessions, workspaceState.focusedSessionId]);
+  }, [workspaceState.focusedSessionId]);
 
   useEffect(() => {
     const desired = new Set<SessionId>();
@@ -611,6 +593,7 @@ function WorkspaceScreen({
           focusedSessionId={workspaceState.focusedSessionId}
           lru={lruRef.current}
           palette={palette}
+          fontFamily={resolvedFontWithFallback}
           onSelect={switchSession}
           onClose={closeOverlay}
           onCreate={createAndFocus}

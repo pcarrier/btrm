@@ -112,7 +112,6 @@ export class BlitWorkspace {
 
   async createSession(options: CreateWorkspaceSessionOptions): Promise<BlitSession> {
     const connection = this.requireConnection(options.connectionId);
-    let cwdFromPtyId: number | undefined;
     if (options.cwdFromSessionId) {
       const sourceSession = this.requireSession(options.cwdFromSessionId);
       if (sourceSession.connectionId !== options.connectionId) {
@@ -120,14 +119,13 @@ export class BlitWorkspace {
           `Cannot create a session in ${options.connectionId} from session ${options.cwdFromSessionId}`,
         );
       }
-      cwdFromPtyId = sourceSession.ptyId;
     }
     const session = await connection.createSession({
       rows: options.rows,
       cols: options.cols,
       tag: options.tag,
       command: options.command,
-      cwdFromPtyId,
+      cwdFromSessionId: options.cwdFromSessionId,
     });
     return session;
   }

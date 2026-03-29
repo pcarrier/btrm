@@ -61,8 +61,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     const workspace = useRequiredBlitWorkspace();
     const session = useBlitSession(props.sessionId);
     const connection = useBlitConnection(session?.connectionId);
-    const store = session ? workspace.getConnection(session.connectionId)?.getStore() ?? null : null;
-    if (props.sessionId !== null && (!session || !connection || !store)) {
+    const blitConn = session ? workspace.getConnection(session.connectionId) : null;
+    if (props.sessionId !== null && (!session || !connection || !blitConn)) {
       throw new Error(`Unknown blit session ${props.sessionId}`);
     }
     const {
@@ -77,7 +77,6 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       scrollbarColor = "rgba(255,255,255,0.3)",
       scrollbarWidth = 4,
     } = props;
-    const ptyId = session?.ptyId ?? null;
 
     // Refs for DOM elements.
     const containerRef = useRef<HTMLDivElement>(null);
@@ -175,7 +174,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     }, []);
 
     useEffect(() => {
-      if (!store) return;
+      if (!blitConn || sessionId === null) return;
       const syncReadOnlySize = (t: Terminal) => {
         const tr = t.rows;
         const tc = t.cols;
@@ -185,9 +184,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         }
         scheduleRender();
       };
-      const unsub = store.addDirtyListener((dirtyPtyId: number) => {
-        if (dirtyPtyId !== ptyId) return;
-        const t = store.getTerminal(dirtyPtyId);
+      const unsub = blitConn.addDirtyListener(sessionId, () => {
+        const t = blitConn.getTerminal(sessionId);
         if (!t) return;
         if (terminalRef.current !== t) {
           terminalRef.current = t;
@@ -199,8 +197,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         if (readOnly) syncReadOnlySize(t);
       });
       // Check for a terminal that was created between render and this effect.
-      if (ptyId !== null) {
-        const t = store.getTerminal(ptyId);
+      if (sessionId !== null && blitConn) {
+        const t = blitConn.getTerminal(sessionId);
         if (t) {
           if (terminalRef.current !== t) {
             terminalRef.current = t;
@@ -215,9 +213,9 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         unsub();
       };
     }, [
-      ptyId,
+      sessionId,
       readOnly,
-      store,
+      blitConn,
       reconcilePrediction,
       applyPaletteToTerminal,
     ]);
@@ -271,14 +269,14 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     // -----------------------------------------------------------------------
 
     useEffect(() => {
-      if (!store) {
+      if (!blitConn) {
         setWasmReady(false);
         return;
       }
-      const unsub = store.onReady(() => setWasmReady(true));
-      if (store.isReady()) setWasmReady(true);
+      const unsub = blitConn.onReady(() => setWasmReady(true));
+      if (blitConn.isReady()) setWasmReady(true);
       return unsub;
-    }, [store]);
+    }, [blitConn]);
 
     // -----------------------------------------------------------------------
     // Cell measurement (re-measure when font or DPR changes)
@@ -297,7 +295,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     }, [dpr]);
 
     useEffect(() => {
-      if (!store) return;
+      if (!blitConn) return;
       const rasterFontSize = fontSize * dpr;
       const apply = (forceInvalidate = false) => {
         const cell = measureCell(fontFamily, fontSize);
@@ -313,9 +311,9 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             t.set_font_size(rasterFontSize);
             if (shouldInvalidate) t.invalidate_render_cache();
           }
-          store.setFontFamily(fontFamily);
-          store.setFontSize(rasterFontSize);
-          store.setCellSize(cell.pw, cell.ph);
+          blitConn.getStore().setFontFamily(fontFamily);
+          blitConn.getStore().setFontSize(rasterFontSize);
+          blitConn.setCellSize(cell.pw, cell.ph);
         }
         if (shouldInvalidate) {
           contentDirtyRef.current = true;
@@ -334,7 +332,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       const onFontsLoaded = () => apply(true);
       document.fonts?.addEventListener("loadingdone", onFontsLoaded);
       return () => document.fonts?.removeEventListener("loadingdone", onFontsLoaded);
-    }, [fontFamily, fontSize, dpr, store, readOnly, scheduleRender]);
+    }, [fontFamily, fontSize, dpr, blitConn, readOnly, scheduleRender]);
 
     // -----------------------------------------------------------------------
     // Cursor blink timer
@@ -359,23 +357,23 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     // -----------------------------------------------------------------------
 
     useEffect(() => {
-      if (!store) return;
-      const shared = store.getSharedRenderer();
+      if (!blitConn) return;
+      const shared = blitConn.getSharedRenderer();
       if (shared) rendererRef.current = shared.renderer;
-    }, [store]);
+    }, [blitConn]);
 
     // -----------------------------------------------------------------------
     // Terminal instance lifecycle
     // -----------------------------------------------------------------------
 
     useEffect(() => {
-      if (!store) {
+      if (!blitConn) {
         terminalRef.current = null;
         return;
       }
-      if (ptyId !== null) {
-        store.retain(ptyId);
-        const t = store.getTerminal(ptyId);
+      if (sessionId !== null && blitConn) {
+        blitConn.retain(sessionId);
+        const t = blitConn.getTerminal(sessionId);
         if (t) {
           terminalRef.current = t;
           applyPaletteToTerminal(t);
@@ -393,9 +391,9 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       }
       return () => {
         terminalRef.current = null;
-        if (ptyId !== null) store.release(ptyId);
+        if (sessionId !== null && blitConn) blitConn.release(sessionId);
       };
-    }, [wasmReady, ptyId, store, fontFamily, fontSize, readOnly, applyPaletteToTerminal]);
+    }, [wasmReady, sessionId, blitConn, fontFamily, fontSize, readOnly, applyPaletteToTerminal]);
 
     // -----------------------------------------------------------------------
     // Palette changes
@@ -443,26 +441,38 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         observer.disconnect();
         window.removeEventListener("resize", handleResize);
       };
-    }, [ptyId, readOnly, sendResize, fontFamily, fontSize, dpr, cellVersion]);
+    }, [sessionId, readOnly, sendResize, fontFamily, fontSize, dpr, cellVersion]);
+
+    // Re-send dimensions when the connection becomes ready — the initial
+    // resize may have been dropped if the transport wasn't connected yet.
+    useEffect(() => {
+      if (status === "connected" && sessionId !== null && !readOnly) {
+        const rows = rowsRef.current;
+        const cols = colsRef.current;
+        if (rows > 0 && cols > 0) {
+          sendResize(sessionId, rows, cols);
+        }
+      }
+    }, [status, sessionId, readOnly, sendResize]);
 
     // -----------------------------------------------------------------------
     // Render (demand-driven — only rAF when something changed)
     // -----------------------------------------------------------------------
 
     useEffect(() => {
-      if (!store) return;
+      if (!blitConn) return;
       doRenderRef.current = () => {
         const t0 = performance.now();
         if (!rendererRef.current?.supported) {
-          const shared = store.getSharedRenderer();
+          const shared = blitConn.getSharedRenderer();
           if (shared) rendererRef.current = shared.renderer;
           if (!rendererRef.current?.supported) {
-            if (!readOnly) store.noteFrameRendered();
+            if (!readOnly) blitConn.noteFrameRendered();
             return;
           }
         }
         if (!terminalRef.current) {
-          if (!readOnly) store.noteFrameRendered();
+          if (!readOnly) blitConn.noteFrameRendered();
           return;
         }
 
@@ -486,7 +496,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             }
           }
 
-          const mem = store.wasmMemory()!;
+          const mem = blitConn.wasmMemory()!;
           // Detect WASM heap growth: if the underlying ArrayBuffer changed,
           // vertex pointers from the previous prepare_render_ops are invalid.
           if (mem.buffer !== lastWasmBufferRef.current) {
@@ -524,7 +534,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
           );
 
           // Copy GL to display canvas, then draw overlay content on top.
-          const shared = store.getSharedRenderer();
+          const shared = blitConn.getSharedRenderer();
           const displayCanvas = glCanvasRef.current;
           if (shared && displayCanvas) {
             if (displayCanvas.width !== pw) {
@@ -674,7 +684,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
           }
 
           if (!readOnly) {
-            store.noteFrameRendered();
+            blitConn.noteFrameRendered();
           }
           onRender?.(performance.now() - t0);
         }
@@ -687,7 +697,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         cancelAnimationFrame(rafRef.current);
         renderScheduledRef.current = false;
       };
-    }, [fontFamily, fontSize, dpr, readOnly, scheduleRender, store]);
+    }, [fontFamily, fontSize, dpr, readOnly, scheduleRender, blitConn]);
 
     // -----------------------------------------------------------------------
     // Keyboard input
@@ -812,7 +822,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
 
     useEffect(() => {
       const canvas = glCanvasRef.current;
-      if (!canvas || readOnly || !store) return;
+      if (!canvas || readOnly || !blitConn) return;
 
       function mouseToCell(e: MouseEvent): { row: number; col: number } {
         const rect = canvas!.getBoundingClientRect();
@@ -1058,7 +1068,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         if (selecting) {
           // Freeze on first drag so selection text is stable, but not
           // on mousedown alone (which would pause video players).
-          if (ptyId !== null && !store.isFrozen(ptyId)) store.freeze(ptyId);
+          if (sessionId !== null && blitConn && !blitConn.isFrozen(sessionId)) blitConn.freeze(sessionId);
           const cell = mouseToCell(e);
           if (selGranularity >= 2 && selAnchorStart && selAnchorEnd) {
             // Extend selection by word/line granularity from the anchor
@@ -1110,7 +1120,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             copySelection();
           }
           clearSelection();
-          if (ptyId !== null) store.thaw(ptyId);
+          if (sessionId !== null && blitConn) blitConn.thaw(sessionId);
         }
         if (canvas.contains(e.target as Node)) {
           inputRef.current?.focus();
@@ -1243,7 +1253,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
           selecting = false;
           selectingRef.current = false;
           clearSelection();
-          if (ptyId !== null) store.thaw(ptyId);
+          if (sessionId !== null && blitConn) blitConn.thaw(sessionId);
         }
       };
 
@@ -1267,7 +1277,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         canvas.removeEventListener("click", handleClick);
         if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
       };
-    }, [ptyId, sessionId, status, sendScroll, store, workspace, readOnly]);
+    }, [sessionId, status, sendScroll, blitConn, workspace, readOnly]);
 
     // -----------------------------------------------------------------------
     // Render

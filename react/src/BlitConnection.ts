@@ -114,6 +114,7 @@ export class BlitConnection {
   private disposed = false;
   private hasConnected = false;
   private retryCount = 0;
+  private lastError: string | null = null;
 
   private snapshot: BlitConnectionSnapshot;
   private sessions: InternalSession[] = [];
@@ -605,6 +606,7 @@ export class BlitConnection {
     if (status === "connected") {
       this.hasConnected = true;
       this.retryCount = 0;
+      this.lastError = null;
     } else if (
       (status === "error" || status === "disconnected") &&
       (this.snapshot.status === "connecting" || this.snapshot.status === "authenticating")
@@ -612,11 +614,18 @@ export class BlitConnection {
       this.retryCount++;
     }
 
+    // Persist the error until a successful connection clears it.
+    if (authRejected) {
+      this.lastError = "auth";
+    } else if (lastError) {
+      this.lastError = lastError;
+    }
+
     this.snapshot = {
       ...this.snapshot,
       status,
       retryCount: this.retryCount,
-      error: authRejected ? "auth" : lastError,
+      error: this.lastError,
     };
 
     if (status === "disconnected" || status === "error") {

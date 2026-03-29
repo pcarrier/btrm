@@ -236,7 +236,6 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
         match ws.recv().await {
             Some(Ok(Message::Text(pass))) => {
                 if constant_time_eq(pass.trim().as_bytes(), state.passphrase.as_bytes()) {
-                    let _ = ws.send(Message::Text("ok".into())).await;
                     break true;
                 } else {
                     let _ = ws.send(Message::Text("auth".into())).await;
@@ -259,10 +258,14 @@ async fn handle_ws(mut ws: WebSocket, state: AppState) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("cannot connect to blit-server: {e}");
+            let _ = ws
+                .send(Message::Text(format!("error:{e}").into()))
+                .await;
             let _ = ws.close().await;
             return;
         }
     };
+    let _ = ws.send(Message::Text("ok".into())).await;
     let (mut sock_reader, mut sock_writer) = stream.into_split();
     let (mut ws_tx, mut ws_rx) = ws.split();
 

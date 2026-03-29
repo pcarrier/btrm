@@ -31,7 +31,7 @@ export class TerminalStore {
   private dirtyListeners = new Set<TerminalDirtyListener>();
   private leadPtyId: number | null = null;
   private fontFamily = DEFAULT_FONT;
-  private fontSize = DEFAULT_FONT_SIZE;
+  private fontSize = DEFAULT_FONT_SIZE * (typeof devicePixelRatio !== "undefined" ? devicePixelRatio : 1);
   private cellPw = 1;
   private cellPh = 1;
   private palette: TerminalPalette | null = null;
@@ -39,6 +39,8 @@ export class TerminalStore {
   private ready = false;
   private readyListeners = new Set<() => void>();
   private frozenPtys = new Set<number>();
+  /** Incremented every time any terminal's cell metrics are set, so renderers can detect stale state. */
+  metricsGeneration = 0;
   private frozenBuffers = new Map<number, Uint8Array[]>();
   private sharedRenderer: GlRenderer | null = null;
   private sharedCanvas: HTMLCanvasElement | null = null;
@@ -233,16 +235,10 @@ export class TerminalStore {
 
   setFontFamily(fontFamily: string): void {
     this.fontFamily = fontFamily;
-    for (const t of this.terminals.values()) {
-      t.set_font_family(fontFamily);
-    }
   }
 
   setFontSize(fontSize: number): void {
     this.fontSize = fontSize;
-    for (const t of this.terminals.values()) {
-      t.set_font_size(fontSize);
-    }
   }
 
   /** Get a shared GL renderer for readOnly (preview) terminals. */
@@ -382,6 +378,13 @@ export class TerminalStore {
   setDesiredSubscriptions(ptyIds: Set<number>): void {
     this.desired = new Set(ptyIds);
     this.syncSubscriptions();
+  }
+
+  /**
+   * Get the current retain count for a PTY.
+   */
+  getRetainCount(ptyId: number): number {
+    return this.retainCount.get(ptyId) ?? 0;
   }
 
   retain(ptyId: number): void {

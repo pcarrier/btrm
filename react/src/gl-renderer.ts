@@ -111,6 +111,7 @@ export interface GlRenderer {
     cursorBlinkOn: boolean,
     cell: CellMetrics,
     bgColor: [number, number, number],
+    focused?: boolean,
   ): void;
   dispose(): void;
 }
@@ -182,10 +183,12 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
+  let lastAtlasCanvas: HTMLCanvasElement | null = null;
   let lastAtlasVersion = -1;
 
   function uploadAtlas(atlasCanvas: HTMLCanvasElement, version: number): void {
-    if (version === lastAtlasVersion) return;
+    if (atlasCanvas === lastAtlasCanvas && version === lastAtlasVersion) return;
+    lastAtlasCanvas = atlasCanvas;
     lastAtlasVersion = version;
     gl!.bindTexture(gl!.TEXTURE_2D, atlasTexture);
     gl!.texImage2D(
@@ -250,16 +253,28 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
     cursorStyle: number,
     cursorBlinkOn: boolean,
     cell: CellMetrics,
+    focused: boolean,
   ): void {
     if (!cursorVisible) return;
+    const x1 = cursorCol * cell.pw;
+    const y1 = cursorRow * cell.ph;
+
+    if (!focused) {
+      // Unfocused: non-blinking outline.
+      const t = Math.max(1, Math.round(cell.pw * 0.08));
+      drawSolidRect(x1, y1, x1 + cell.pw, y1 + t, 0.6, 0.6, 0.6, 0.6);
+      drawSolidRect(x1, y1 + cell.ph - t, x1 + cell.pw, y1 + cell.ph, 0.6, 0.6, 0.6, 0.6);
+      drawSolidRect(x1, y1, x1 + t, y1 + cell.ph, 0.6, 0.6, 0.6, 0.6);
+      drawSolidRect(x1 + cell.pw - t, y1, x1 + cell.pw, y1 + cell.ph, 0.6, 0.6, 0.6, 0.6);
+      return;
+    }
+
     const blinks =
       cursorStyle === 0 ||
       cursorStyle === 1 ||
       cursorStyle === 3 ||
       cursorStyle === 5;
     if (blinks && !cursorBlinkOn) return;
-    const x1 = cursorCol * cell.pw;
-    const y1 = cursorRow * cell.ph;
     if (cursorStyle === 3 || cursorStyle === 4) {
       const h = Math.max(1, Math.round(cell.ph * 0.12));
       drawSolidRect(
@@ -324,6 +339,7 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
       cursorBlinkOn: boolean,
       cell: CellMetrics,
       bgColor: [number, number, number],
+      focused = true,
     ) {
       if (gl!.isContextLost()) return;
       gl!.viewport(0, 0, canvas.width, canvas.height);
@@ -340,6 +356,7 @@ export function createGlRenderer(canvas: HTMLCanvasElement): GlRenderer {
         cursorStyle,
         cursorBlinkOn,
         cell,
+        focused,
       );
     },
     dispose() {

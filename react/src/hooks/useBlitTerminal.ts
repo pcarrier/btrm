@@ -32,7 +32,7 @@ export function cssFontFamily(family: string): string {
     .join(", ");
 }
 
-export function measureCell(fontFamily: string, fontSize: number): CellMetrics {
+export function measureCell(fontFamily: string, fontSize: number, dpr?: number): CellMetrics {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
   ctx.font = `${fontSize}px ${cssFontFamily(fontFamily)}`;
@@ -43,8 +43,8 @@ export function measureCell(fontFamily: string, fontSize: number): CellMetrics {
   // the font's ascender/descender values.
   const h = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
 
-  const dpr = window.devicePixelRatio || 1;
-  const pw = Math.round(w * dpr);
-  const ph = Math.round(h * dpr);
-  return { w: pw / dpr, h: ph / dpr, pw, ph };
+  const d = dpr ?? (window.devicePixelRatio || 1);
+  const pw = Math.round(w * d);
+  const ph = Math.round(h * d);
+  return { w: pw / d, h: ph / d, pw, ph };
 }

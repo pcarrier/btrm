@@ -35,17 +35,25 @@ import {
   blitHost,
   basePath,
 } from "./storage";
-import { themeFor, layout, ui, z } from "./theme";
+import type { UIScale } from "./theme";
+import { themeFor, layout, ui, uiScale, z } from "./theme";
 import { StatusBar } from "./StatusBar";
-import { ExposeOverlay } from "./ExposeOverlay";
+import { SwitcherOverlay } from "./SwitcherOverlay";
 import { PaletteOverlay } from "./PaletteOverlay";
 import { FontOverlay } from "./FontOverlay";
 import { HelpOverlay } from "./HelpOverlay";
 import { DisconnectedOverlay } from "./DisconnectedOverlay";
+import { BSPContainer } from "./bsp/BSPContainer";
+import type { BSPAssignments, BSPLayout } from "./bsp/layout";
+import { loadActiveLayout, saveActiveLayout, saveToHistory, loadRecentLayouts, PRESETS } from "./bsp/layout";
 
 export type Overlay = "expose" | "palette" | "font" | "help" | null;
 
-const PRIMARY_CONNECTION_ID = "default";
+const PRIMARY_CONNECTION_ID = "main";
+
+// Module-level cache so the workspace and connection survive HMR.
+let cachedWorkspace: BlitWorkspace | null = null;
+let cachedTransport: BlitTransport | null = null;
 
 const CSS_GENERIC = new Set([
   "serif", "sans-serif", "monospace", "cursive", "fantasy",
@@ -73,27 +81,21 @@ export function Workspace({
   wasm: BlitWasmModule;
   onAuthError: () => void;
 }) {
-  const workspaceRef = useRef<BlitWorkspace | null>(null);
-  if (!workspaceRef.current) {
-    workspaceRef.current = new BlitWorkspace({ wasm });
+  if (!cachedWorkspace) {
+    cachedWorkspace = new BlitWorkspace({ wasm });
   }
-  const workspace = workspaceRef.current;
+  const workspace = cachedWorkspace;
 
-  useEffect(() => {
+  if (cachedTransport !== transport) {
+    if (cachedTransport) {
+      workspace.removeConnection(PRIMARY_CONNECTION_ID);
+    }
+    cachedTransport = transport;
     workspace.addConnection({
       id: PRIMARY_CONNECTION_ID,
       transport,
     });
-    return () => {
-      workspace.removeConnection(PRIMARY_CONNECTION_ID);
-    };
-  }, [workspace, transport]);
-
-  useEffect(() => {
-    return () => {
-      workspace.dispose();
-    };
-  }, [workspace]);
+  }
 
   return (
     <BlitWorkspaceProvider workspace={workspace}>
@@ -130,6 +132,11 @@ function WorkspaceScreen({
   const [serverFonts, setServerFonts] = useState<string[]>([]);
   const [offlineVisible, setOfflineVisible] = useState(false);
   const [fontLoading, setFontLoading] = useState(false);
+  const [activeLayout, setActiveLayout] = useState<BSPLayout | null>(loadActiveLayout);
+  const activeLayoutRef = useRef(activeLayout);
+  activeLayoutRef.current = activeLayout;
+  const [layoutAssignments, setLayoutAssignments] = useState<BSPAssignments | null>(null);
+  const [pendingPaneTargetId, setPendingPaneTargetId] = useState<string | null>(null);
   const toggleDebug = useCallback(() => setDebugPanel((value) => !value), []);
   const fontRequestVersionRef = useRef(0);
   const paletteOverlayOriginRef = useRef<TerminalPalette | null>(null);
@@ -247,6 +254,13 @@ function WorkspaceScreen({
   }, [workspaceState.focusedSessionId]);
 
   useEffect(() => {
+    if (activeLayout) return;
+    setLayoutAssignments(null);
+    setPendingPaneTargetId(null);
+  }, [activeLayout]);
+
+  useEffect(() => {
+    if (activeLayout && overlay !== "expose") return;
     const desired = new Set<SessionId>();
     if (workspaceState.focusedSessionId) {
       desired.add(workspaceState.focusedSessionId);
@@ -257,7 +271,7 @@ function WorkspaceScreen({
       }
     }
     workspace.setVisibleSessions(desired);
-  }, [overlay, sessions, workspace, workspaceState.focusedSessionId]);
+  }, [activeLayout, overlay, sessions, workspace, workspaceState.focusedSessionId]);
 
   const hasConnectedRef = useRef(connection?.status === "connected");
   useEffect(() => {
@@ -389,8 +403,13 @@ function WorkspaceScreen({
     closeOverlay();
   }, [closeOverlay]);
 
+  const focusBySessionRef = useRef<((sessionId: SessionId) => void) | null>(null);
+  const moveSessionToPaneRef = useRef<((sessionId: SessionId, targetPaneId: string) => void) | null>(null);
+  const [bspFocusedPaneId, setBspFocusedPaneId] = useState<string | null>(null);
+
   const switchSession = useCallback((sessionId: SessionId) => {
     workspace.focusSession(sessionId);
+    focusBySessionRef.current?.(sessionId);
     closeOverlay();
   }, [closeOverlay, workspace]);
 
@@ -414,6 +433,24 @@ function WorkspaceScreen({
     }
   }, [closeOverlay, connection?.status, primaryConnectionId, workspace, workspaceState.focusedSessionId]);
 
+  const focusPaneRef = useRef<((paneId: string) => void) | null>(null);
+
+  const selectPane = useCallback((paneId: string, sessionId: SessionId | null, command?: string) => {
+    if (command) {
+      setPendingPaneTargetId(paneId);
+      closeOverlay();
+      void createAndFocus(command);
+      return;
+    }
+    if (sessionId) {
+      workspace.focusSession(sessionId);
+      focusBySessionRef.current?.(sessionId);
+    } else {
+      focusPaneRef.current?.(paneId);
+    }
+    closeOverlay();
+  }, [closeOverlay, createAndFocus, workspace]);
+
   const handleRestartOrClose = useCallback(() => {
     if (!focusedSession) {
       void createAndFocus();
@@ -436,16 +473,6 @@ function WorkspaceScreen({
         toggleOverlay("expose");
         return;
       }
-      if (mod && e.shiftKey && e.key === "P") {
-        e.preventDefault();
-        toggleOverlay("palette");
-        return;
-      }
-      if (mod && e.shiftKey && e.key === "F") {
-        e.preventDefault();
-        toggleOverlay("font");
-        return;
-      }
       if (e.ctrlKey && e.shiftKey && (e.key === "?" || e.code === "Slash")) {
         e.preventDefault();
         toggleOverlay("help");
@@ -458,10 +485,13 @@ function WorkspaceScreen({
       }
       if (mod && e.shiftKey && e.key === "Enter") {
         e.preventDefault();
+        if (bspFocusedPaneId) {
+          setPendingPaneTargetId(bspFocusedPaneId);
+        }
         void createAndFocus();
         return;
       }
-      if (e.key === "Enter" && !mod && !e.shiftKey && !overlayRef.current) {
+      if (e.key === "Enter" && !mod && !e.shiftKey && !overlayRef.current && !activeLayoutRef.current) {
         const current = stateRef.current;
         const focused = current.focusedSessionId
           ? current.sessions.find((session) => session.id === current.focusedSessionId)
@@ -511,10 +541,36 @@ function WorkspaceScreen({
     return () => window.removeEventListener("keydown", handler, true);
   }, [cancelOverlay, createAndFocus, focusedSession, handleRestartOrClose, toggleDebug, toggleOverlay, workspace]);
 
+  // Set global font defaults on the connection store so new terminals get the right size.
+  // Only update the defaults (for new terminal creation), don't propagate to existing
+  // terminals — individual BlitTerminals handle their own font size including DPR.
+  const conn = workspace.getConnection(primaryConnectionId);
+  if (conn) {
+    const dpr = window.devicePixelRatio || 1;
+    conn.setFontSize(fontSize * dpr);
+    conn.setFontFamily(resolvedFontWithFallback);
+  }
+
+  // Sync layout state to URL hash.
+  useEffect(() => {
+    const parts: string[] = [];
+    if (activeLayout) parts.push(`l=${activeLayout.dsl}`);
+    if (bspFocusedPaneId) parts.push(`p=${bspFocusedPaneId}`);
+    if (layoutAssignments) {
+      const a = Object.entries(layoutAssignments.assignments)
+        .filter(([, sid]) => sid != null)
+        .map(([pane, sid]) => `${pane}:${sid}`)
+        .join(",");
+      if (a) parts.push(`a=${a}`);
+    }
+    history.replaceState(null, "", parts.length > 0 ? `#${parts.join("&")}` : location.pathname);
+  }, [activeLayout, bspFocusedPaneId, layoutAssignments]);
+
   const debugStats = workspace.getConnectionDebugStats(
     primaryConnectionId,
     workspaceState.focusedSessionId,
   );
+  const chromeScale = uiScale(fontSize);
 
   return (
     <BlitWorkspaceProvider
@@ -532,7 +588,47 @@ function WorkspaceScreen({
         }}
       >
       <section style={layout.termContainer}>
-        {workspaceState.focusedSessionId != null ? (
+        {activeLayout ? (
+          <BSPContainer
+            layout={activeLayout}
+            onLayoutChange={setActiveLayout}
+            connectionId={primaryConnectionId}
+            palette={palette}
+            fontFamily={resolvedFontWithFallback}
+            fontSize={fontSize}
+            focusedSessionId={workspaceState.focusedSessionId}
+            lruSessionIds={lruRef.current}
+            manageVisibility={overlay !== "expose"}
+            preferredEmptyPaneId={pendingPaneTargetId}
+            onAssignmentsChange={setLayoutAssignments}
+            onPreferredEmptyPaneResolved={() => setPendingPaneTargetId(null)}
+            onFocusSession={(id) => workspace.focusSession(id)}
+            onFocusBySession={(fn) => { focusBySessionRef.current = fn; }}
+            onFocusPane={(fn) => { focusPaneRef.current = fn; }}
+            onMoveSessionToPane={(fn) => { moveSessionToPaneRef.current = fn; }}
+            onFocusedPaneChange={setBspFocusedPaneId}
+            onCreateInPane={async (paneId, command) => {
+              setPendingPaneTargetId(paneId);
+              try {
+                await workspace.createSession({
+                  connectionId: primaryConnectionId,
+                  rows: termRef.current?.rows ?? 24,
+                  cols: termRef.current?.cols ?? 80,
+                  ...(command ? { command } : {}),
+                  ...(!command && workspaceState.focusedSessionId
+                    ? { cwdFromSessionId: workspaceState.focusedSessionId }
+                    : {}),
+                });
+                // Don't call focusSession here — BSPContainer will push focus
+                // up once reconciliation assigns the session to the pane.
+              } catch (error) {
+                if (connection?.status !== "disconnected" && connection?.status !== "error") {
+                  console.error("blit: failed to create PTY", error);
+                }
+              }
+            }}
+          />
+        ) : workspaceState.focusedSessionId != null ? (
           <>
             <BlitTerminal
               ref={termCallbackRef}
@@ -552,25 +648,25 @@ function WorkspaceScreen({
                   transform: "translateX(-50%)",
                   backgroundColor: theme.solidPanelBg,
                   border: `1px solid ${theme.border}`,
-                  padding: "6px 14px",
-                  fontSize: 12,
+                  padding: `${chromeScale.controlY}px ${chromeScale.controlX}px`,
+                  fontSize: chromeScale.sm,
                   zIndex: z.exitedBanner,
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
+                  gap: chromeScale.gap,
                 }}
               >
                 <mark style={{ ...ui.badge, backgroundColor: "rgba(255,100,100,0.3)" }}>
                   Exited
                 </mark>
                 {connection?.supportsRestart ? (
-                  <button onClick={() => handleRestartOrClose()} style={{ ...ui.btn, fontSize: 12 }}>
+                  <button onClick={() => handleRestartOrClose()} style={{ ...ui.btn, fontSize: chromeScale.md }}>
                     Restart <kbd style={ui.kbd}>Enter</kbd>
                   </button>
                 ) : null}
                 <button
                   onClick={() => void workspace.closeSession(focusedSession.id)}
-                  style={{ ...ui.btn, fontSize: 12, opacity: 0.5 }}
+                  style={{ ...ui.btn, fontSize: chromeScale.md, opacity: 0.5 }}
                 >
                   Close <kbd style={ui.kbd}>Esc</kbd>
                 </button>
@@ -580,28 +676,58 @@ function WorkspaceScreen({
         ) : (
           <EmptyState
             theme={theme}
+            scale={chromeScale}
             mod={/Mac|iPhone|iPad/.test(navigator.platform) ? "Cmd" : "Ctrl"}
             onCreate={() => void createAndFocus()}
-            onExpose={() => toggleOverlay("expose")}
+            onSwitcher={() => toggleOverlay("expose")}
             onHelp={() => toggleOverlay("help")}
           />
         )}
       </section>
       {overlay === "expose" && (
-        <ExposeOverlay
+        <SwitcherOverlay
           sessions={sessions}
           focusedSessionId={workspaceState.focusedSessionId}
           lru={lruRef.current}
           palette={palette}
           fontFamily={resolvedFontWithFallback}
+          fontSize={fontSize}
           onSelect={switchSession}
           onClose={closeOverlay}
           onCreate={createAndFocus}
+          activeLayout={activeLayout}
+          layoutAssignments={layoutAssignments}
+          onSelectPane={selectPane}
+          focusedPaneId={activeLayout ? bspFocusedPaneId : null}
+          onMoveToPane={(sessionId, targetPaneId) => {
+            moveSessionToPaneRef.current?.(sessionId, targetPaneId);
+            workspace.focusSession(sessionId);
+            closeOverlay();
+          }}
+          onApplyLayout={(l) => {
+            setPendingPaneTargetId(null);
+            setActiveLayout(l);
+            saveActiveLayout(l);
+            saveToHistory(l);
+            closeOverlay();
+          }}
+          onClearLayout={() => {
+            setPendingPaneTargetId(null);
+            setLayoutAssignments(null);
+            setActiveLayout(null);
+            saveActiveLayout(null);
+            closeOverlay();
+          }}
+          recentLayouts={loadRecentLayouts()}
+          presetLayouts={PRESETS}
+          onChangeFont={() => toggleOverlay("font")}
+          onChangePalette={() => toggleOverlay("palette")}
         />
       )}
       {overlay === "palette" && (
         <PaletteOverlay
           current={palette}
+          fontSize={fontSize}
           onSelect={changePalette}
           onPreview={setPalette}
           onClose={closeOverlay}
@@ -613,6 +739,7 @@ function WorkspaceScreen({
           currentSize={fontSize}
           serverFonts={serverFonts}
           palette={palette}
+          fontSize={fontSize}
           onSelect={changeFont}
           onPreview={(family, size) => {
             setFont(family);
@@ -621,10 +748,11 @@ function WorkspaceScreen({
           onClose={closeOverlay}
         />
       )}
-      {overlay === "help" && <HelpOverlay onClose={closeOverlay} palette={palette} />}
+      {overlay === "help" && <HelpOverlay onClose={closeOverlay} palette={palette} fontSize={fontSize} />}
       {offlineVisible && (
         <DisconnectedOverlay
           palette={palette}
+          fontSize={fontSize}
           status={connection?.status ?? "disconnected"}
           retryCount={connection?.retryCount ?? 0}
           error={connection?.error ?? null}
@@ -634,8 +762,11 @@ function WorkspaceScreen({
       <footer
         style={{
           ...layout.statusBar,
+          padding: "0 1em",
           backgroundColor: theme.bg,
           borderTopColor: theme.subtleBorder,
+          height: chromeScale.md + chromeScale.controlY * 2,
+          fontSize: chromeScale.sm,
         }}
       >
         <StatusBar
@@ -644,6 +775,7 @@ function WorkspaceScreen({
           status={connection?.status ?? "disconnected"}
           metrics={metrics}
           palette={palette}
+          fontSize={fontSize}
           termSize={termRef.current ? `${termRef.current.cols}x${termRef.current.rows}` : null}
           fontLoading={fontLoading}
           debug={debugPanel}
@@ -651,7 +783,7 @@ function WorkspaceScreen({
           debugStats={debugStats}
           timelineRef={timelineRef}
           netRef={netRef}
-          onExpose={() => toggleOverlay("expose")}
+          onSwitcher={() => toggleOverlay("expose")}
           onPalette={() => toggleOverlay("palette")}
           onFont={() => toggleOverlay("font")}
         />
@@ -663,15 +795,17 @@ function WorkspaceScreen({
 
 function EmptyState({
   theme,
+  scale,
   mod,
   onCreate,
-  onExpose,
+  onSwitcher,
   onHelp,
 }: {
   theme: ReturnType<typeof themeFor>;
+  scale: UIScale;
   mod: string;
   onCreate: () => void;
-  onExpose: () => void;
+  onSwitcher: () => void;
   onHelp: () => void;
 }) {
   return (
@@ -682,37 +816,37 @@ function EmptyState({
         alignItems: "center",
         justifyContent: "center",
         height: "100%",
-        gap: 12,
+        gap: scale.gap,
         opacity: 0.6,
       }}
     >
-      <div style={{ fontSize: 14 }}>No terminal open</div>
+      <div style={{ fontSize: scale.lg }}>Welcome</div>
       <div
         style={{
-          fontSize: 12,
+          fontSize: scale.sm,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 8,
+          gap: scale.tightGap,
         }}
       >
-        <button onClick={onCreate} style={{ ...ui.btn, fontSize: 12 }}>
+        <button onClick={onCreate} style={{ ...ui.btn, fontSize: scale.md }}>
           New terminal <kbd style={ui.kbd}>Enter</kbd>{" "}
           <kbd style={ui.kbd}>{mod}+Shift+Enter</kbd>
         </button>
-        <button onClick={onExpose} style={{ ...ui.btn, fontSize: 12 }}>
-          Expose <kbd style={ui.kbd}>{mod}+K</kbd>
+        <button onClick={onSwitcher} style={{ ...ui.btn, fontSize: scale.md }}>
+          Menu <kbd style={ui.kbd}>{mod}+K</kbd>
         </button>
-        <button onClick={onHelp} style={{ ...ui.btn, fontSize: 12 }}>
+        <button onClick={onHelp} style={{ ...ui.btn, fontSize: scale.md }}>
           Help <kbd style={ui.kbd}>Ctrl+?</kbd>
         </button>
       </div>
       <button
         onClick={onCreate}
         style={{
-          marginTop: 8,
-          padding: "6px 16px",
-          fontSize: 13,
+          marginTop: scale.tightGap,
+          padding: `${scale.controlY}px ${scale.controlX * 2}px`,
+          fontSize: scale.md,
           backgroundColor: theme.accent,
           color: "#fff",
           border: "none",

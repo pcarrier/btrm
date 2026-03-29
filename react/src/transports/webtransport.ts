@@ -190,7 +190,10 @@ export class WebTransportTransport implements BlitTransport {
       const wt = new WebTransport(this.url, opts);
       let authRejected = false;
       this.wt = wt;
-      await wt.ready;
+      await Promise.race([
+        wt.ready,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("connect timeout")), 10_000)),
+      ]);
 
       if (this.disposed || this.wt !== wt) {
         wt.close();

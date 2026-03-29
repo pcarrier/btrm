@@ -1487,7 +1487,7 @@ mod linux {
         let mut connections = snapshot
             .connections
             .iter()
-            .filter(|conn| ui.peer_filter.map_or(true, |ip| conn.remote_ip == ip))
+            .filter(|conn| ui.peer_filter.is_none_or(|ip| conn.remote_ip == ip))
             .collect::<Vec<_>>();
         connections.sort_by(|a, b| match ui.connection_sort {
             ConnectionSort::Packets => b
@@ -1523,10 +1523,10 @@ mod linux {
         snapshot: &DashboardSnapshot,
         layout: Option<DashboardLayout>,
     ) {
-        if let Some(filter_ip) = ui.peer_filter {
-            if !snapshot.peers.iter().any(|peer| peer.ip == filter_ip) {
-                ui.peer_filter = None;
-            }
+        if let Some(filter_ip) = ui.peer_filter
+            && !snapshot.peers.iter().any(|peer| peer.ip == filter_ip)
+        {
+            ui.peer_filter = None;
         }
 
         let peers = sorted_peers(snapshot, ui);

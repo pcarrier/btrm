@@ -8,14 +8,27 @@ async function authenticate(page: import("@playwright/test").Page) {
   await expect(passInput).toBeVisible();
   await passInput.fill("test-secret");
   await passInput.press("Enter");
+  await expect(page.getByText("No terminal open")).toBeVisible({ timeout: 10_000 });
+}
+
+async function authenticateAndCreateTerminal(page: import("@playwright/test").Page) {
+  await authenticate(page);
+  await page.getByRole("button", { name: "New terminal" }).first().click();
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 });
 }
 
 test.describe("Terminal", () => {
-  test("after auth, terminal canvas is visible with non-zero dimensions", async ({
+  test("after auth, workspace shows empty state with new terminal button", async ({
     page,
   }) => {
     await authenticate(page);
+    await expect(page.getByText("No terminal open")).toBeVisible();
+  });
+
+  test("creating a terminal shows canvas with non-zero dimensions", async ({
+    page,
+  }) => {
+    await authenticateAndCreateTerminal(page);
 
     const canvas = page.locator("canvas").first();
     await expect(canvas).toBeVisible({ timeout: 10_000 });
@@ -27,9 +40,8 @@ test.describe("Terminal", () => {
   });
 
   test("can type in terminal and see output", async ({ page }) => {
-    await authenticate(page);
+    await authenticateAndCreateTerminal(page);
 
-    await page.locator("canvas").first().waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForTimeout(1000);
 
     const inputSink = page.locator('textarea[aria-label="Terminal input"]');
@@ -48,8 +60,7 @@ test.describe("Terminal", () => {
   });
 
   test("Expose opens on Ctrl+K and shows search and PTY list", async ({ page }) => {
-    await authenticate(page);
-    await page.locator("canvas").first().waitFor({ state: "visible", timeout: 10_000 });
+    await authenticateAndCreateTerminal(page);
     await page.waitForTimeout(500);
 
     await page.keyboard.press("Control+k");
@@ -65,8 +76,7 @@ test.describe("Terminal", () => {
   });
 
   test("can create a new PTY from Expose", async ({ page }) => {
-    await authenticate(page);
-    await page.locator("canvas").first().waitFor({ state: "visible", timeout: 10_000 });
+    await authenticateAndCreateTerminal(page);
     await page.waitForTimeout(500);
 
     await page.keyboard.press("Control+k");
@@ -91,8 +101,7 @@ test.describe("Terminal", () => {
   });
 
   test("Expose preview canvases render with non-zero dimensions and switching tabs works", async ({ page }) => {
-    await authenticate(page);
-    await page.locator("canvas").first().waitFor({ state: "visible", timeout: 10_000 });
+    await authenticateAndCreateTerminal(page);
     await page.waitForTimeout(500);
 
     await page.keyboard.press("Control+k");

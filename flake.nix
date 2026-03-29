@@ -305,7 +305,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        version = "0.9.1";
+        version = "0.9.2";
 
         cargoLockConfig = {
           lockFile = ./Cargo.lock;
@@ -484,7 +484,7 @@ PKGJSON
 
         reactNpmDeps = pkgs.fetchNpmDeps {
           src = ./react;
-          hash = "sha256-jOFgJfesxvN+f9xTYmtS0u+CnwUxgTOOyn9T6VYJi2k=";
+          hash = "sha256-YxZ3JJJ6Ah5v1gfrvu5kZ1eoOHN3xsowE8MHtBrvUgI=";
         };
 
         webAppNpmDeps = pkgs.fetchNpmDeps {
@@ -635,7 +635,7 @@ CTRL
             ln -sf "${blit-gateway}/bin/blit-gateway" target/debug/blit-gateway
 
             echo "=== Installing e2e deps ==="
-            (cd e2e && pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
+            (cd e2e && if ! pnpm install --frozen-lockfile 2>/dev/null; then pnpm install; fi)
 
             echo "=== Running Playwright ==="
             (cd e2e && npx playwright test)
@@ -674,7 +674,7 @@ CTRL
             if [ ! -f browser/pkg/blit_browser.js ]; then
               touch browser/pkg/blit_browser.js
             fi
-            (cd react && pnpm install --frozen-lockfile 2>/dev/null || pnpm install && pnpm vitest run)
+            (cd react && { pnpm install --frozen-lockfile 2>/dev/null || pnpm install; } && pnpm vitest run)
           '';
         };
 

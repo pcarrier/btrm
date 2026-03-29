@@ -8,6 +8,8 @@ async function authenticate(page: import("@playwright/test").Page) {
   await expect(passInput).toBeVisible();
   await passInput.fill("test-secret");
   await passInput.press("Enter");
+  await expect(page.getByText("No terminal open")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "New terminal" }).first().click();
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 });
 }
 

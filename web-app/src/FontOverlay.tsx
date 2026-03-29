@@ -192,9 +192,6 @@ export function FontOverlay({
             style={{ ...inputStyle, width: 52, flex: "none", textAlign: "center" }}
           />
         </div>
-        <span style={{ fontSize: size, fontFamily: previewFamily || DEFAULT_FONT, flexShrink: 0 }}>
-          The quick brown fox
-        </span>
         <button type="submit" style={{
           ...ui.btn,
           alignSelf: "flex-end",

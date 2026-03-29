@@ -207,6 +207,7 @@ export const ui: Record<string, React.CSSProperties> = {
     display: "inline-block",
     padding: "2px 6px",
     fontSize: 12,
+    fontFamily: "inherit",
     border: "1px solid rgba(128,128,128,0.4)",
     whiteSpace: "nowrap",
   },

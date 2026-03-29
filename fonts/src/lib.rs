@@ -376,7 +376,7 @@ fn list_via_name_tables() -> Vec<String> {
 
 fn list_monospace_via_fc_list() -> Option<Vec<String>> {
     let output = std::process::Command::new("fc-list")
-        .args(["--format", "%{file}\t%{family}\n"])
+        .args(["--format", "%{file}\n"])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -386,10 +386,7 @@ fn list_monospace_via_fc_list() -> Option<Vec<String>> {
     let mut families = BTreeSet::new();
     let mut seen_paths = BTreeSet::new();
     for line in text.lines() {
-        let Some((path, names)) = line.split_once('\t') else {
-            continue;
-        };
-        let path = path.trim();
+        let path = line.trim();
         if path.is_empty() || !seen_paths.insert(path.to_owned()) {
             continue;
         }
@@ -402,12 +399,8 @@ fn list_monospace_via_fc_list() -> Option<Vec<String>> {
         if !info.is_monospace {
             continue;
         }
-        for name in names.split(',') {
-            let name = name.trim();
-            if !name.is_empty() {
-                families.insert(name.to_owned());
-            }
-        }
+        // Use the name table family so the name matches what find_font_files expects.
+        families.insert(info.family);
     }
     if families.is_empty() {
         return None;

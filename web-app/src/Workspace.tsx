@@ -213,8 +213,6 @@ function WorkspaceScreen({
         if (cancelled || requestVersion !== fontRequestVersionRef.current) return;
 
         const loadSpec = `16px "${family}"`;
-        if (document.fonts?.check?.(loadSpec)) continue;
-
         const id = fontStyleId(family);
         if (!document.getElementById(id)) {
           try {

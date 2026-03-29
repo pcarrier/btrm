@@ -42,8 +42,8 @@ test.describe("Auth flow", () => {
     await passInput.press("Enter");
 
     await expect(passInput).toBeHidden({ timeout: 10_000 });
-    const canvas = page.locator("canvas");
-    await expect(canvas.first()).toBeVisible({ timeout: 10_000 });
+    const newTerminal = page.getByText("No terminal open");
+    await expect(newTerminal).toBeVisible({ timeout: 10_000 });
   });
 
   test("saved passphrase auto-connects on reload", async ({ page }) => {
@@ -54,11 +54,11 @@ test.describe("Auth flow", () => {
     await passInput.fill("test-secret");
     await passInput.press("Enter");
 
-    const canvas = page.locator("canvas");
-    await expect(canvas.first()).toBeVisible({ timeout: 10_000 });
+    const newTerminal = page.getByText("No terminal open");
+    await expect(newTerminal).toBeVisible({ timeout: 10_000 });
 
     await page.reload();
-    await expect(canvas.first()).toBeVisible({ timeout: 10_000 });
+    await expect(newTerminal).toBeVisible({ timeout: 10_000 });
   });
 
   test("invalid saved passphrase shows error and input is usable", async ({
@@ -81,7 +81,7 @@ test.describe("Auth flow", () => {
 
     await passInput.press("Enter");
     await expect(passInput).toBeHidden({ timeout: 10_000 });
-    const canvas = page.locator("canvas");
-    await expect(canvas.first()).toBeVisible({ timeout: 10_000 });
+    const newTerminal = page.getByText("No terminal open");
+    await expect(newTerminal).toBeVisible({ timeout: 10_000 });
   });
 });

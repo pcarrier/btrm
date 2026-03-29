@@ -21,34 +21,14 @@ import {
 import { themeFor } from "./theme";
 import { Workspace } from "./Workspace";
 
-function createBestTransport(
-  pass: string,
-  onFallbackToWebSocket: () => void,
-): BlitTransport {
+function createTransport(pass: string): BlitTransport {
   const certHash = wtCertHash();
-  const canTryWebTransport = typeof WebTransport !== "undefined";
-  if (!canTryWebTransport || !certHash) {
-    return new WebSocketTransport(wsUrl(), pass);
+  if (typeof WebTransport !== "undefined" && certHash) {
+    return new WebTransportTransport(wtUrl(), pass, {
+      serverCertificateHash: certHash,
+    });
   }
-  const wt = new WebTransportTransport(wtUrl(), pass, {
-    serverCertificateHash: certHash,
-  });
-  let connectedOnce = false;
-  const onStatus = (status: string) => {
-    if (status === "connected") {
-      connectedOnce = true;
-      wt.removeEventListener("statuschange", onStatus);
-      return;
-    }
-    if (!connectedOnce && (status === "error" || status === "disconnected")) {
-      wt.removeEventListener("statuschange", onStatus);
-      wt.close();
-      console.warn("WebTransport failed (cert may have changed), falling back to WebSocket");
-      onFallbackToWebSocket();
-    }
-  };
-  wt.addEventListener("statuschange", onStatus);
-  return wt;
+  return new WebSocketTransport(wsUrl(), pass);
 }
 
 export function App({ wasm }: { wasm: BlitWasmModule }) {
@@ -60,9 +40,7 @@ export function App({ wasm }: { wasm: BlitWasmModule }) {
   useEffect(() => {
     if (!savedPass || transport) return;
     setTransport(
-      createBestTransport(savedPass, () =>
-        setTransport(new WebSocketTransport(wsUrl(), savedPass)),
-      ),
+      createTransport(savedPass),
     );
   }, [savedPass, transport]);
 
@@ -70,20 +48,11 @@ export function App({ wasm }: { wasm: BlitWasmModule }) {
     (pass: string) => {
       setAuthError(null);
       transport?.close();
-      // Auth check uses plain WebSocket (no QUIC dependency)
-      const t = new WebSocketTransport(wsUrl(), pass, { reconnect: false });
+      const t = createTransport(pass);
       const onStatus = (status: string) => {
         if (status === "connected") {
           writeStorage(PASS_KEY, pass);
           t.removeEventListener("statuschange", onStatus);
-          t.close();
-          setTransport(
-            createBestTransport(pass, () => {
-              const ws = new WebSocketTransport(wsUrl(), pass);
-              setTransport(ws);
-              // connect() will be called when the workspace attaches the connection
-            }),
-          );
         } else if (status === "error") {
           setAuthError("Authentication failed");
           t.close();
@@ -91,7 +60,7 @@ export function App({ wasm }: { wasm: BlitWasmModule }) {
         }
       };
       t.addEventListener("statuschange", onStatus);
-      t.connect();
+      setTransport(t);
     },
     [transport],
   );
@@ -137,7 +106,7 @@ function AuthScreen({
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 8,
+          gap: "0.5em",
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -151,17 +120,17 @@ function AuthScreen({
           placeholder="passphrase"
           autoFocus
           style={{
-            padding: "8px 12px",
-            fontSize: 16,
+            padding: "0.5em 0.75em",
+            fontSize: "1em",
             border: "1px solid #444",
             outline: "none",
-            width: 260,
+            width: "20em",
             fontFamily: "inherit",
             backgroundColor: theme.solidInputBg,
             color: theme.fg,
           }}
         />
-        {error && <output style={{ color: theme.errorText, fontSize: 13 }}>{error}</output>}
+        {error && <output style={{ color: theme.errorText, fontSize: "0.85em" }}>{error}</output>}
       </form>
     </main>
   );

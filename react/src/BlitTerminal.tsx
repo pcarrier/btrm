@@ -73,6 +73,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       style,
       palette = ctx.palette,
       readOnly = false,
+      showCursor = true,
       onRender,
       scrollbarColor = "rgba(255,255,255,0.3)",
       scrollbarWidth = 4,
@@ -84,6 +85,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
     // Refs for mutable state that must not trigger re-renders.
+    const viewIdRef = useRef<string | null>(null);
     const terminalRef = useRef<Terminal | null>(null);
     const rendererRef = useRef<GlRenderer | null>(null);
     const displayCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -91,6 +93,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     const rowsRef = useRef(24);
     const colsRef = useRef(80);
     const contentDirtyRef = useRef(true);
+    const lastOffsetRef = useRef(0);
     /** Track WASM buffer identity to detect heap growth that invalidates vertex pointers. */
     const lastWasmBufferRef = useRef<ArrayBuffer | null>(null);
     const [cellVersion, setCellVersion] = useState(0);
@@ -112,6 +115,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       null,
     );
     const paletteRef = useRef<TerminalPalette | undefined>(palette);
+    const showCursorRef = useRef(showCursor);
+    showCursorRef.current = showCursor;
 
     const selStartRef = useRef<{ row: number; col: number } | null>(null);
     const selEndRef = useRef<{ row: number; col: number } | null>(null);
@@ -139,6 +144,12 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         doRenderRef.current();
       });
     }, []);
+
+    // Re-render when showCursor (focused state) changes.
+    useEffect(() => {
+      contentDirtyRef.current = true;
+      scheduleRender();
+    }, [showCursor, scheduleRender]);
 
     // -----------------------------------------------------------------------
     // Connection callbacks — BlitTerminal only cares about UPDATE (rendering)
@@ -226,13 +237,6 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       [workspace],
     );
 
-    const sendResize = useCallback(
-      (id: string, rows: number, cols: number) => {
-        workspace.resizeSession(id, rows, cols);
-      },
-      [workspace],
-    );
-
     const sendScroll = useCallback(
       (id: string, offset: number) => {
         workspace.scrollSession(id, offset);
@@ -282,23 +286,43 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     // Cell measurement (re-measure when font or DPR changes)
     // -----------------------------------------------------------------------
 
-    const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+    function effectiveDpr(): number {
+      const base = window.devicePixelRatio || 1;
+      // Safari doesn't change devicePixelRatio on Cmd+/- zoom.
+      // Detect zoom via outerWidth/innerWidth.
+      if (window.outerWidth && window.innerWidth) {
+        const zoom = window.outerWidth / window.innerWidth;
+        if (zoom > 0.25 && zoom < 8) return base * zoom;
+      }
+      return base;
+    }
+
+    const [dpr, setDpr] = useState(effectiveDpr);
+    const dprRef = useRef(dpr);
+    dprRef.current = dpr;
 
     useEffect(() => {
-      if (typeof window.matchMedia !== "function") return;
-      const mq = window.matchMedia(
-        `(resolution: ${window.devicePixelRatio}dppx)`,
-      );
-      const onChange = () => setDpr(window.devicePixelRatio || 1);
-      mq.addEventListener("change", onChange);
-      return () => mq.removeEventListener("change", onChange);
-    }, [dpr]);
+      const check = () => {
+        const next = effectiveDpr();
+        if (next !== dprRef.current) setDpr(next);
+      };
+      let mq: MediaQueryList | null = null;
+      if (typeof window.matchMedia === "function") {
+        mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        mq.addEventListener("change", check);
+      }
+      window.addEventListener("resize", check);
+      return () => {
+        mq?.removeEventListener("change", check);
+        window.removeEventListener("resize", check);
+      };
+    }, []);
 
     useEffect(() => {
       if (!blitConn) return;
       const rasterFontSize = fontSize * dpr;
       const apply = (forceInvalidate = false) => {
-        const cell = measureCell(fontFamily, fontSize);
+        const cell = measureCell(fontFamily, fontSize, dpr);
         const changed =
           cell.pw !== cellRef.current.pw || cell.ph !== cellRef.current.ph;
         const shouldInvalidate = forceInvalidate || changed;
@@ -311,8 +335,6 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             t.set_font_size(rasterFontSize);
             if (shouldInvalidate) t.invalidate_render_cache();
           }
-          blitConn.getStore().setFontFamily(fontFamily);
-          blitConn.getStore().setFontSize(rasterFontSize);
           blitConn.setCellSize(cell.pw, cell.ph);
         }
         if (shouldInvalidate) {
@@ -331,6 +353,8 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       // the glyph atlas may need a rebuild because the actual raster changed.
       const onFontsLoaded = () => apply(true);
       document.fonts?.addEventListener("loadingdone", onFontsLoaded);
+      // If fonts already loaded while we were setting up, re-apply now.
+      if (document.fonts?.status === "loaded") apply(true);
       return () => document.fonts?.removeEventListener("loadingdone", onFontsLoaded);
     }, [fontFamily, fontSize, dpr, blitConn, readOnly, scheduleRender]);
 
@@ -366,12 +390,14 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
     // Terminal instance lifecycle
     // -----------------------------------------------------------------------
 
+
+
     useEffect(() => {
       if (!blitConn) {
         terminalRef.current = null;
         return;
       }
-      if (sessionId !== null && blitConn) {
+      if (sessionId !== null) {
         blitConn.retain(sessionId);
         const t = blitConn.getTerminal(sessionId);
         if (t) {
@@ -424,13 +450,19 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         if (sizeChanged) {
           rowsRef.current = rows;
           colsRef.current = cols;
-          contentDirtyRef.current = true;
-          scheduleRender();
-          if (sessionId !== null) {
-            sendResize(sessionId, rows, cols);
+          if (sessionId !== null && blitConn && viewIdRef.current) {
+            blitConn.setViewSize(sessionId, viewIdRef.current, rows, cols);
           }
         }
+        // Always schedule — DPR may have changed even if cols/rows didn't.
+        contentDirtyRef.current = true;
+        scheduleRender();
       };
+
+      // Allocate a view ID for multi-pane size tracking.
+      if (!viewIdRef.current && blitConn) {
+        viewIdRef.current = blitConn.allocViewId();
+      }
 
       const observer = new ResizeObserver(handleResize);
       observer.observe(container);
@@ -440,20 +472,22 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
       return () => {
         observer.disconnect();
         window.removeEventListener("resize", handleResize);
+        if (sessionId !== null && blitConn && viewIdRef.current) {
+          blitConn.removeView(sessionId, viewIdRef.current);
+        }
       };
-    }, [sessionId, readOnly, sendResize, fontFamily, fontSize, dpr, cellVersion]);
+    }, [sessionId, readOnly, blitConn, fontFamily, fontSize, dpr, cellVersion]);
 
-    // Re-send dimensions when the connection becomes ready — the initial
-    // resize may have been dropped if the transport wasn't connected yet.
+    // Re-send dimensions when the connection becomes ready.
     useEffect(() => {
-      if (status === "connected" && sessionId !== null && !readOnly) {
+      if (status === "connected" && sessionId !== null && !readOnly && blitConn && viewIdRef.current) {
         const rows = rowsRef.current;
         const cols = colsRef.current;
         if (rows > 0 && cols > 0) {
-          sendResize(sessionId, rows, cols);
+          blitConn.setViewSize(sessionId, viewIdRef.current, rows, cols);
         }
       }
-    }, [status, sessionId, readOnly, sendResize]);
+    }, [status, sessionId, readOnly, blitConn]);
 
     // -----------------------------------------------------------------------
     // Render (demand-driven — only rAF when something changed)
@@ -504,6 +538,19 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             contentDirtyRef.current = true;
           }
 
+          {
+            const gridH = t.rows * cell.ph;
+            const gridW = t.cols * cell.pw;
+            const xOff = Math.max(0, Math.floor((pw - gridW) / 2));
+            const yOff = Math.max(0, Math.floor((ph - gridH) / 2));
+            const combined = xOff * 65536 + yOff;
+            if (combined !== lastOffsetRef.current) {
+              lastOffsetRef.current = combined;
+              t.set_render_offset(xOff, yOff);
+              contentDirtyRef.current = true;
+            }
+          }
+
           if (contentDirtyRef.current) {
             contentDirtyRef.current = false;
             t.prepare_render_ops();
@@ -531,6 +578,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
             cursorBlinkOnRef.current,
             cell,
             paletteRef.current?.bg ?? [0, 0, 0],
+            showCursorRef.current,
           );
 
           // Copy GL to display canvas, then draw overlay content on top.
@@ -545,10 +593,14 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
               displayCanvas.height = ph;
               displayCtxRef.current = null;
             }
-            const ctx = (displayCtxRef.current ??=
-              displayCanvas.getContext("2d"));
+            if (!displayCtxRef.current) {
+              displayCtxRef.current = displayCanvas.getContext("2d");
+              // Disable any implicit DPR scaling — we manage pixels ourselves.
+              displayCtxRef.current?.resetTransform();
+            }
+            const ctx = displayCtxRef.current;
             if (ctx) {
-              ctx.drawImage(shared.canvas, 0, 0);
+              ctx.drawImage(shared.canvas, 0, 0, pw, ph, 0, 0, pw, ph);
 
               // Selection highlight
               const ss = selStartRef.current;
@@ -815,6 +867,47 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
         input.removeEventListener("input", handleInput);
       };
     }, [sessionId, status, readOnly, sendInput, sendScroll]);
+
+    // -----------------------------------------------------------------------
+    // Wheel scroll (works on unfocused panes too)
+    // -----------------------------------------------------------------------
+
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container || readOnly) return;
+
+      const handleWheel = (e: WheelEvent) => {
+        const t = terminalRef.current;
+        if (t && t.mouse_mode() > 0 && !e.shiftKey) {
+          // Mouse mode: handled by the mouse input effect below.
+          return;
+        }
+        if (sessionId !== null && status === "connected") {
+          const maxScroll = t ? t.scrollback_lines() : 0;
+          if (maxScroll === 0 && scrollOffsetRef.current === 0) return;
+          e.preventDefault();
+          const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+          const lines = Math.round(-delta / 20) || (delta > 0 ? -3 : 3);
+          scrollOffsetRef.current = Math.max(
+            0,
+            Math.min(maxScroll, scrollOffsetRef.current + lines),
+          );
+          sendScroll(sessionId, scrollOffsetRef.current);
+          if (scrollOffsetRef.current > 0) {
+            scrollFadeRef.current = 1;
+            if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
+            scrollFadeTimerRef.current = setTimeout(() => {
+              scrollFadeRef.current = 0;
+              scheduleRender();
+            }, 1000);
+          }
+          scheduleRender();
+        }
+      };
+
+      container.addEventListener("wheel", handleWheel, { passive: false });
+      return () => container.removeEventListener("wheel", handleWheel);
+    }, [sessionId, status, readOnly, sendScroll, scheduleRender]);
 
     // -----------------------------------------------------------------------
     // Mouse input
@@ -1129,35 +1222,13 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
 
       const handleWheel = (e: WheelEvent) => {
         const t = terminalRef.current;
-        // Shift+wheel always scrolls the scrollback (like ghostty/alacritty).
-        // Without Shift, forward to the application if mouse mode is active.
+        // Mouse-mode wheel: forward to the application.
         if (t && t.mouse_mode() > 0 && !e.shiftKey) {
           e.preventDefault();
           const button = e.deltaY < 0 ? 64 : 65;
           sendMouseEvent("down", e, button);
-        } else if (sessionId !== null && status === "connected") {
-          const t2 = terminalRef.current;
-          const maxScroll = t2 ? t2.scrollback_lines() : 0;
-          if (maxScroll === 0 && scrollOffsetRef.current === 0) return; // nothing to scroll
-          e.preventDefault();
-          // macOS swaps deltaX/deltaY when Shift is held
-          const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-          const lines = Math.round(-delta / 20) || (delta > 0 ? -3 : 3);
-          scrollOffsetRef.current = Math.max(
-            0,
-            Math.min(maxScroll, scrollOffsetRef.current + lines),
-          );
-          sendScroll(sessionId, scrollOffsetRef.current);
-          if (scrollOffsetRef.current > 0) {
-            scrollFadeRef.current = 1;
-            if (scrollFadeTimerRef.current) clearTimeout(scrollFadeTimerRef.current);
-            scrollFadeTimerRef.current = setTimeout(() => {
-              scrollFadeRef.current = 0;
-              scheduleRender();
-            }, 1000);
-          }
-          scheduleRender();
         }
+        // Scrollback is handled by the container-level wheel handler above.
       };
 
       // --- URL detection ---
@@ -1302,7 +1373,7 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
                   width: "100%",
                   height: "100%",
                   objectFit: "contain",
-                  objectPosition: "top left",
+                  objectPosition: "center",
                 }
               : {
                   display: "block",
@@ -1310,7 +1381,6 @@ export const BlitTerminal = forwardRef<BlitTerminalHandle, BlitTerminalProps>(
                   top: 0,
                   left: 0,
                   cursor: "text",
-                  willChange: "transform",
                 }
           }
         />

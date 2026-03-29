@@ -161,7 +161,10 @@ export function parseDSL(input: string): { root: BSPNode; weight: number } {
       const firstEntry = parseEntry();
 
       // Apply fontSize to leaf nodes
-      if (firstEntry.node.type === "leaf" && firstEntry.fontSize != null) {
+      if (firstEntry.fontSize != null) {
+        if (firstEntry.node.type !== "leaf") {
+          throw new DSLParseError(`fontSize can only be applied to leaf nodes, not splits, at position ${start}`, start);
+        }
         firstEntry.node.fontSize = firstEntry.fontSize;
       }
       children.push({ node: firstEntry.node, weight: firstEntry.weight });
@@ -170,7 +173,10 @@ export function parseDSL(input: string): { root: BSPNode; weight: number } {
       while (peek() === ",") {
         pos++;
         const entry = parseEntry();
-        if (entry.node.type === "leaf" && entry.fontSize != null) {
+        if (entry.fontSize != null) {
+          if (entry.node.type !== "leaf") {
+            throw new DSLParseError(`fontSize can only be applied to leaf nodes, not splits, at position ${pos}`, pos);
+          }
           entry.node.fontSize = entry.fontSize;
         }
         children.push({ node: entry.node, weight: entry.weight });

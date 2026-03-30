@@ -203,6 +203,7 @@ sudo systemctl enable --now blit@alice.socket
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `BLIT_SOCK` | `$TMPDIR/blit.sock`, `/tmp/blit-$USER.sock`, `/run/blit/$USER.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit.sock` | Unix socket path |
+
 For SSH targets, `blit --ssh HOST` forwards the remote Unix socket over SSH and opens the browser with an embedded local gateway.
 
 ## Agent subcommands

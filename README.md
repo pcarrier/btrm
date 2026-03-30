@@ -194,7 +194,7 @@ echo 'export BLIT_SCROLLBACK="50000"' >> $(brew --prefix)/etc/blit/blit-server.e
 brew services restart blit-gateway blit-server
 ```
 
-### Debian / Ubuntu (APT)
+### Debian / Ubuntu (systemd)
 
 The `blit-server` .deb ships the unit files, so after installing via APT:
 
@@ -212,23 +212,9 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now blit@alice.socket
 ```
 
-## Building and testing
+## Contributing
 
-Every `nix run` target has a corresponding script in `bin/` so you don't need to remember the nix invocation:
-
-```bash
-./bin/tests                  # Rust + React unit tests
-./bin/lint                   # Clippy
-./bin/e2e                    # Playwright e2e tests
-./bin/build-debs             # .deb packages -> dist/debs/
-./bin/build-tarballs         # static tarballs -> dist/tarballs/
-./bin/browser-publish        # npm publish blit-browser
-./bin/react-publish          # npm publish blit-react
-```
-
-`build-debs` and `build-tarballs` accept an optional output directory argument (default `dist/debs` and `dist/tarballs`).
-The version and platform are derived from `flake.nix` and the build host.
-Linkage is verified at `nix build` time — Linux binaries must be statically linked and macOS binaries must not reference nix-store dylibs.
+Building from source, running tests, dev environment setup, code conventions, and release process are all covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## nix-darwin
 

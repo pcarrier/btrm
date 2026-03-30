@@ -1,4 +1,8 @@
-# Embedding with `blit-react`
+# Embedding
+
+There are two distinct dimensions: embedding the frontend into your app, and embedding `blit-server` into your own service.
+
+## Your app, our components: `blit-react`
 
 `blit-react` is workspace-first. A `BlitWorkspace` owns connections, each connection owns sessions, and each `BlitTerminal` renders a session by ID.
 
@@ -61,7 +65,7 @@ function TerminalScreen() {
 }
 ```
 
-## React API
+### React API
 
 | API | Purpose |
 | --- | --- |
@@ -74,7 +78,7 @@ function TerminalScreen() {
 | `useBlitFocusedSession()` | Read the currently focused session |
 | `BlitTerminal` | Render one session by `sessionId` |
 
-## Workspace operations
+### Workspace operations
 
 - `createSession({ connectionId, rows, cols, tag?, command?, cwdFromSessionId? })`
 - `closeSession(sessionId)`
@@ -84,7 +88,7 @@ function TerminalScreen() {
 - `setVisibleSessions(sessionIds)`
 - `addConnection(...)` / `removeConnection(connectionId)` / `reconnectConnection(connectionId)`
 
-## Transports
+### Transports
 
 All transports share a common set of options (`BlitTransportOptions`):
 
@@ -122,13 +126,9 @@ interface BlitTransport {
 }
 ```
 
-## fd-channel mode
+## Your service, our server: `fd-channel` mode
 
-fd-channel lets an external process own `blit-server`'s lifecycle and control which clients connect via `SCM_RIGHTS` fd passing. See [ARCHITECTURE.md](ARCHITECTURE.md) for the protocol details and the working examples:
+`fd-channel` lets an external process own `blit-server`'s lifecycle and control which clients connect via `SCM_RIGHTS` fd passing. See [ARCHITECTURE.md](ARCHITECTURE.md) for the protocol details and the working examples:
 
 - [Python](examples/fd-channel-python.py)
 - [Bun](examples/fd-channel-bun.ts)
-
-```
-nix run .#tests
-```

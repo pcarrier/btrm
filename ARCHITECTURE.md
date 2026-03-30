@@ -10,7 +10,7 @@ blit is a terminal streaming stack. The server parses PTY output into structured
 graph LR
     PTY <-->|stdin/stdout| S[blit-server]
     S <-->|Unix socket| G[blit-gateway]
-    G <-->|WebSocket / WebTransport| B[browser]
+    G <-->|WebSocket / WebTransport / WebRTC| B[browser]
     S <-->|Unix socket / TCP / SSH| C[blit-cli]
     C -->|embeds temp gateway| B
 ```

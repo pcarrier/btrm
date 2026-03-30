@@ -571,8 +571,10 @@ function WorkspaceScreen({
     conn.setFontFamily(resolvedFontWithFallback);
   }
 
-  // Sync layout state to URL hash.
+  // Sync layout state to URL hash once connected (avoid clobbering
+  // hash-loaded assignments before sessions have reconnected).
   useEffect(() => {
+    if (connection?.status !== "connected") return;
     const parts: string[] = [];
     if (activeLayout) parts.push(`l=${activeLayout.dsl}`);
     if (bspFocusedPaneId) parts.push(`p=${bspFocusedPaneId}`);
@@ -584,7 +586,7 @@ function WorkspaceScreen({
       if (a) parts.push(`a=${a}`);
     }
     history.replaceState(null, "", parts.length > 0 ? `#${parts.join("&")}` : location.pathname);
-  }, [activeLayout, bspFocusedPaneId, layoutAssignments]);
+  }, [activeLayout, bspFocusedPaneId, connection?.status, layoutAssignments]);
 
   const debugStats = workspace.getConnectionDebugStats(
     primaryConnectionId,

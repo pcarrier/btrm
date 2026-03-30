@@ -41,7 +41,8 @@ Print version and exit.
 # ENVIRONMENT
 
 _BLIT_SOCK_
-Unix socket path. Defaults to _/run/blit/$USER.sock_, then
+Unix socket path. Defaults to _$TMPDIR/blit.sock_, then
+_/tmp/blit-$USER.sock_, then _/run/blit/$USER.sock_, then
 _$XDG_RUNTIME_DIR/blit.sock_, then _/tmp/blit.sock_.
 
 _BLIT_DISPLAY_FPS_

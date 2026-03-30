@@ -180,8 +180,10 @@ The protocol is defined purely in terms of byte streams. Any transport that can 
 `blit-server` binds a `UnixListener`. Socket path resolution:
 
 1. `$BLIT_SOCK` environment variable
-2. `$XDG_RUNTIME_DIR/blit.sock`
-3. `/tmp/blit.sock`
+2. `$TMPDIR/blit.sock`
+3. `$XDG_RUNTIME_DIR/blit.sock`
+4. `/tmp/blit-$USER.sock`
+5. `/tmp/blit.sock`
 
 Clients (gateway, CLI) connect to this socket and exchange length-prefixed binary frames. This is the only server-side transport; all other transports ultimately proxy to it.
 
@@ -254,7 +256,7 @@ Any implementation of this interface can be passed to `BlitWorkspace` as a conne
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SHELL` | `/bin/sh` | Shell to spawn for new PTYs |
-| `BLIT_SOCK` | `$XDG_RUNTIME_DIR/blit.sock` | Unix socket path |
+| `BLIT_SOCK` | `$TMPDIR/blit.sock` or `$XDG_RUNTIME_DIR/blit.sock` | Unix socket path |
 | `BLIT_SCROLLBACK` | `10000` | Scrollback rows per PTY |
 | `BLIT_FD_CHANNEL` | unset | fd-channel file descriptor |
 

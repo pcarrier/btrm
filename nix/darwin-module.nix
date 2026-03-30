@@ -27,9 +27,9 @@ in {
     };
 
     socketPath = mkOption {
-      type = types.str;
-      default = "/tmp/blit.sock";
-      description = "Unix socket path for blit-server.";
+      type = types.nullOr types.str;
+      default = null;
+      description = "Unix socket path for blit-server. Defaults to $TMPDIR/blit.sock.";
     };
 
     gateways = mkOption {
@@ -93,8 +93,9 @@ in {
             ''[ -n "$LANG" ] || export LANG="$(defaults read -g AppleLocale 2>/dev/null | sed 's/@.*//' || echo en_US).UTF-8"; exec ${cfg.package}/bin/blit-server''
           ];
           EnvironmentVariables = {
-            BLIT_SOCK = cfg.socketPath;
             BLIT_SCROLLBACK = toString cfg.scrollback;
+          } // lib.optionalAttrs (cfg.socketPath != null) {
+            BLIT_SOCK = cfg.socketPath;
           } // lib.optionalAttrs (cfg.shell != null) {
             SHELL = cfg.shell;
           };
@@ -114,8 +115,9 @@ in {
             ''. ${gw.passFile} && exec ${gw.package}/bin/blit-gateway''
           ];
           EnvironmentVariables = {
-            BLIT_SOCK = cfg.socketPath;
             BLIT_ADDR = "${gw.addr}:${toString gw.port}";
+          } // lib.optionalAttrs (cfg.socketPath != null) {
+            BLIT_SOCK = cfg.socketPath;
           } // lib.optionalAttrs (gw.fontDirs != []) {
             BLIT_FONT_DIRS = lib.concatStringsSep ":" gw.fontDirs;
           } // lib.optionalAttrs gw.quic {

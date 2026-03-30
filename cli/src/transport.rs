@@ -40,7 +40,17 @@ pub fn default_local_socket() -> String {
     if let Ok(p) = std::env::var("BLIT_SOCK") {
         return p;
     }
+    if let Ok(dir) = std::env::var("TMPDIR") {
+        let p = format!("{dir}/blit.sock");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
     if let Ok(user) = std::env::var("USER") {
+        let p = format!("/tmp/blit-{user}.sock");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
         let sys = format!("/run/blit/{user}.sock");
         if std::path::Path::new(&sys).exists() {
             return sys;

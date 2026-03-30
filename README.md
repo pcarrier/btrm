@@ -271,6 +271,14 @@ sudo apt install blit blit-server blit-gateway
 
 ### systemd
 
+The `blit-server` .deb ships the unit files, so after installing via APT:
+
+```bash
+sudo systemctl enable --now blit@alice.socket
+```
+
+On non-Debian systems, copy the units from the repo:
+
 ```bash
 sudo cp systemd/blit@.socket systemd/blit@.service /etc/systemd/system/
 sudo systemctl daemon-reload

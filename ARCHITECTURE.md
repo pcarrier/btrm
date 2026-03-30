@@ -222,7 +222,7 @@ The React library includes a `WebRtcDataChannelTransport`. An ordered DataChanne
 
 `blit-cli` can connect to a remote `blit-server` over SSH in two ways:
 
-- **Console mode**: pipes through `ssh -T host 'nc -U /path/to/blit.sock'` (or `socat`), using the SSH process's stdin/stdout as the byte stream.
+- **Console mode**: pipes through `ssh -T host 'nc -U $SOCK'` (or `socat`), using the SSH process's stdin/stdout as the byte stream. The remote socket path is resolved on the remote host using the same cascade (`$BLIT_SOCK` → `$TMPDIR/blit.sock` → `/tmp/blit-$USER.sock` → `/run/blit/$USER.sock` → `$XDG_RUNTIME_DIR/blit.sock` → `/tmp/blit.sock`), where `$USER` is the SSH user.
 - **Browser mode**: uses `ssh -L local.sock:remote.sock` to forward a local Unix socket to the remote server, then starts a local embedded gateway pointing at the forwarded socket.
 
 ### Transport abstraction

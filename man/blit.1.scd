@@ -32,6 +32,11 @@ Connect to a specific Unix socket.
 _--tcp_ _HOST:PORT_
 Connect via raw TCP.
 
+_--ssh_ _HOST_
+Connect to a remote _blit-server_ over SSH. The remote socket path is
+resolved using the same cascade as _BLIT_SOCK_ (see below), evaluated on
+the remote host as the SSH user.
+
 _--help_, _-h_
 Print usage and exit.
 

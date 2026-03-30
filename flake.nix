@@ -484,6 +484,12 @@ PKGJSON
               for lib in $(otool -L "$bin" | awk '/\/nix\/store\/.*libiconv/{print $1}'); do
                 install_name_tool -change "$lib" /usr/lib/libiconv.2.dylib "$bin"
               done
+              bad=$(otool -L "$bin" | awk '/\/nix\/store\//{print $1}')
+              if [ -n "$bad" ]; then
+                echo "FATAL: $bin still links to nix-store dylibs:"
+                echo "$bad"
+                exit 1
+              fi
             done
           '';
         } // extraArgs);

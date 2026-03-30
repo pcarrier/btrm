@@ -75,7 +75,7 @@ jobs:
           for bin in stage/*; do
             echo "=== $bin ==="
             otool -L "$bin"
-            otool -L "$bin" | grep -v '^\S' | grep -v '/usr/lib/' && { echo "FATAL: $bin links to non-system dylibs!"; exit 1; } || true
+            otool -L "$bin" | grep -v '^\S' | grep -v '/usr/lib/' | grep -v '/System/Library/' && { echo "FATAL: $bin links to non-system dylibs!"; exit 1; } || true
           done
 
       - name: Package tarballs
@@ -93,8 +93,54 @@ jobs:
           name: macos-aarch64
           path: dist/*.tar.gz
 
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            system: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build and verify binaries
+        run: |
+          mkdir -p stage
+          for pkg in blit-server-static blit-cli-static blit-gateway-static; do
+            out=$(nix build .#"$pkg" --no-link --print-out-paths)
+            cp "$out"/bin/* stage/
+          done
+          ls -lh stage/
+
+          for bin in stage/*; do
+            echo "=== $bin ==="
+            file "$bin"
+            file "$bin" | grep -qE "static(ally|-pie) linked" || { echo "FATAL: $bin is not static!"; exit 1; }
+          done
+
+      - name: Package tarballs
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for bin in stage/*; do
+            name=$(basename "$bin")
+            tar -czf "dist/${name}_${version}_linux_${{ matrix.arch }}.tar.gz" -C stage "$name"
+          done
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
   release:
-    needs: [build-debs, build-macos]
+    needs: [build-debs, build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -109,10 +155,17 @@ jobs:
           merge-multiple: true
           path: macos
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          merge-multiple: true
+          path: linux
+
       - name: List artifacts
         run: |
           ls -lh debs/
           ls -lh macos/
+          ls -lh linux/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -120,6 +173,7 @@ jobs:
           files: |
             debs/*.deb
             macos/*.tar.gz
+            linux/*.tar.gz
           generate_release_notes: true
 
   apt-repo:

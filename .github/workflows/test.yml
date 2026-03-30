@@ -62,9 +62,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: Build binaries
+      - name: Build and verify binaries
         run: |
           for pkg in blit-server-static blit-cli-static blit-gateway-static; do
             echo "=== $pkg ==="
-            nix build .#"$pkg"
+            out=$(nix build .#"$pkg" --no-link --print-out-paths)
+            echo "  dylibs:"
+            otool -L "$out"/bin/* | grep -v '^\S'
           done

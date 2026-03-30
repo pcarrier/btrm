@@ -496,13 +496,6 @@ export function SwitcherOverlay({
       subtitle: t("switcher.createInCwd"),
       action: "new-terminal",
     }];
-    actions.push({
-      type: "action",
-      key: "action:change-layout",
-      title: t("switcher.layout"),
-      subtitle: activeLayout ? activeLayout.dsl : t("switcher.chooseLayout"),
-      action: "change-layout",
-    });
     if (activeLayout && onClearLayout) {
       actions.push({
         type: "action",
@@ -530,6 +523,13 @@ export function SwitcherOverlay({
         action: "change-font",
       });
     }
+    actions.push({
+      type: "action",
+      key: "action:change-layout",
+      title: t("switcher.layout"),
+      subtitle: activeLayout ? activeLayout.dsl : t("switcher.chooseLayout"),
+      action: "change-layout",
+    });
     actions.push({
       type: "action",
       key: "action:clear-local-storage",

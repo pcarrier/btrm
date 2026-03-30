@@ -187,16 +187,32 @@ Bun doesn't expose `sendmsg`/`SCM_RIGHTS` in its standard library, but `bun:ffi`
 
 ```ts
 import { spawn } from "bun";
-import { dlopen, FFIType, ptr, CString } from "bun:ffi";
+import { dlopen, FFIType, ptr } from "bun:ffi";
 
-const libc = dlopen("libc.so.6", {
+const DARWIN = process.platform === "darwin";
+
+const libc = dlopen(DARWIN ? "libSystem.B.dylib" : "libc.so.6", {
   socketpair: { args: [FFIType.i32, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
   sendmsg:    { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i64 },
   close:      { args: [FFIType.i32], returns: FFIType.i32 },
 });
 
-const AF_UNIX = 1, SOCK_STREAM = 1;
-const SOL_SOCKET = 1, SCM_RIGHTS = 1;
+const AF_UNIX = 1, SOCK_STREAM = 1, SCM_RIGHTS = 1;
+const SOL_SOCKET = DARWIN ? 0xffff : 1;
+
+//   Linux (amd64 & arm64)            Darwin arm64
+//   cmsghdr.cmsg_len: size_t (8)     socklen_t (4)
+//   CMSG_LEN(4):      20             16
+//   CMSG_SPACE(4):    24             16
+//   fd data offset:   16             12
+//   msghdr size:      56             48
+//   msg_iovlen:       size_t (8)     int (4)
+//   msg_controllen:   size_t (8)     socklen_t (4)
+
+const CMSG_LEN   = DARWIN ? 16 : 20;
+const CMSG_SPACE = DARWIN ? 16 : 24;
+const CMSG_FD_OFF = DARWIN ? 12 : 16;
+const MSGHDR_SIZE = DARWIN ? 48 : 56;
 
 function socketpair(): [number, number] {
   const fds = new Int32Array(2);
@@ -206,31 +222,42 @@ function socketpair(): [number, number] {
 }
 
 function sendFd(channel: number, clientFd: number) {
-  // Build a msghdr with one iov byte and one SCM_RIGHTS cmsg carrying clientFd.
-  // struct iovec { void *iov_base; size_t iov_len; }
   const iovBuf = new Uint8Array(1);
-  const iov = new BigUint64Array(2);
-  iov[0] = BigInt(Bun.ptr(iovBuf));  // iov_base
-  iov[1] = 1n;                        // iov_len
+  const iov = new BigUint64Array(2); // struct iovec { void*, size_t } -- same on all LP64
+  iov[0] = BigInt(Bun.ptr(iovBuf));
+  iov[1] = 1n;
 
-  // cmsg: { cmsg_len, cmsg_level, cmsg_type, data }
-  const CMSG_SPACE = 20; // CMSG_SPACE(sizeof(int)) on x86_64
-  const cmsg = new ArrayBuffer(CMSG_SPACE);
-  const cmsgView = new DataView(cmsg);
-  cmsgView.setUint32(0, 16, true);       // cmsg_len = CMSG_LEN(4)
-  cmsgView.setUint32(4, SOL_SOCKET, true);
-  cmsgView.setUint32(8, SCM_RIGHTS, true);
-  cmsgView.setInt32(12, clientFd, true);  // the fd payload
+  const cmsg = new DataView(new ArrayBuffer(CMSG_SPACE));
+  if (DARWIN) {
+    cmsg.setUint32(0, CMSG_LEN, true);       // cmsg_len (socklen_t = 4 bytes)
+    cmsg.setUint32(4, SOL_SOCKET, true);      // cmsg_level
+    cmsg.setUint32(8, SCM_RIGHTS, true);      // cmsg_type
+  } else {
+    cmsg.setBigUint64(0, BigInt(CMSG_LEN), true); // cmsg_len (size_t = 8 bytes)
+    cmsg.setUint32(8, SOL_SOCKET, true);           // cmsg_level
+    cmsg.setUint32(12, SCM_RIGHTS, true);          // cmsg_type
+  }
+  cmsg.setInt32(CMSG_FD_OFF, clientFd, true);
 
-  // struct msghdr (x86_64): name(8) namelen(4) pad(4) iov(8) iovlen(8) control(8) controllen(8) flags(4)
-  const msghdr = new ArrayBuffer(56);
-  const msg = new DataView(msghdr);
-  msg.setBigUint64(16, BigInt(Bun.ptr(new Uint8Array(iov.buffer))), true); // msg_iov
-  msg.setBigUint64(24, 1n, true);                                          // msg_iovlen
-  msg.setBigUint64(32, BigInt(Bun.ptr(new Uint8Array(cmsg))), true);       // msg_control
-  msg.setBigUint64(40, BigInt(CMSG_SPACE), true);                          // msg_controllen
+  const msg = new DataView(new ArrayBuffer(MSGHDR_SIZE));
+  const iovPtr = BigInt(Bun.ptr(new Uint8Array(iov.buffer)));
+  const ctrlPtr = BigInt(Bun.ptr(new Uint8Array(cmsg.buffer)));
 
-  if (libc.symbols.sendmsg(channel, ptr(new Uint8Array(msghdr)), 0) < 0)
+  if (DARWIN) {
+    // Darwin msghdr: name(8) namelen(4) pad(4) iov(8) iovlen(4) pad(4) control(8) controllen(4)
+    msg.setBigUint64(16, iovPtr, true);              // msg_iov
+    msg.setUint32(24, 1, true);                      // msg_iovlen (int)
+    msg.setBigUint64(32, ctrlPtr, true);             // msg_control
+    msg.setUint32(40, CMSG_SPACE, true);             // msg_controllen (socklen_t)
+  } else {
+    // Linux msghdr: name(8) namelen(4) pad(4) iov(8) iovlen(8) control(8) controllen(8)
+    msg.setBigUint64(16, iovPtr, true);              // msg_iov
+    msg.setBigUint64(24, 1n, true);                  // msg_iovlen (size_t)
+    msg.setBigUint64(32, ctrlPtr, true);             // msg_control
+    msg.setBigUint64(40, BigInt(CMSG_SPACE), true);  // msg_controllen (size_t)
+  }
+
+  if (libc.symbols.sendmsg(channel, ptr(new Uint8Array(msg.buffer)), 0) < 0)
     throw new Error("sendmsg failed");
 }
 
@@ -254,4 +281,4 @@ libc.symbols.close(clientTheirs);
 // and use 4-byte LE length-prefixed framing to exchange messages.
 ```
 
-The struct layouts above assume x86_64 Linux. If you don't need per-connection mediation (auth gating, connection pooling, sandboxing), connecting directly to `blit-server`'s Unix socket via `Bun.connect({ unix: ... })` is simpler.
+If you don't need per-connection mediation (auth gating, connection pooling, sandboxing), connecting directly to `blit-server`'s Unix socket via `Bun.connect({ unix: ... })` is simpler.

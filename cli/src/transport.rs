@@ -40,7 +40,17 @@ pub fn default_local_socket() -> String {
     if let Ok(p) = std::env::var("BLIT_SOCK") {
         return p;
     }
+    if let Ok(dir) = std::env::var("TMPDIR") {
+        let p = format!("{dir}/blit.sock");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
     if let Ok(user) = std::env::var("USER") {
+        let p = format!("/tmp/blit-{user}.sock");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
         let sys = format!("/run/blit/{user}.sock");
         if std::path::Path::new(&sys).exists() {
             return sys;
@@ -101,7 +111,7 @@ pub async fn connect(
     }
 
     if let Some(host) = ssh {
-        let bridge = r#"sh -c 'S="${BLIT_SOCK:-/run/blit/$(id -un).sock}"; exec nc -U "$S" 2>/dev/null || socat - "UNIX-CONNECT:$S"'"#;
+        let bridge = r#"sh -c 'if [ -n "$BLIT_SOCK" ]; then S="$BLIT_SOCK"; elif [ -n "$TMPDIR" ] && [ -S "$TMPDIR/blit.sock" ]; then S="$TMPDIR/blit.sock"; elif [ -S "/tmp/blit-$(id -un).sock" ]; then S="/tmp/blit-$(id -un).sock"; elif [ -S "/run/blit/$(id -un).sock" ]; then S="/run/blit/$(id -un).sock"; elif [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/blit.sock" ]; then S="$XDG_RUNTIME_DIR/blit.sock"; else S=/tmp/blit.sock; fi; exec nc -U "$S" 2>/dev/null || socat - "UNIX-CONNECT:$S"'"#;
         let child = tokio::process::Command::new("ssh")
             .arg("-T")
             .arg("-o")

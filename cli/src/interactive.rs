@@ -754,7 +754,7 @@ async fn setup_ssh_forward(ssh_args: &[String]) -> BrowserConnector {
         .arg("ControlPersist=300")
         .args(ssh_args)
         .arg("--")
-        .arg(r#"sh -c 'echo "${BLIT_SOCK:-/run/blit/$(id -un).sock}"'"#)
+        .arg(r#"sh -c 'if [ -n "$BLIT_SOCK" ]; then echo "$BLIT_SOCK"; elif [ -n "$TMPDIR" ] && [ -S "$TMPDIR/blit.sock" ]; then echo "$TMPDIR/blit.sock"; elif [ -S "/tmp/blit-$(id -un).sock" ]; then echo "/tmp/blit-$(id -un).sock"; elif [ -S "/run/blit/$(id -un).sock" ]; then echo "/run/blit/$(id -un).sock"; elif [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/blit.sock" ]; then echo "$XDG_RUNTIME_DIR/blit.sock"; else echo /tmp/blit.sock; fi'"#)
         .output()
         .await
         .unwrap_or_else(|e| {

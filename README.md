@@ -206,7 +206,7 @@ dev
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SHELL` | `/bin/sh` | Shell to spawn for new PTYs |
-| `BLIT_SOCK` | `$XDG_RUNTIME_DIR/blit.sock` or `/tmp/blit.sock` | Unix socket path |
+| `BLIT_SOCK` | `$TMPDIR/blit.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit-$USER.sock` | Unix socket path |
 | `BLIT_SCROLLBACK` | `10000` | Scrollback rows per PTY |
 
 ### `blit-gateway`
@@ -215,7 +215,7 @@ dev
 | --- | --- | --- |
 | `BLIT_PASS` | required | Browser passphrase |
 | `BLIT_ADDR` | `0.0.0.0:3264` | HTTP/WebSocket listen address |
-| `BLIT_SOCK` | `$XDG_RUNTIME_DIR/blit.sock` or `/tmp/blit.sock` | Upstream server socket |
+| `BLIT_SOCK` | `$TMPDIR/blit.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit-$USER.sock` | Upstream server socket |
 | `BLIT_CORS` | unset | CORS origin for font routes |
 | `BLIT_QUIC` | unset | Set to `1` to enable WebTransport |
 | `BLIT_TLS_CERT` | auto-generated | TLS cert for WebTransport |
@@ -225,7 +225,7 @@ dev
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `BLIT_SOCK` | `$XDG_RUNTIME_DIR/blit.sock` or `/tmp/blit.sock` | Unix socket path |
+| `BLIT_SOCK` | `$TMPDIR/blit.sock`, `/tmp/blit-$USER.sock`, `/run/blit/$USER.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit.sock` | Unix socket path |
 | `BLIT_DISPLAY_FPS` | `240` | Advertised display rate in console mode |
 
 For SSH targets, `blit --ssh HOST` forwards the remote Unix socket over SSH and either opens the browser with an embedded local gateway or renders directly in the current terminal with `--console`.
@@ -301,6 +301,24 @@ sudo systemctl enable --now blit@alice.socket
 }
 ```
 
+### macOS (Homebrew)
+
+```bash
+brew install indent-com/tap/blit-server
+brew install indent-com/tap/blit-gateway
+brew services start blit-server
+brew services start blit-gateway
+```
+
+Configuration lives in env files under `$(brew --prefix)/etc/blit/`. These start empty (the binaries have sensible defaults) and are preserved across upgrades. Add any environment variable from the tables above to override defaults:
+
+```bash
+# e.g. configure the gateway passphrase and scrollback
+echo 'export BLIT_PASS="secret"' >> $(brew --prefix)/etc/blit/blit-gateway.env
+echo 'export BLIT_SCROLLBACK="50000"' >> $(brew --prefix)/etc/blit/blit-server.env
+brew services restart blit-gateway blit-server
+```
+
 ### NixOS
 
 ```nix
@@ -318,7 +336,6 @@ sudo systemctl enable --now blit@alice.socket
   };
 }
 ```
-
 ## Building and testing
 
 Every `nix run` target has a corresponding script in `bin/` so you don't need to remember the nix invocation:

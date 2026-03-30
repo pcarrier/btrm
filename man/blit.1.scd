@@ -32,6 +32,11 @@ Connect to a specific Unix socket.
 _--tcp_ _HOST:PORT_
 Connect via raw TCP.
 
+_--ssh_ _HOST_
+Connect to a remote _blit-server_ over SSH. The remote socket path is
+resolved using the same cascade as _BLIT_SOCK_ (see below), evaluated on
+the remote host as the SSH user.
+
 _--help_, _-h_
 Print usage and exit.
 
@@ -41,7 +46,8 @@ Print version and exit.
 # ENVIRONMENT
 
 _BLIT_SOCK_
-Unix socket path. Defaults to _/run/blit/$USER.sock_, then
+Unix socket path. Defaults to _$TMPDIR/blit.sock_, then
+_/tmp/blit-$USER.sock_, then _/run/blit/$USER.sock_, then
 _$XDG_RUNTIME_DIR/blit.sock_, then _/tmp/blit.sock_.
 
 _BLIT_DISPLAY_FPS_

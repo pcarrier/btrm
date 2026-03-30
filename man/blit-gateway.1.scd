@@ -35,8 +35,9 @@ _BLIT_ADDR_
 HTTP/WebSocket listen address (default: _0.0.0.0:3264_).
 
 _BLIT_SOCK_
-Upstream server socket. Defaults to _/run/blit/$USER.sock_, then
-_$XDG_RUNTIME_DIR/blit.sock_, then _/tmp/blit.sock_.
+Upstream server socket. Defaults to _$TMPDIR/blit.sock_, then
+_$XDG_RUNTIME_DIR/blit.sock_, then _/tmp/blit-$USER.sock_, then
+_/tmp/blit.sock_.
 
 # SEE ALSO
 

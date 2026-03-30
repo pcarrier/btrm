@@ -111,11 +111,16 @@ async fn main() {
         std::process::exit(1);
     });
     let sock_path = std::env::var("BLIT_SOCK").unwrap_or_else(|_| {
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-            format!("{dir}/blit.sock")
-        } else {
-            "/tmp/blit.sock".into()
+        if let Ok(dir) = std::env::var("TMPDIR") {
+            return format!("{dir}/blit.sock");
         }
+        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+            return format!("{dir}/blit.sock");
+        }
+        if let Ok(user) = std::env::var("USER") {
+            return format!("/tmp/blit-{user}.sock");
+        }
+        "/tmp/blit.sock".into()
     });
     let addr = std::env::var("BLIT_ADDR").unwrap_or_else(|_| "0.0.0.0:3264".into());
     let quic_enabled = std::env::var("BLIT_QUIC")

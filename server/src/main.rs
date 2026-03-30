@@ -1639,11 +1639,16 @@ fn try_send_update(
 }
 
 fn default_socket_path() -> String {
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        format!("{dir}/blit.sock")
-    } else {
-        "/tmp/blit.sock".into()
+    if let Ok(dir) = std::env::var("TMPDIR") {
+        return format!("{dir}/blit.sock");
     }
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return format!("{dir}/blit.sock");
+    }
+    if let Ok(user) = std::env::var("USER") {
+        return format!("/tmp/blit-{user}.sock");
+    }
+    "/tmp/blit.sock".into()
 }
 
 fn usage() -> &'static str {

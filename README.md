@@ -40,6 +40,7 @@ Browser access to `blit-server` goes through either of two paths — pick one, n
 | --- | --- | --- | --- | --- | --- | --- |
 | Architecture | PTY host + gateway | Single binary | Single binary | Client + daemon | Client + server | Library (BYO server) |
 | Multiple PTYs | ✅ First-class | ❌ One per instance | ❌ One per instance | ❌ One per connection | ❌ One per connection | ⚠️ Manual |
+| Browser access | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Protocol | Binary frame diffs | Raw byte stream | Raw byte stream | SSH + prediction | UDP + SSP | Raw byte stream |
 | Delta updates | ✅ Only changed cells sent | ❌ | ❌ | ❌ | ✅ Predictive | ❌ |
 | LZ4 compression | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -54,6 +55,17 @@ Browser access to `blit-server` goes through either of two paths — pick one, n
 | Agent / CLI subcommands | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Reconnect on disconnect | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
 | SSH tunneling built-in | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| Self-hostable | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+### Adjacent tools
+
+**tmux** is the classic terminal multiplexer — windows, panes, session detach/reattach, all over a Unix socket. It's purely terminal-native: no browser access, no wire protocol beyond its own client-server IPC. blit handles the browser streaming side, so the two are complementary — you can run tmux inside a blit PTY.
+
+**Zellij** is a terminal multiplexer (like tmux) — it manages panes, tabs, and layouts inside your existing terminal. It has a WASM plugin system, built-in search, multiplayer session sharing, and a beta web client. Where blit is a streaming stack that sends rendered frames to a browser, Zellij is a local-first workspace that happens to have a web escape hatch.
+
+**sshx** is a collaborative terminal sharing tool. You run a single command and get a shareable URL with an infinite canvas of terminals, live cursors, and end-to-end encryption (Argon2 + AES). It uses a managed cloud mesh for routing, so there's no self-hosting. The focus is real-time pair programming, not persistent server access.
+
+**tmate** is a tmux fork that gives you instant terminal sharing via a hosted relay. You get an SSH URL and a read-only web URL out of the box. It's the fastest path to "let someone else see my terminal" but doesn't do browser-native rendering, backpressure, or multi-session management.
 
 ## What lives in this repo
 

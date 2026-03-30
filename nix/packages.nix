@@ -172,7 +172,7 @@ PKGJSON
       } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
         postFixup = ''
           for bin in $out/bin/*; do
-            for lib in $(otool -L "$bin" | awk '/\/nix\/store\//{print $1}'); do
+            for lib in $(otool -L "$bin" | tail -n +2 | awk '/\/nix\/store\//{print $1}'); do
               base=$(basename "$lib")
               case "$base" in
                 libiconv.*|libiconv-*) sys="/usr/lib/libiconv.2.dylib" ;;
@@ -186,7 +186,7 @@ PKGJSON
               echo "rewriting $lib -> $sys"
               install_name_tool -change "$lib" "$sys" "$bin"
             done
-            bad=$(otool -L "$bin" | awk '/\/nix\/store\//{print $1}')
+            bad=$(otool -L "$bin" | tail -n +2 | awk '/\/nix\/store\//{print $1}')
             if [ -n "$bad" ]; then
               echo "FATAL: $bin still links to nix-store dylibs:"
               echo "$bad"

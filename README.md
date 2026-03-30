@@ -259,22 +259,14 @@ Output is plain text with no decoration — designed to be easy for scripts and 
 
 ## Deployment (demo binaries)
 
-### NixOS
+### Debian / Ubuntu (APT)
 
-```nix
-{ inputs, ... }: {
-  imports = [ inputs.blit.nixosModules.blit ];
-
-  services.blit = {
-    enable = true;
-    users = [ "alice" "bob" ];
-    gateways.alice = {
-      user = "alice";
-      port = 3264;
-      passFile = "/run/secrets/blit-alice-pass";
-    };
-  };
-}
+```bash
+curl -fsSL https://repo.blit.sh/blit.gpg | sudo gpg --dearmor -o /usr/share/keyrings/blit.gpg
+echo "deb [signed-by=/usr/share/keyrings/blit.gpg arch=$(dpkg --print-architecture)] https://repo.blit.sh/ stable main" \
+  | sudo tee /etc/apt/sources.list.d/blit.list
+sudo apt update
+sudo apt install blit blit-server blit-gateway
 ```
 
 ### systemd
@@ -301,14 +293,22 @@ sudo systemctl enable --now blit@alice.socket
 }
 ```
 
-### Debian / Ubuntu (APT)
+### NixOS
 
-```bash
-curl -fsSL https://repo.blit.sh/blit.gpg | sudo gpg --dearmor -o /usr/share/keyrings/blit.gpg
-echo "deb [signed-by=/usr/share/keyrings/blit.gpg arch=$(dpkg --print-architecture)] https://repo.blit.sh/ stable main" \
-  | sudo tee /etc/apt/sources.list.d/blit.list
-sudo apt update
-sudo apt install blit blit-server blit-gateway
+```nix
+{ inputs, ... }: {
+  imports = [ inputs.blit.nixosModules.blit ];
+
+  services.blit = {
+    enable = true;
+    users = [ "alice" "bob" ];
+    gateways.alice = {
+      user = "alice";
+      port = 3264;
+      passFile = "/run/secrets/blit-alice-pass";
+    };
+  };
+}
 ```
 
 ## Building and testing

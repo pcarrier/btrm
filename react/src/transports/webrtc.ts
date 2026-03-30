@@ -21,6 +21,7 @@ export function createWebRtcDataChannelTransport(
   const backoff = opts?.reconnectBackoff ?? 1.5;
 
   let _status: ConnectionStatus = "connecting";
+  let _lastError: string | null = null;
   let channel: RTCDataChannel | null = null;
   let disposed = false;
   let syncResolve: (() => void) | null = null;
@@ -83,7 +84,7 @@ export function createWebRtcDataChannelTransport(
     connectTimeout = setTimeout(() => {
       connectTimeout = null;
       if (_status === "connecting") {
-        transport.lastError = "connect timeout";
+        _lastError = "connect timeout";
         setStatus("error");
         scheduleReconnect();
       }
@@ -93,7 +94,7 @@ export function createWebRtcDataChannelTransport(
       if (disposed || channel !== ch) return;
       clearConnectTimeout();
       currentDelay = initialDelay;
-      transport.lastError = null;
+      _lastError = null;
       setStatus("connected");
       const msg = new Uint8Array(3);
       msg[0] = C2S_DISPLAY_RATE;
@@ -126,7 +127,7 @@ export function createWebRtcDataChannelTransport(
     ch.onerror = () => {
       if (disposed || channel !== ch) return;
       clearConnectTimeout();
-      transport.lastError = "Data channel error";
+      _lastError = "Data channel error";
       setStatus("error");
       scheduleReconnect();
     };
@@ -159,8 +160,12 @@ export function createWebRtcDataChannelTransport(
       return _status;
     },
 
-    authRejected: false,
-    lastError: null,
+    get authRejected() {
+      return false;
+    },
+    get lastError() {
+      return _lastError;
+    },
 
     addEventListener(type: string, listener: (data: never) => void): void {
       if (type === "message") {

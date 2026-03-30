@@ -130,6 +130,41 @@ blit-server
 
 If building from source, substitute `cargo run -p blit-server`, `cargo run -p blit-cli`, etc. For the dev environment with hot-reloading, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Running services
+
+### macOS (Homebrew)
+
+```bash
+brew services start blit-server
+brew services start blit-gateway
+```
+
+Configuration lives in env files under `$(brew --prefix)/etc/blit/`. These start empty (the binaries have sensible defaults) and are preserved across upgrades. Add any environment variable from the tables above to override defaults:
+
+```bash
+echo 'export BLIT_PASS="secret"' >> $(brew --prefix)/etc/blit/blit-gateway.env
+echo 'export BLIT_SCROLLBACK="50000"' >> $(brew --prefix)/etc/blit/blit-server.env
+brew services restart blit-gateway blit-server
+```
+
+### Debian / Ubuntu (systemd)
+
+The `blit-server` .deb ships the unit files, so after installing via APT:
+
+```bash
+sudo systemctl enable --now blit@alice.socket
+```
+
+### Manual (systemd)
+
+On non-Debian systems, copy the units from the repo:
+
+```bash
+sudo cp systemd/blit@.socket systemd/blit@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now blit@alice.socket
+```
+
 ## Configuration
 
 ### `blit-server`
@@ -185,41 +220,6 @@ blit --ssh myhost show 1
 ```
 
 Output is plain text with no decoration — designed to be easy for scripts and LLMs to parse. Errors go to stderr; non-zero exit on failure.
-
-## Running services
-
-### macOS (Homebrew)
-
-```bash
-brew services start blit-server
-brew services start blit-gateway
-```
-
-Configuration lives in env files under `$(brew --prefix)/etc/blit/`. These start empty (the binaries have sensible defaults) and are preserved across upgrades. Add any environment variable from the tables above to override defaults:
-
-```bash
-echo 'export BLIT_PASS="secret"' >> $(brew --prefix)/etc/blit/blit-gateway.env
-echo 'export BLIT_SCROLLBACK="50000"' >> $(brew --prefix)/etc/blit/blit-server.env
-brew services restart blit-gateway blit-server
-```
-
-### Debian / Ubuntu (systemd)
-
-The `blit-server` .deb ships the unit files, so after installing via APT:
-
-```bash
-sudo systemctl enable --now blit@alice.socket
-```
-
-### Manual (systemd)
-
-On non-Debian systems, copy the units from the repo:
-
-```bash
-sudo cp systemd/blit@.socket systemd/blit@.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now blit@alice.socket
-```
 
 ## Contributing
 

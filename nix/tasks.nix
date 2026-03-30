@@ -124,8 +124,55 @@ CTRL
     binPkg = blit-gateway-static;
     description = "blit WebSocket gateway";
   };
+  publish-npm-packages = pkgs.writeShellApplication {
+    name = "blit-publish-npm-packages";
+    runtimeInputs = [ pkgs.nodejs ];
+    text = ''
+      echo "=== Publishing blit-browser ==="
+      ${browser-publish}/bin/browser-publish "$@"
+      echo ""
+      echo "=== Publishing blit-react ==="
+      ${react-publish}/bin/react-publish "$@"
+    '';
+  };
+
+  publish-crates = pkgs.writeShellApplication {
+    name = "blit-publish-crates";
+    runtimeInputs = [ rustToolchain pkgs.curl pkgs.jq ];
+    text = ''
+      if [ -n "''${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+        echo "=== Exchanging OIDC token for crates.io publish token ==="
+        oidc=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://crates.io" | jq -r '.value')
+        token=$(curl -sS -X POST https://crates.io/api/v1/trusted_publishing/tokens \
+          -H "Authorization: Bearer $oidc" | jq -r '.token')
+        export CARGO_REGISTRY_TOKEN="$token"
+      fi
+
+      [ -n "''${CARGO_REGISTRY_TOKEN:-}" ] || { echo "FATAL: no CARGO_REGISTRY_TOKEN and not in GitHub Actions"; exit 1; }
+
+      publish() {
+        echo "--- publishing $1 ---"
+        cargo publish -p "$1" --no-verify
+      }
+
+      publish blit-fonts
+      publish blit-remote
+      echo "waiting for crates.io to index..."
+      sleep 30
+
+      publish blit-webserver
+      publish blit-alacritty
+      echo "waiting for crates.io to index..."
+      sleep 30
+
+      publish blit-server
+      publish blit-cli
+      publish blit-gateway
+    '';
+  };
 in {
-  inherit browser-publish react-publish;
+  inherit browser-publish react-publish publish-npm-packages publish-crates;
   inherit blit-server-deb blit-cli-deb blit-gateway-deb;
 
   build-debs = pkgs.writeShellApplication {

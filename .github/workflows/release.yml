@@ -79,6 +79,24 @@ jobs:
             tarballs/*.tar.gz
           generate_release_notes: true
 
+  publish-crates:
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: ./bin/publish-crates
+
+  publish-npm:
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: ./bin/publish-npm-packages --provenance --access public
+
   apt-repo:
     needs: [build-debs]
     runs-on: ubuntu-latest

@@ -233,6 +233,7 @@ cargo test -p blit-server -- --nocapture
 
 # Update npm dependency hashes in nix/packages.nix
 "$script_dir/hashes"
+git add nix/packages.nix
 
 # Stage all changed versioned files
 git add Cargo.toml Cargo.lock nix/common.nix react/package.json react/package-lock.json

@@ -310,25 +310,14 @@ brew services start blit-server
 brew services start blit-gateway
 ```
 
-Configuration lives in env files under `$(brew --prefix)/etc/blit/`. These are created on first install with sensible defaults and preserved across upgrades.
+Configuration lives in env files under `$(brew --prefix)/etc/blit/`. These start empty (the binaries have sensible defaults) and are preserved across upgrades. Add any environment variable from the tables above to override defaults:
 
 ```bash
-# blit-server options
-cat $(brew --prefix)/etc/blit/blit-server.env
-# export BLIT_SCROLLBACK="10000"
-
-# blit-gateway options
-cat $(brew --prefix)/etc/blit/blit-gateway.env
-# export BLIT_ADDR="127.0.0.1:3264"
+# e.g. configure the gateway passphrase and scrollback
+echo 'export BLIT_PASS="secret"' >> $(brew --prefix)/etc/blit/blit-gateway.env
+echo 'export BLIT_SCROLLBACK="50000"' >> $(brew --prefix)/etc/blit/blit-server.env
+brew services restart blit-gateway blit-server
 ```
-
-Edit these files to customize, then restart the service:
-
-```bash
-brew services restart blit-server
-```
-
-Any environment variable from the tables above can be added (e.g. `export BLIT_SOCK=...`, `export BLIT_PASS=...`).
 
 ### NixOS
 

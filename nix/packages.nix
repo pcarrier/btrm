@@ -58,14 +58,17 @@
   "name": "blit-browser",
   "version": "${version}",
   "type": "module",
-  "description": "Low-latency terminal streaming -- browser WASM renderer",
+  "description": "Low-latency terminal streaming — browser WASM renderer",
   "main": "blit_browser.js",
   "types": "blit_browser.d.ts",
   "files": ["blit_browser_bg.wasm","blit_browser.js","blit_browser.d.ts","blit_browser_bg.wasm.d.ts","snippets"],
   "sideEffects": ["./snippets/*"],
   "keywords": ["terminal","tty","wasm","streaming","webgl"],
+  "homepage": "https://blit.sh",
   "license": "MIT",
-  "repository": {"type":"git","url":"git+https://github.com/indent-com/blit.git"}
+  "author": "Indent <oss@indent.com> (https://indent.com)",
+  "repository": {"type":"git","url":"git+https://github.com/indent-com/blit.git","directory":"browser"},
+  "bugs": {"url":"https://github.com/indent-com/blit/issues"}
 }
 PKGJSON
           echo "Package contents:"

@@ -496,15 +496,6 @@ export function SwitcherOverlay({
       subtitle: t("switcher.createInCwd"),
       action: "new-terminal",
     }];
-    if (activeLayout && onClearLayout) {
-      actions.push({
-        type: "action",
-        key: "action:clear-layout",
-        title: t("switcher.exitLayout"),
-        subtitle: t("switcher.exitLayoutDesc"),
-        action: "clear-layout",
-      });
-    }
     if (onChangePalette) {
       actions.push({
         type: "action",
@@ -530,6 +521,15 @@ export function SwitcherOverlay({
       subtitle: activeLayout ? activeLayout.dsl : t("switcher.chooseLayout"),
       action: "change-layout",
     });
+    if (activeLayout && onClearLayout) {
+      actions.push({
+        type: "action",
+        key: "action:clear-layout",
+        title: t("switcher.exitLayout"),
+        subtitle: t("switcher.exitLayoutDesc"),
+        action: "clear-layout",
+      });
+    }
     actions.push({
       type: "action",
       key: "action:clear-local-storage",

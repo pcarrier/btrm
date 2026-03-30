@@ -301,6 +301,16 @@ sudo systemctl enable --now blit@alice.socket
 }
 ```
 
+### Debian / Ubuntu (APT)
+
+```bash
+curl -fsSL https://repo.blit.sh/blit.gpg | sudo gpg --dearmor -o /usr/share/keyrings/blit.gpg
+echo "deb [signed-by=/usr/share/keyrings/blit.gpg arch=$(dpkg --print-architecture)] https://repo.blit.sh/ stable main" \
+  | sudo tee /etc/apt/sources.list.d/blit.list
+sudo apt update
+sudo apt install blit blit-server blit-gateway
+```
+
 ## Building and testing
 
 Every `nix run` target has a corresponding script in `bin/` so you don't need to remember the nix invocation:

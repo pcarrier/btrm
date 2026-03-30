@@ -224,7 +224,7 @@ function socketpair(): [number, number] {
 function sendFd(channel: number, clientFd: number) {
   const iovBuf = new Uint8Array(1);
   const iov = new BigUint64Array(2); // struct iovec { void*, size_t } -- same on all LP64
-  iov[0] = BigInt(Bun.ptr(iovBuf));
+  iov[0] = BigInt(ptr(iovBuf));
   iov[1] = 1n;
 
   const cmsg = new DataView(new ArrayBuffer(CMSG_SPACE));
@@ -240,8 +240,8 @@ function sendFd(channel: number, clientFd: number) {
   cmsg.setInt32(CMSG_FD_OFF, clientFd, true);
 
   const msg = new DataView(new ArrayBuffer(MSGHDR_SIZE));
-  const iovPtr = BigInt(Bun.ptr(new Uint8Array(iov.buffer)));
-  const ctrlPtr = BigInt(Bun.ptr(new Uint8Array(cmsg.buffer)));
+  const iovPtr = BigInt(ptr(new Uint8Array(iov.buffer)));
+  const ctrlPtr = BigInt(ptr(new Uint8Array(cmsg.buffer)));
 
   if (DARWIN) {
     // Darwin msghdr: name(8) namelen(4) pad(4) iov(8) iovlen(4) pad(4) control(8) controllen(4)

@@ -301,6 +301,35 @@ sudo systemctl enable --now blit@alice.socket
 }
 ```
 
+### macOS (Homebrew)
+
+```bash
+brew install indent-com/tap/blit-server
+brew install indent-com/tap/blit-gateway
+brew services start blit-server
+brew services start blit-gateway
+```
+
+Configuration lives in env files under `$(brew --prefix)/etc/blit/`. These are created on first install with sensible defaults and preserved across upgrades.
+
+```bash
+# blit-server options
+cat $(brew --prefix)/etc/blit/blit-server.env
+# export BLIT_SCROLLBACK="10000"
+
+# blit-gateway options
+cat $(brew --prefix)/etc/blit/blit-gateway.env
+# export BLIT_ADDR="127.0.0.1:3264"
+```
+
+Edit these files to customize, then restart the service:
+
+```bash
+brew services restart blit-server
+```
+
+Any environment variable from the tables above can be added (e.g. `export BLIT_SOCK=...`, `export BLIT_PASS=...`).
+
 ### NixOS
 
 ```nix
@@ -318,7 +347,6 @@ sudo systemctl enable --now blit@alice.socket
   };
 }
 ```
-
 ## Building and testing
 
 Every `nix run` target has a corresponding script in `bin/` so you don't need to remember the nix invocation:

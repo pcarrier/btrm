@@ -1107,11 +1107,15 @@ fn spawn_pty(
         let shell_flags = &state.0.shell_flags;
         if let Some(command) = command {
             let shell_c = CString::new(shell).unwrap();
-            let exec_flag = CString::new(format!("-{}c", shell_flags)).unwrap();
             let command_c = CString::new(command).unwrap();
+            let flag = CString::new(if shell_flags.is_empty() {
+                "-c".to_owned()
+            } else {
+                format!("-{}c", shell_flags)
+            }).unwrap();
             unsafe {
                 let p = shell_c.as_ptr();
-                let f = exec_flag.as_ptr();
+                let f = flag.as_ptr();
                 let c = command_c.as_ptr();
                 libc::execvp(p, [p, f, c, std::ptr::null()].as_ptr());
                 libc::_exit(1);
@@ -1132,11 +1136,16 @@ fn spawn_pty(
             }
         }
         let shell_c = CString::new(shell).unwrap();
-        let login_flag = CString::new(format!("-{}", shell_flags)).unwrap();
         unsafe {
-            let p = shell_c.as_ptr();
-            let l = login_flag.as_ptr();
-            libc::execvp(p, [p, l, std::ptr::null()].as_ptr());
+            if shell_flags.is_empty() {
+                let p = shell_c.as_ptr();
+                libc::execvp(p, [p, std::ptr::null()].as_ptr());
+            } else {
+                let flag = CString::new(format!("-{}", shell_flags)).unwrap();
+                let p = shell_c.as_ptr();
+                let f = flag.as_ptr();
+                libc::execvp(p, [p, f, std::ptr::null()].as_ptr());
+            }
             libc::_exit(1);
         }
     }
@@ -1241,7 +1250,11 @@ fn respawn_child(
         let shell_flags = &state.0.shell_flags;
         if let Some(cmd) = command {
             let shell_c = CString::new(shell).unwrap();
-            let flag = CString::new(format!("-{}c", shell_flags)).unwrap();
+            let flag = CString::new(if shell_flags.is_empty() {
+                "-c".to_owned()
+            } else {
+                format!("-{}c", shell_flags)
+            }).unwrap();
             let cmd_c = CString::new(cmd).unwrap();
             unsafe {
                 libc::execvp(
@@ -1258,12 +1271,16 @@ fn respawn_child(
             }
         }
         let shell_c = CString::new(shell).unwrap();
-        let login = CString::new(format!("-{}", shell_flags)).unwrap();
         unsafe {
-            libc::execvp(
-                shell_c.as_ptr(),
-                [shell_c.as_ptr(), login.as_ptr(), std::ptr::null()].as_ptr(),
-            );
+            if shell_flags.is_empty() {
+                let p = shell_c.as_ptr();
+                libc::execvp(p, [p, std::ptr::null()].as_ptr());
+            } else {
+                let flag = CString::new(format!("-{}", shell_flags)).unwrap();
+                let p = shell_c.as_ptr();
+                let f = flag.as_ptr();
+                libc::execvp(p, [p, f, std::ptr::null()].as_ptr());
+            }
             libc::_exit(1);
         }
     }

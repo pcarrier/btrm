@@ -8,8 +8,8 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-blit-remote = { path = "../remote" }
-blit-alacritty = { path = "../alacritty-driver" }
+blit-remote = { workspace = true }
+blit-alacritty = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 libc = "0.2"
 memchr = "2"

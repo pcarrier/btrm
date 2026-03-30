@@ -8,6 +8,6 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-blit-remote = { path = "../remote" }
+blit-remote = { workspace = true }
 alacritty_terminal = "0.25"
 regex = "1"

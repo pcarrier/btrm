@@ -104,8 +104,15 @@ for file in "${cargo_manifests[@]}"; do
         || die "expected $file to be at version $current_version"
 done
 
-[[ "$(read_flake_version nix/packages.nix)" == "$current_version" ]] \
-    || die "expected nix/packages.nix to be at version $current_version"
+[[ "$(read_flake_version nix/common.nix)" == "$current_version" ]] \
+    || die "expected nix/common.nix to be at version $current_version"
+
+# Validate workspace dependency versions in root Cargo.toml
+ws_dep_versions=$(perl -ne 'print "$1\n" if /version = "([^"]+)", path/' Cargo.toml)
+for v in $ws_dep_versions; do
+    [[ "$v" == "$current_version" ]] \
+        || die "expected workspace dependency version $v in Cargo.toml to be $current_version"
+done
 
 node - "$current_version" <<'NODE'
 const fs = require("fs");
@@ -148,7 +155,11 @@ for file in "${cargo_manifests[@]}"; do
 done
 
 FROM="$current_version" TO="$target_version" \
-    perl -0pi -e 's/version = "\Q$ENV{FROM}\E";/version = "$ENV{TO}";/' nix/packages.nix
+    perl -0pi -e 's/version = "\Q$ENV{FROM}\E";/version = "$ENV{TO}";/' nix/common.nix
+
+# Bump workspace dependency versions in root Cargo.toml
+FROM="$current_version" TO="$target_version" \
+    perl -pi -e 's/version = "\Q$ENV{FROM}\E", path/version = "$ENV{TO}", path/g' Cargo.toml
 
 node - "$target_version" <<'NODE'
 const fs = require("fs");
@@ -181,8 +192,15 @@ for file in "${cargo_manifests[@]}"; do
         || die "failed to update $file to version $target_version"
 done
 
-[[ "$(read_flake_version nix/packages.nix)" == "$target_version" ]] \
-    || die "failed to update nix/packages.nix to version $target_version"
+[[ "$(read_flake_version nix/common.nix)" == "$target_version" ]] \
+    || die "failed to update nix/common.nix to version $target_version"
+
+# Verify workspace dependency versions in root Cargo.toml
+ws_dep_versions=$(perl -ne 'print "$1\n" if /version = "([^"]+)", path/' Cargo.toml)
+for v in $ws_dep_versions; do
+    [[ "$v" == "$target_version" ]] \
+        || die "failed to update workspace dependency version in Cargo.toml to $target_version"
+done
 
 node - "$target_version" <<'NODE'
 const fs = require("fs");
@@ -217,7 +235,7 @@ cargo test -p blit-server -- --nocapture
 "$script_dir/hashes"
 
 # Stage all changed versioned files
-git add Cargo.lock nix/packages.nix react/package.json react/package-lock.json
+git add Cargo.toml Cargo.lock nix/common.nix react/package.json react/package-lock.json
 for file in "${cargo_manifests[@]}"; do
     git add "$file"
 done

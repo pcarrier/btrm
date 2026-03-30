@@ -8,6 +8,6 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-blit-fonts = { path = "../fonts" }
+blit-fonts = { workspace = true }
 axum = "0.8"
 percent-encoding = "2"

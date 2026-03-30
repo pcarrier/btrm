@@ -130,5 +130,5 @@ fd-channel lets an external process own `blit-server`'s lifecycle and control wh
 - [Bun](examples/fd-channel-bun.ts)
 
 ```
-nix run .#examples-test
+nix run .#tests
 ```

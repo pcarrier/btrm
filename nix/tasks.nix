@@ -171,25 +171,9 @@ CTRL
       publish blit-gateway
     '';
   };
-  examples-test = pkgs.writeShellApplication {
-    name = "blit-examples-test";
-    runtimeInputs = [ pkgs.python3 pkgs.bun ];
-    text = ''
-      export BLIT_SERVER="${blit-server}/bin/blit-server"
-
-      echo "=== Python fd-channel test ==="
-      python3 examples/fd-channel-python.py
-
-      echo ""
-      echo "=== Bun fd-channel test ==="
-      bun run examples/fd-channel-bun.ts
-    '';
-  };
-
 in {
   inherit browser-publish react-publish publish-npm-packages publish-crates;
   inherit blit-server-deb blit-cli-deb blit-gateway-deb;
-  inherit examples-test;
 
   build-debs = pkgs.writeShellApplication {
     name = "blit-build-debs";
@@ -258,7 +242,7 @@ in {
 
   tests = pkgs.writeShellApplication {
     name = "blit-tests";
-    runtimeInputs = [ rustToolchain pkgs.nodejs pkgs.pnpm pkgs.scdoc ];
+    runtimeInputs = [ rustToolchain pkgs.nodejs pkgs.pnpm pkgs.scdoc pkgs.python3 pkgs.bun ];
     text = ''
       echo "=== Setting up web-app dist ==="
       mkdir -p web-app/dist
@@ -281,6 +265,14 @@ in {
         touch browser/pkg/blit_browser.js
       fi
       (cd react && { pnpm install --frozen-lockfile 2>/dev/null || pnpm install; } && pnpm vitest run)
+
+      export BLIT_SERVER="${blit-server}/bin/blit-server"
+      echo ""
+      echo "=== Python fd-channel test ==="
+      python3 examples/fd-channel-python.py
+      echo ""
+      echo "=== Bun fd-channel test ==="
+      bun run examples/fd-channel-bun.ts
     '';
   };
 }

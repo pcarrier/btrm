@@ -82,7 +82,8 @@ uniform sampler2D u_texture;
 out vec4 fragColor;
 
 void main() {
-    fragColor = texture(u_texture, v_uv);
+    vec4 c = texture(u_texture, v_uv);
+    fragColor = vec4(pow(c.rgb, vec3(1.0/2.2)), c.a);
 }
 `;
 

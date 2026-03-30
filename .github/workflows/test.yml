@@ -55,3 +55,23 @@ jobs:
             echo "=== $pkg ==="
             nix build .#"$pkg"
           done
+
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+          - runner: macos-latest
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Build binaries
+        run: |
+          for pkg in blit-server blit-cli blit-gateway; do
+            echo "=== $pkg ==="
+            nix build .#"$pkg"
+          done

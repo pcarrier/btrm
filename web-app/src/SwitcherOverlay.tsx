@@ -474,6 +474,9 @@ export function SwitcherOverlay({
     if (!layoutMode && paneMatches.length > 0) {
       next.push({ title: "Panes", items: paneMatches });
     }
+    if (!layoutMode && sessionMatches.length > 0) {
+      next.push({ title: "Terminals", items: sessionMatches });
+    }
 
     if (customLayouts.length > 0) {
       next.push({ title: "Typed Layout", items: customLayouts });
@@ -483,9 +486,6 @@ export function SwitcherOverlay({
     }
     if ((searching || layoutMode) && presets.length > 0) {
       next.push({ title: "Layouts", items: presets });
-    }
-    if (!layoutMode && sessionMatches.length > 0) {
-      next.push({ title: "Terminals", items: sessionMatches });
     }
 
     const actions: ActionItem[] = [{

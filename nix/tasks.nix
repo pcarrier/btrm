@@ -171,9 +171,25 @@ CTRL
       publish blit-gateway
     '';
   };
+  examples-test = pkgs.writeShellApplication {
+    name = "blit-examples-test";
+    runtimeInputs = [ pkgs.python3 pkgs.bun ];
+    text = ''
+      export BLIT_SERVER="${blit-server}/bin/blit-server"
+
+      echo "=== Python fd-channel test ==="
+      python3 examples/fd-channel-python.py
+
+      echo ""
+      echo "=== Bun fd-channel test ==="
+      bun run examples/fd-channel-bun.ts
+    '';
+  };
+
 in {
   inherit browser-publish react-publish publish-npm-packages publish-crates;
   inherit blit-server-deb blit-cli-deb blit-gateway-deb;
+  inherit examples-test;
 
   build-debs = pkgs.writeShellApplication {
     name = "blit-build-debs";

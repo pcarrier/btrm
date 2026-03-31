@@ -251,7 +251,7 @@ in {
 
   setup-blitz-signaling = pkgs.writeShellApplication {
     name = "setup-blitz-signaling";
-    runtimeInputs = [ pkgs.flyctl pkgs.git pkgs.gnugrep ];
+    runtimeInputs = [ pkgs.flyctl pkgs.git ];
     text = ''
       root=$(git rev-parse --show-toplevel)
       APP="blitz-signaling"
@@ -263,20 +263,26 @@ in {
       if ! flyctl secrets list -a "$APP" 2>/dev/null | grep -q REDIS_URL; then
         echo ""
         echo "=== Provisioning Upstash Redis ==="
-        tmp=$(mktemp)
-        flyctl redis create --name "$APP-redis" --region "$REGION" --no-replicas 2>&1 | tee "$tmp" || true
-        REDIS_URL=$(grep -oP 'redis://\S+' "$tmp" | head -1 || true)
-        rm -f "$tmp"
+        output=$(flyctl redis create --name "$APP-redis" --region "$REGION" --no-replicas 2>&1) || {
+          echo "$output"
+          echo ""
+          echo "ERROR: Redis provisioning failed. Set REDIS_URL manually and re-run:"
+          echo "  flyctl secrets set REDIS_URL=redis://... -a $APP"
+          exit 1
+        }
+        echo "$output"
 
-        if [ -n "$REDIS_URL" ]; then
+        REDIS_URL=$(echo "$output" | sed -n 's/.*\(redis:\/\/[^ ]*\).*/\1/p' | head -1)
+        if [ -z "$REDIS_URL" ]; then
           echo ""
-          echo "=== Setting REDIS_URL ==="
-          flyctl secrets set REDIS_URL="$REDIS_URL" -a "$APP" --stage
-        else
-          echo ""
-          echo "Could not auto-detect REDIS_URL from output."
-          echo "Set it manually: flyctl secrets set REDIS_URL=redis://... -a $APP"
+          echo "ERROR: Could not detect REDIS_URL from provisioning output. Set it manually and re-run:"
+          echo "  flyctl secrets set REDIS_URL=redis://... -a $APP"
+          exit 1
         fi
+
+        echo ""
+        echo "=== Setting REDIS_URL ==="
+        flyctl secrets set REDIS_URL="$REDIS_URL" -a "$APP" --stage
       else
         echo ""
         echo "REDIS_URL already set, skipping Redis provisioning."

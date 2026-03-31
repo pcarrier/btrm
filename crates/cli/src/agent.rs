@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use blit_remote::{
     msg_ack, msg_close, msg_create_n_command, msg_input, msg_read, msg_resize, msg_restart,
-    msg_subscribe, parse_server_msg, ServerMsg, TerminalState, S2C_EXITED, S2C_HELLO, S2C_LIST,
-    S2C_READY, S2C_TEXT, S2C_TITLE, S2C_UPDATE,
+    msg_subscribe, parse_server_msg, ServerMsg, TerminalState, EXIT_STATUS_UNKNOWN, S2C_EXITED,
+    S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE, S2C_UPDATE,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -105,6 +105,16 @@ impl AgentConn {
         self.ptys.iter().any(|p| p.id == id)
     }
 
+    async fn recv_deadline(
+        &mut self,
+        deadline: tokio::time::Instant,
+    ) -> Result<Vec<u8>, String> {
+        tokio::time::timeout_at(deadline, read_frame(&mut self.reader))
+            .await
+            .map_err(|_| "timeout".to_string())?
+            .ok_or_else(|| "server closed connection".to_string())
+    }
+
     async fn maybe_resize(&mut self, id: u16, size: Option<(u16, u16)>) -> Result<(), String> {
         if let Some((rows, cols)) = size {
             self.send(&msg_resize(id, rows, cols)).await?;
@@ -121,9 +131,7 @@ pub async fn cmd_list(transport: Transport) -> Result<(), String> {
         let title = conn.titles.get(&pty.id).map(|s| s.as_str()).unwrap_or("");
         let status = match conn.exited.get(&pty.id) {
             None => "running".to_string(),
-            Some(&s) if s == blit_remote::EXIT_STATUS_UNKNOWN => "exited".to_string(),
-            Some(&s) if s >= 0 => format!("exited({})", s),
-            Some(&s) => format!("signal({})", -s),
+            Some(&s) => format_exit_status(s),
         };
         println!("{}\t{}\t{}\t{}", pty.id, pty.tag, title, status);
     }
@@ -136,7 +144,7 @@ pub async fn cmd_start(
     command: Vec<String>,
     rows: u16,
     cols: u16,
-) -> Result<(), String> {
+) -> Result<u16, String> {
     let mut conn = AgentConn::connect(transport).await?;
 
     let nonce: u16 = 1;
@@ -156,7 +164,7 @@ pub async fn cmd_start(
         {
             if n == nonce {
                 println!("{pty_id}");
-                return Ok(());
+                return Ok(pty_id);
             }
         }
     }
@@ -267,6 +275,10 @@ pub async fn cmd_send(transport: Transport, id: u16, text: String) -> Result<(),
         return Err(format!("pty {id} not found"));
     }
 
+    if conn.exited.contains_key(&id) {
+        return Err(format!("pty {id} has exited"));
+    }
+
     let bytes = parse_escapes(&text);
     conn.send(&msg_input(id, &bytes)).await?;
     Ok(())
@@ -315,6 +327,130 @@ pub async fn cmd_restart(transport: Transport, id: u16) -> Result<(), String> {
         if let Some(ServerMsg::Created { pty_id, .. }) = parse_server_msg(&data) {
             if pty_id == id {
                 return Ok(());
+            }
+        }
+    }
+}
+
+fn format_exit_status(status: i32) -> String {
+    if status == EXIT_STATUS_UNKNOWN {
+        "exited".to_string()
+    } else if status >= 0 {
+        format!("exited({})", status)
+    } else {
+        format!("signal({})", -status)
+    }
+}
+
+fn exit_code_from_status(status: i32) -> i32 {
+    if status == EXIT_STATUS_UNKNOWN {
+        1
+    } else if status >= 0 {
+        status
+    } else {
+        128 + (-status)
+    }
+}
+
+pub async fn cmd_wait(
+    transport: Transport,
+    id: u16,
+    timeout_secs: u64,
+    pattern: Option<String>,
+) -> Result<i32, String> {
+    let mut conn = AgentConn::connect(transport).await?;
+
+    if !conn.has_pty(id) {
+        return Err(format!("pty {id} not found"));
+    }
+
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+
+    if let Some(ref pat) = pattern {
+        let re = regex::Regex::new(pat).map_err(|e| format!("invalid pattern: {e}"))?;
+
+        conn.send(&msg_subscribe(id)).await?;
+
+        let mut state = TerminalState::new(0, 0);
+
+        loop {
+            let data = match conn.recv_deadline(deadline).await {
+                Ok(d) => d,
+                Err(e) if e == "timeout" => {
+                    eprintln!("blit: timed out waiting for pty {id}");
+                    return Ok(124);
+                }
+                Err(e) => return Err(e),
+            };
+            if data.is_empty() {
+                continue;
+            }
+            match data[0] {
+                S2C_UPDATE if data.len() >= 3 => {
+                    let pid = u16::from_le_bytes([data[1], data[2]]);
+                    if pid == id {
+                        state.feed_compressed(&data[3..]);
+                        conn.send(&msg_ack()).await?;
+                        let text = state.get_all_text();
+                        for line in text.lines() {
+                            if re.is_match(line) {
+                                println!("{line}");
+                                return Ok(0);
+                            }
+                        }
+                        if let Some(&status) = conn.exited.get(&id) {
+                            let code = exit_code_from_status(status);
+                            println!("{}", format_exit_status(status));
+                            return Ok(code);
+                        }
+                    }
+                }
+                S2C_EXITED => {
+                    if let Some(ServerMsg::Exited {
+                        pty_id,
+                        exit_status,
+                    }) = parse_server_msg(&data)
+                    {
+                        if pty_id == id {
+                            let code = exit_code_from_status(exit_status);
+                            println!("{}", format_exit_status(exit_status));
+                            return Ok(code);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    } else {
+        if let Some(&status) = conn.exited.get(&id) {
+            let code = exit_code_from_status(status);
+            println!("{}", format_exit_status(status));
+            return Ok(code);
+        }
+
+        loop {
+            let data = match conn.recv_deadline(deadline).await {
+                Ok(d) => d,
+                Err(e) if e == "timeout" => {
+                    eprintln!("blit: timed out waiting for pty {id}");
+                    return Ok(124);
+                }
+                Err(e) => return Err(e),
+            };
+            if data.is_empty() {
+                continue;
+            }
+            if let Some(ServerMsg::Exited {
+                pty_id,
+                exit_status,
+            }) = parse_server_msg(&data)
+            {
+                if pty_id == id {
+                    let code = exit_code_from_status(exit_status);
+                    println!("{}", format_exit_status(exit_status));
+                    return Ok(code);
+                }
             }
         }
     }
@@ -544,6 +680,14 @@ mod tests {
             let mut msg = vec![S2C_CLOSED];
             msg.extend_from_slice(&pty_id.to_le_bytes());
             write_frame(&mut self.writer, &msg).await;
+        }
+
+        async fn send_exited(&mut self, pty_id: u16, exit_status: i32) {
+            write_frame(
+                &mut self.writer,
+                &blit_remote::msg_exited(pty_id, exit_status),
+            )
+            .await;
         }
 
         async fn send_text(
@@ -928,6 +1072,233 @@ mod tests {
                 }
             }
         }
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_send_to_exited_session() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "shell", "bash", true, "");
+            mock.send_initial_burst().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_send(transport, 1, "hello".to_string()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("has exited"));
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_already_exited() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", true, "");
+            mock.ptys[0].exit_status = 0;
+            mock.send_initial_burst().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(transport, 1, 5, None).await;
+        assert_eq!(result.unwrap(), 0);
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_exits_later() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", false, "");
+            mock.send_initial_burst().await;
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            mock.send_exited(1, 42).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(transport, 1, 5, None).await;
+        assert_eq!(result.unwrap(), 42);
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_timeout() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", false, "");
+            mock.send_initial_burst().await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(transport, 1, 1, None).await;
+        assert_eq!(result.unwrap(), 124);
+
+        mock.abort();
+    }
+
+    #[tokio::test]
+    async fn test_wait_not_found() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.send_initial_burst().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(transport, 99, 5, None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_signal_exit() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", false, "");
+            mock.send_initial_burst().await;
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            mock.send_exited(1, -9).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(transport, 1, 5, None).await;
+        assert_eq!(result.unwrap(), 137);
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_pattern_match() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", false, "BUILD SUCCESS");
+            mock.send_initial_burst().await;
+
+            let data = mock.recv().await.unwrap();
+            assert_eq!(data[0], blit_remote::C2S_SUBSCRIBE);
+
+            mock.send_update_for(1).await;
+
+            let ack = mock.recv().await.unwrap();
+            assert_eq!(ack[0], blit_remote::C2S_ACK);
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(
+            transport,
+            1,
+            5,
+            Some("BUILD (SUCCESS|FAILURE)".to_string()),
+        )
+        .await;
+        assert_eq!(result.unwrap(), 0);
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_pattern_exits_before_match() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", false, "compiling...");
+            mock.send_initial_burst().await;
+
+            let data = mock.recv().await.unwrap();
+            assert_eq!(data[0], blit_remote::C2S_SUBSCRIBE);
+
+            mock.send_update_for(1).await;
+
+            let _ack = mock.recv().await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            mock.send_exited(1, 1).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(
+            transport,
+            1,
+            5,
+            Some("BUILD (SUCCESS|FAILURE)".to_string()),
+        )
+        .await;
+        assert_eq!(result.unwrap(), 1);
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_invalid_pattern() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", false, "");
+            mock.send_initial_burst().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(transport, 1, 5, Some("[invalid".to_string())).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid pattern"));
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_pattern_already_exited_no_match() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", true, "compiling done");
+            mock.ptys[0].exit_status = 0;
+            mock.send_initial_burst().await;
+
+            let data = mock.recv().await.unwrap();
+            assert_eq!(data[0], blit_remote::C2S_SUBSCRIBE);
+
+            mock.send_update_for(1).await;
+
+            let _ack = mock.recv().await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(
+            transport,
+            1,
+            5,
+            Some("BUILD (SUCCESS|FAILURE)".to_string()),
+        )
+        .await;
+        assert_eq!(result.unwrap(), 0);
 
         mock.await.unwrap();
     }

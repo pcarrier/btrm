@@ -256,6 +256,7 @@ dependencies = [
  "futures-util",
  "libc",
  "rand 0.10.0",
+ "regex",
  "tokio",
 ]
 

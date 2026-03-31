@@ -2,9 +2,9 @@
 name: blit-terminal
 description: >
   Use when you need to create, control, or read from terminal sessions
-  via the blit CLI. Covers starting PTYs, sending keystrokes, reading
-  output, checking exit status, and managing session lifecycle. Activate
-  when interacting with blit terminals programmatically.
+  via the CLI. Covers starting PTYs for commands or shells, sending keystrokes,
+  reading output, checking exit status, and managing session lifecycle. Activate
+  to interact with terminals programmatically.
 ---
 
 # blit CLI

@@ -1,19 +1,14 @@
-mod ice;
-mod peer;
-mod server;
-mod signaling;
-mod turn;
-
 use clap::Parser;
-use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::fs;
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 
 const DEFAULT_SIGNAL_URL: &str = "wss://cloud.blit.sh";
 const DEFAULT_URL_TEMPLATE: &str = "https://blit.sh/#{secret}";
+const REPO_BASE: &str = "https://repo.blit.sh";
 
 #[derive(Parser)]
 #[command(name = "blitz", version, about = "Share a terminal session via WebRTC")]
@@ -30,7 +25,7 @@ struct Cli {
     #[arg(long, default_value = DEFAULT_URL_TEMPLATE)]
     url: String,
 
-    /// Connect to an existing blit-server socket instead of starting an embedded one
+    /// Connect to an existing blit-server socket instead of starting one
     #[arg(long)]
     socket: Option<String>,
 
@@ -39,143 +34,157 @@ struct Cli {
     quiet: bool,
 }
 
-fn derive_signing_key(passphrase: &str) -> SigningKey {
-    let mut hasher = Sha256::new();
-    hasher.update(passphrase.as_bytes());
-    let seed: [u8; 32] = hasher.finalize().into();
-    SigningKey::from_bytes(&seed)
+fn platform() -> (&'static str, &'static str) {
+    let os = match std::env::consts::OS {
+        "linux" => "Linux",
+        "macos" => "Darwin",
+        _ => {
+            eprintln!("unsupported OS: {}", std::env::consts::OS);
+            std::process::exit(1);
+        }
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "aarch64",
+        _ => {
+            eprintln!("unsupported architecture: {}", std::env::consts::ARCH);
+            std::process::exit(1);
+        }
+    };
+    (os, arch)
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+fn bin_dir(revision: &str) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".blit").join("bin").join(revision)
 }
 
-struct PeerState {
-    handle: tokio::task::JoinHandle<()>,
-    signal_tx: mpsc::UnboundedSender<serde_json::Value>,
-    established: Arc<AtomicBool>,
+fn fetch_latest_revision() -> Result<String, Box<dyn std::error::Error>> {
+    let url = format!("{REPO_BASE}/latest");
+    let body = ureq::get(&url).call()?.body_mut().read_to_string()?;
+    Ok(body.trim().to_owned())
 }
 
-#[tokio::main]
-async fn main() {
+fn download_binary(os: &str, arch: &str, name: &str, dest: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let url = format!("{REPO_BASE}/{os}/{arch}/{name}");
+    eprintln!("downloading {name} from {url}");
+    let mut reader = ureq::get(&url).call()?.into_body().into_reader();
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = dest.with_extension("tmp");
+    let mut file = fs::File::create(&tmp)?;
+    std::io::copy(&mut reader, &mut file)?;
+    file.flush()?;
+    drop(file);
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))?;
+    fs::rename(&tmp, dest)?;
+    Ok(())
+}
+
+fn ensure_binary(os: &str, arch: &str, name: &str, dir: &PathBuf) -> PathBuf {
+    let path = dir.join(name);
+    if !path.exists() {
+        if let Err(e) = download_binary(os, arch, name, &path) {
+            eprintln!("failed to download {name}: {e}");
+            std::process::exit(1);
+        }
+    }
+    path
+}
+
+fn main() {
     let cli = Cli::parse();
+    let (os, arch) = platform();
 
     let passphrase = cli
         .passphrase
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let signing_key = derive_signing_key(&passphrase);
-    let public_key_hex = hex_encode(signing_key.verifying_key().as_bytes());
-
-    let sock_path = match &cli.socket {
-        Some(path) => path.clone(),
-        None => {
-            let path = server::start_embedded(&passphrase).await;
-            eprintln!("embedded server listening on {path}");
-            path
-        }
-    };
-
-    if !cli.quiet {
-        let url = cli.url.replace("{secret}", &passphrase);
-        println!("{url}");
-    }
-
-    let ice_config = match ice::fetch_ice_config(&cli.signal_url).await {
-        Ok(cfg) => {
-            eprintln!("fetched ICE config ({} servers)", cfg.ice_servers.len());
-            Some(cfg)
-        }
+    let revision = match fetch_latest_revision() {
+        Ok(r) => r,
         Err(e) => {
-            eprintln!("failed to fetch ICE config: {e}");
-            None
+            eprintln!("failed to fetch latest revision: {e}");
+            std::process::exit(1);
+        }
+    };
+    let dir = bin_dir(&revision);
+
+    let mut server_child: Option<Child> = None;
+    let mut sock_to_clean: Option<String> = None;
+
+    let sock_path = match cli.socket {
+        Some(path) => path,
+        None => {
+            let server_bin = ensure_binary(os, arch, "blit-server", &dir);
+
+            let mut hasher = Sha256::new();
+            hasher.update(passphrase.as_bytes());
+            hasher.update(b"socket-path");
+            let hash: [u8; 32] = hasher.finalize().into();
+            let suffix: String = hash[..4].iter().map(|b| format!("{b:02x}")).collect();
+
+            let sock = format!(
+                "{}/blitz-{suffix}.sock",
+                std::env::var("TMPDIR")
+                    .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                    .unwrap_or_else(|_| "/tmp".into()),
+            );
+
+            let child = Command::new(&server_bin)
+                .arg("--socket")
+                .arg(&sock)
+                .stdin(Stdio::null())
+                .spawn()
+                .unwrap_or_else(|e| {
+                    eprintln!("failed to start blit-server: {e}");
+                    std::process::exit(1);
+                });
+            server_child = Some(child);
+
+            for _ in 0..100 {
+                if Path::new(&sock).exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if !Path::new(&sock).exists() {
+                eprintln!("blit-server did not create socket in time");
+                if let Some(mut c) = server_child.take() {
+                    c.kill().ok();
+                }
+                std::process::exit(1);
+            }
+
+            eprintln!("blit-server listening on {sock}");
+            sock_to_clean = Some(sock.clone());
+            sock
         }
     };
 
-    let (sig_event_tx, mut sig_event_rx) = mpsc::unbounded_channel::<signaling::Event>();
-    let (sig_send_tx, sig_send_rx) = mpsc::unbounded_channel::<String>();
-    let signal_url = format!(
-        "{}/channel/{}/producer",
-        cli.signal_url.trim_end_matches('/'),
-        public_key_hex,
-    );
+    let forwarder_bin = ensure_binary(os, arch, "blit-webrtc-forwarder", &dir);
 
-    tokio::spawn(signaling::connect(
-        signal_url,
-        signing_key.clone(),
-        sig_event_tx,
-        sig_send_rx,
-    ));
-
-    let mut peers: HashMap<String, PeerState> = HashMap::new();
-
-    while let Some(event) = sig_event_rx.recv().await {
-        match event {
-            signaling::Event::Registered { session_id } => {
-                eprintln!("registered with signaling server (session {session_id})");
-                let stale: Vec<String> = peers
-                    .iter()
-                    .filter(|(_, s)| !s.established.load(Ordering::Relaxed))
-                    .map(|(id, _)| id.clone())
-                    .collect();
-                for id in stale {
-                    if let Some(state) = peers.remove(&id) {
-                        eprintln!("aborting peer still in signaling phase: {id}");
-                        state.handle.abort();
-                    }
-                }
-            }
-            signaling::Event::PeerJoined { session_id } => {
-                if let Some(existing) = peers.get(&session_id) {
-                    if existing.established.load(Ordering::Relaxed) {
-                        eprintln!("ignoring duplicate peer_joined for established peer: {session_id}");
-                        continue;
-                    }
-                    if let Some(old) = peers.remove(&session_id) {
-                        old.handle.abort();
-                    }
-                }
-                eprintln!("consumer joined: {session_id}");
-                let (peer_sig_tx, peer_sig_rx) = mpsc::unbounded_channel();
-                let established = Arc::new(AtomicBool::new(false));
-                let peer_id = session_id.clone();
-                let sock = sock_path.clone();
-                let out_tx = sig_send_tx.clone();
-                let key = signing_key.clone();
-                let est = established.clone();
-                let ice = ice_config.clone();
-                let handle = tokio::spawn(async move {
-                    if let Err(e) =
-                        peer::handle_peer(peer_id.clone(), sock, peer_sig_rx, out_tx, key, est, ice).await
-                    {
-                        eprintln!("peer {peer_id} error: {e}");
-                    }
-                });
-                peers.insert(
-                    session_id,
-                    PeerState {
-                        handle,
-                        signal_tx: peer_sig_tx,
-                        established,
-                    },
-                );
-            }
-            signaling::Event::PeerLeft { session_id } => {
-                eprintln!("consumer left: {session_id}");
-                if let Some(state) = peers.remove(&session_id) {
-                    state.handle.abort();
-                }
-            }
-            signaling::Event::Signal { from, data } => {
-                if let Some(state) = peers.get(&from) {
-                    let _ = state.signal_tx.send(data);
-                } else {
-                    eprintln!("signal from unknown peer {from}, ignoring");
-                }
-            }
-            signaling::Event::Error { message } => {
-                eprintln!("signaling error: {message}");
-            }
-        }
+    let mut cmd = Command::new(&forwarder_bin);
+    cmd.arg("--socket").arg(&sock_path);
+    cmd.arg("--passphrase").arg(&passphrase);
+    cmd.arg("--signal-url").arg(&cli.signal_url);
+    cmd.arg("--url").arg(&cli.url);
+    if cli.quiet {
+        cmd.arg("--quiet");
     }
+
+    let status = cmd.status().unwrap_or_else(|e| {
+        eprintln!("failed to start blit-webrtc-forwarder: {e}");
+        std::process::exit(1);
+    });
+
+    if let Some(mut c) = server_child.take() {
+        c.kill().ok();
+        c.wait().ok();
+    }
+    if let Some(sock) = sock_to_clean {
+        let _ = fs::remove_file(&sock);
+    }
+
+    std::process::exit(status.code().unwrap_or(1));
 }

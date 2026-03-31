@@ -399,6 +399,11 @@ pub async fn cmd_wait(
                                 return Ok(0);
                             }
                         }
+                        if let Some(&status) = conn.exited.get(&id) {
+                            let code = exit_code_from_status(status);
+                            println!("{}", format_exit_status(status));
+                            return Ok(code);
+                        }
                     }
                 }
                 S2C_EXITED => {
@@ -1263,6 +1268,37 @@ mod tests {
         let result = cmd_wait(transport, 1, 5, Some("[invalid".to_string())).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid pattern"));
+
+        mock.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_pattern_already_exited_no_match() {
+        let (client, server) = tokio::net::UnixStream::pair().unwrap();
+
+        let mock = tokio::spawn(async move {
+            let mut mock = MockServer::new(server);
+            mock.add_pty(1, "build", "make", true, "compiling done");
+            mock.ptys[0].exit_status = 0;
+            mock.send_initial_burst().await;
+
+            let data = mock.recv().await.unwrap();
+            assert_eq!(data[0], blit_remote::C2S_SUBSCRIBE);
+
+            mock.send_update_for(1).await;
+
+            let _ack = mock.recv().await;
+        });
+
+        let transport = Transport::Unix(client);
+        let result = cmd_wait(
+            transport,
+            1,
+            5,
+            Some("BUILD (SUCCESS|FAILURE)".to_string()),
+        )
+        .await;
+        assert_eq!(result.unwrap(), 0);
 
         mock.await.unwrap();
     }

@@ -807,6 +807,9 @@ fn record_ack(client: &mut ClientState) {
 fn reset_inflight(client: &mut ClientState) {
     client.inflight_bytes = 0;
     client.inflight_frames.clear();
+    client.next_send_at = Instant::now();
+    client.browser_backlog_frames = 0;
+    client.browser_ack_ahead_frames = 0;
 }
 
 fn is_unset_view_size(rows: u16, cols: u16) -> bool {

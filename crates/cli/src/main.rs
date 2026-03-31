@@ -136,6 +136,24 @@ enum Command {
         /// Session ID
         id: u16,
     },
+
+    /// Wait for a session to exit or match a pattern.
+    ///
+    /// Without --pattern, blocks until the PTY process exits and returns
+    /// its exit code. With --pattern, subscribes to output and exits when
+    /// the regex matches a line produced after the wait began.
+    Wait {
+        /// Session ID
+        id: u16,
+
+        /// Maximum seconds to wait before giving up (exit code 124)
+        #[arg(long)]
+        timeout: u64,
+
+        /// Regex pattern to match against new output lines
+        #[arg(long)]
+        pattern: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -192,6 +210,17 @@ async fn main() {
                 }
                 Command::Restart { id } => agent::cmd_restart(transport, id).await,
                 Command::Close { id } => agent::cmd_close(transport, id).await,
+                Command::Wait {
+                    id,
+                    timeout,
+                    pattern,
+                } => match agent::cmd_wait(transport, id, timeout, pattern).await {
+                    Ok(code) => std::process::exit(code),
+                    Err(e) => {
+                        eprintln!("blit: {e}");
+                        std::process::exit(1);
+                    }
+                },
             };
             if let Err(e) = result {
                 eprintln!("blit: {e}");

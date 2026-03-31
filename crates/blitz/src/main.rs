@@ -91,15 +91,16 @@ async fn main() {
             }
             signaling::Event::PeerJoined { session_id, .. } => {
                 eprintln!("consumer joined: {session_id}");
+                let peer_id = session_id.clone();
                 let sock = sock_path.clone();
                 let signing_key = signing_key.clone();
                 let signal_url_base = cli.signal_url.clone();
                 let pubkey = public_key_hex.clone();
                 let handle = tokio::spawn(async move {
                     if let Err(e) =
-                        peer::handle_peer(session_id.clone(), sock, signing_key, signal_url_base, pubkey).await
+                        peer::handle_peer(peer_id.clone(), sock, signing_key, signal_url_base, pubkey).await
                     {
-                        eprintln!("peer {session_id} error: {e}");
+                        eprintln!("peer {peer_id} error: {e}");
                     }
                 });
                 peers.lock().await.insert(session_id, handle);

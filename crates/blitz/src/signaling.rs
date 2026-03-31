@@ -1,6 +1,6 @@
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;

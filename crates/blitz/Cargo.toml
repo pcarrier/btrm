@@ -16,7 +16,7 @@ blit-server = { workspace = true }
 blit-remote = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 sha2 = "0.10"

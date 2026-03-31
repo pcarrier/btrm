@@ -19,5 +19,8 @@ libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 rand = "0.10"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 regex = "1"
+blit-server = { workspace = true }
+blit-webrtc-forwarder = { workspace = true }
+uuid = { version = "1", features = ["v4"] }

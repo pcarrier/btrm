@@ -10,7 +10,6 @@ members = [
     "crates/cli",
     "crates/fonts",
     "crates/webserver",
-    "crates/blitz",
     "crates/webrtc-forwarder",
 ]
 

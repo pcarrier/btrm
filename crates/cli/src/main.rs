@@ -3,6 +3,7 @@ mod interactive;
 mod transport;
 
 use clap::{Args, Parser, Subcommand};
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "blit", version, about = "Terminal streaming client")]
@@ -162,6 +163,40 @@ enum Command {
         #[arg(long)]
         pattern: Option<String>,
     },
+
+    /// Run the blit terminal multiplexer server
+    Server {
+        /// Shell flags (default: li, or set BLIT_SHELL_FLAGS)
+        #[arg(long)]
+        shell_flags: Option<String>,
+
+        /// Scrollback buffer size in lines
+        #[arg(long)]
+        scrollback: Option<usize>,
+
+        /// Accept clients via fd-passing on this file descriptor
+        #[arg(long)]
+        fd_channel: Option<i32>,
+    },
+
+    /// Share a terminal session via WebRTC
+    Share {
+        /// Passphrase for the session (default: random UUID)
+        #[arg(long, env = "BLITZ_PASSPHRASE")]
+        passphrase: Option<String>,
+
+        /// Signaling service URL
+        #[arg(long, default_value = blit_webrtc_forwarder::DEFAULT_SIGNAL_URL)]
+        signal_url: String,
+
+        /// URL template to display (use {secret} as placeholder)
+        #[arg(long, default_value = blit_webrtc_forwarder::DEFAULT_URL_TEMPLATE)]
+        url: String,
+
+        /// Don't print the sharing URL
+        #[arg(long)]
+        quiet: bool,
+    },
 }
 
 #[tokio::main]
@@ -169,6 +204,89 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Some(Command::Server {
+            shell_flags,
+            scrollback,
+            fd_channel,
+        }) => {
+            let socket_path = cli
+                .connect
+                .socket
+                .unwrap_or_else(blit_server::default_socket_path);
+            let config = blit_server::Config {
+                shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+                shell_flags: shell_flags
+                    .or_else(|| std::env::var("BLIT_SHELL_FLAGS").ok())
+                    .unwrap_or_else(|| "li".into()),
+                scrollback: scrollback
+                    .or_else(|| {
+                        std::env::var("BLIT_SCROLLBACK")
+                            .ok()
+                            .and_then(|s| s.parse().ok())
+                    })
+                    .unwrap_or(10_000),
+                socket_path,
+                fd_channel: fd_channel.or_else(|| {
+                    std::env::var("BLIT_FD_CHANNEL")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                }),
+            };
+            blit_server::run(config).await;
+        }
+        Some(Command::Share {
+            passphrase,
+            signal_url,
+            url,
+            quiet,
+        }) => {
+            let passphrase = passphrase.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+            let sock_path = if let Some(path) = &cli.connect.socket {
+                eprintln!("blit: sharing server at {path}");
+                path.clone()
+            } else {
+                let default = blit_server::default_socket_path();
+                if Path::new(&default).exists() {
+                    eprintln!("blit: sharing existing server at {default}");
+                } else {
+                    let server_config = blit_server::Config {
+                        shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+                        shell_flags: std::env::var("BLIT_SHELL_FLAGS")
+                            .unwrap_or_else(|_| "li".into()),
+                        scrollback: std::env::var("BLIT_SCROLLBACK")
+                            .ok()
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(10_000),
+                        socket_path: default.clone(),
+                        fd_channel: None,
+                    };
+                    tokio::spawn(blit_server::run(server_config));
+
+                    for _ in 0..100 {
+                        if Path::new(&default).exists() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                    if !Path::new(&default).exists() {
+                        eprintln!("blit: server did not create socket in time");
+                        std::process::exit(1);
+                    }
+                    eprintln!("blit: server listening on {default}");
+                }
+                default
+            };
+
+            blit_webrtc_forwarder::run(blit_webrtc_forwarder::Config {
+                sock_path,
+                signal_url,
+                passphrase,
+                url_template: Some(url),
+                quiet,
+            })
+            .await;
+        }
         Some(cmd) => {
             let conn = &cli.connect;
             let transport = match transport::connect(&conn.socket, &conn.tcp, &conn.ssh).await {
@@ -259,6 +377,7 @@ async fn main() {
                         std::process::exit(1);
                     }
                 },
+                Command::Server { .. } | Command::Share { .. } => unreachable!(),
             };
             if let Err(e) = result {
                 eprintln!("blit: {e}");

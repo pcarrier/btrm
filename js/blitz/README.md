@@ -8,6 +8,39 @@ Channels are identified by ed25519 public keys. The server verifies NaCl
 anyone who holds the corresponding signing key can participate, without any
 server-side authentication or user accounts.
 
+## Deploy
+
+Install [flyctl](https://fly.io/docs/flyctl/install/), then:
+
+```bash
+cd js/blitz
+./bin/setup
+```
+
+This creates the Fly app, provisions Redis, and deploys. Optionally set
+Cloudflare TURN credentials first:
+
+```bash
+export CF_TURN_TOKEN_ID=...
+export CF_TURN_API_TOKEN=...
+./bin/setup
+```
+
+To enable continuous deployment from GitHub Actions:
+
+```bash
+fly tokens create deploy -a blitz-signaling
+gh secret set FLY_API_TOKEN --repo <owner>/<repo>
+```
+
+## Running locally
+
+```bash
+docker run -d -p 6379:6379 redis:7
+bun install
+bun run dev
+```
+
 ## Protocol
 
 ```
@@ -47,21 +80,6 @@ By default it returns Google's public STUN servers. If `CF_TURN_TOKEN_ID` and
 {"iceServers": [{"urls": "turn:...", "username": "...", "credential": "..."}, ...]}
 ```
 
-## Running locally
-
-```bash
-# Start Redis
-docker run -d -p 6379:6379 redis:7
-
-# Start the service
-cd js/blitz
-bun install
-bun run dev
-```
-
-The service listens on port 8000 by default (`PORT` env var). Set `REDIS_URL`
-to point at a Redis instance.
-
 ## Configuration
 
 | Variable            | Default                  | Description                       |
@@ -70,53 +88,6 @@ to point at a Redis instance.
 | `REDIS_URL`         | `redis://localhost:6379` | Redis connection URL              |
 | `CF_TURN_TOKEN_ID`  | _(unset)_                | Cloudflare TURN key ID            |
 | `CF_TURN_API_TOKEN` | _(unset)_                | Cloudflare TURN API bearer token  |
-
-## Deployment
-
-The Dockerfile builds a minimal image suitable for any container platform:
-
-```bash
-cd js/blitz
-docker build -t blitz-signaling .
-docker run -p 8000:8000 -e REDIS_URL=redis://your-redis:6379 blitz-signaling
-```
-
-### Fly.io (easiest)
-
-[Fly.io](https://fly.io) can deploy the Dockerfile directly with built-in
-Redis via Upstash:
-
-```bash
-cd js/blitz
-
-# Launch the app (creates fly.toml automatically)
-fly launch --no-deploy
-
-# Provision Redis
-fly redis create --name blitz-redis
-
-# Set the connection string (printed by the previous command)
-fly secrets set REDIS_URL=redis://...
-
-# Optional: enable Cloudflare TURN
-fly secrets set CF_TURN_TOKEN_ID=... CF_TURN_API_TOKEN=...
-
-# Deploy
-fly deploy
-```
-
-### Other platforms
-
-Any platform that runs Docker containers works. You need:
-
-1. A Redis instance (managed Redis from AWS ElastiCache, GCP Memorystore,
-   Railway, Upstash, etc.)
-2. A container runtime with the `REDIS_URL` env var set
-3. A health check pointing at `GET /health` (returns 200 when Redis is
-   reachable, 503 otherwise)
-
-For horizontal scaling, multiple instances share state through Redis pub/sub —
-no sticky sessions required.
 
 ## Architecture
 

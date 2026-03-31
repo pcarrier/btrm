@@ -67,7 +67,7 @@ Pick one, not both:
 - **`blit-gateway`**: standalone proxy for persistent browser access. Handles passphrase auth, serves the web app, optionally enables QUIC.
 - **`blit` (CLI)**: connects to the server, embeds a temporary gateway, opens the browser.
 
-Quick start with the gateway:
+With the gateway:
 
 ```bash
 BLIT_PASS=secret blit-gateway &

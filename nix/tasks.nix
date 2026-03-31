@@ -242,10 +242,10 @@ in {
 
   deploy-blitz-signaling = pkgs.writeShellApplication {
     name = "deploy-blitz-signaling";
-    runtimeInputs = [ pkgs.flyctl ];
+    runtimeInputs = [ pkgs.flyctl pkgs.git ];
     text = ''
-      cd js/blitz
-      flyctl deploy "$@"
+      root=$(git rev-parse --show-toplevel)
+      flyctl deploy "$root/js/blitz" "$@"
     '';
   };
 

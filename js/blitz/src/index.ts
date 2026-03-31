@@ -8,7 +8,7 @@ const CF_TURN_TOKEN_ID = process.env.CF_TURN_TOKEN_ID;
 const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN;
 const MESSAGE_TEMPLATE =
   process.env.MESSAGE_TEMPLATE ||
-  "Welcome to blitz! Terminals are now available at https://blit.sh/#{secret}";
+  "Welcome to blitz! Terminals are now available at https://cloud.blitz.sh/#{secret}";
 const ICE_TTL = 86400;
 const SESSION_TTL = 600;
 const MAX_PAYLOAD_BYTES = 65536;

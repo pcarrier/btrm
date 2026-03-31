@@ -181,10 +181,7 @@ jobs:
             mkdir -p "repo/$uname_s/$uname_m"
             tar -xzf "$tarball" -C "repo/$uname_s/$uname_m/"
           done
-          for bin in repo/Darwin/*/blit* repo/Linux/*/blit*; do
-            [ -f "$bin" ] || continue
-            sha256sum "$bin" | awk '{print $1}' > "$bin.sha256"
-          done
+          echo "${GITHUB_REF_NAME}" > repo/REVISION
           echo "Static binaries:"
           find repo/Darwin repo/Linux -type f 2>/dev/null | sort
 

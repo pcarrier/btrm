@@ -37,7 +37,7 @@ fi
 
 echo ""
 echo "=== Deploying ==="
-fly deploy js/blitz
+fly deploy ts/blitz-signaling
 
 echo ""
 echo "=== Done ==="

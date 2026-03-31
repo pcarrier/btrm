@@ -245,7 +245,7 @@ in {
     runtimeInputs = [ pkgs.flyctl pkgs.git ];
     text = ''
       root=$(git rev-parse --show-toplevel)
-      flyctl deploy "$root/js/blitz" "$@"
+      flyctl deploy "$root/ts/blitz-signaling" "$@"
     '';
   };
 

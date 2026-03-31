@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "js/blitz/**"
+      - "ts/blitz-signaling/**"
 
 jobs:
   deploy:

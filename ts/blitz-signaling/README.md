@@ -38,6 +38,7 @@ gh secret set FLY_API_TOKEN --repo <owner>/<repo>
 
 ```bash
 docker run -d -p 6379:6379 redis:7
+cd ts/blitz-signaling
 bun install
 bun run dev
 ```
@@ -97,7 +98,7 @@ By default it returns Google's public STUN servers. If `CF_TURN_TOKEN_ID` and
 terminal session is shared:
 
 ```jsonc
-{"template": "Welcome to blitz! Terminals are now available at https://cloud.blitz.sh/#{secret}"}
+{"template": "Welcome to blitz! Terminals are now available at https://blitz.sh/#{secret}"}
 ```
 
 The `{secret}` placeholder is intended to be replaced client-side with the

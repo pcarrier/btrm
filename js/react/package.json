@@ -72,5 +72,8 @@
     "@vitest/coverage-v8": "^4",
     "vitest": "^4"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "rollup": ">=4.59.0"
+  }
 }

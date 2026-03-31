@@ -262,31 +262,20 @@ in {
       flyctl apps create "$APP" --machines --org "$ORG" 2>/dev/null || echo "App $APP already exists, continuing..."
 
       if ! flyctl secrets list -a "$APP" 2>/dev/null | grep -q REDIS_URL; then
-        echo ""
-        echo "=== Provisioning Upstash Redis ==="
-        output=$(yes n | flyctl redis create --name "$APP-redis" --region "$REGION" --no-replicas --org "$ORG" --enable-eviction 2>&1) || {
-          echo "$output"
+        if [ -z "''${REDIS_URL:-}" ]; then
           echo ""
-          echo "ERROR: Redis provisioning failed. Set REDIS_URL manually and re-run:"
-          echo "  flyctl secrets set REDIS_URL=redis://... -a $APP"
-          exit 1
-        }
-        echo "$output"
-
-        REDIS_URL=$(echo "$output" | sed -n 's/.*\(redis:\/\/[^ ]*\).*/\1/p' | head -1)
-        if [ -z "$REDIS_URL" ]; then
+          echo "ERROR: REDIS_URL is required. Provision Redis and pass the URL:"
           echo ""
-          echo "ERROR: Could not detect REDIS_URL from provisioning output. Set it manually and re-run:"
-          echo "  flyctl secrets set REDIS_URL=redis://... -a $APP"
+          echo "  flyctl redis create --org $ORG"
+          echo "  REDIS_URL=redis://... $0"
           exit 1
         fi
-
         echo ""
         echo "=== Setting REDIS_URL ==="
         flyctl secrets set REDIS_URL="$REDIS_URL" -a "$APP" --stage
       else
         echo ""
-        echo "REDIS_URL already set, skipping Redis provisioning."
+        echo "REDIS_URL already set, skipping."
       fi
 
       if [ -n "''${CF_TURN_TOKEN_ID:-}" ] && [ -n "''${CF_TURN_API_TOKEN:-}" ]; then

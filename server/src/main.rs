@@ -1030,6 +1030,27 @@ fn pty_cwd(pid: libc::pid_t) -> Option<String> {
     }
 }
 
+/// On macOS, child processes forked from a CLI tool (as opposed to a native
+/// .app with an NSWindow) don't inherit foreground-app scheduling: the kernel
+/// has no window association for the PTY session, so it schedules the children
+/// on efficiency cores with possible duty-cycling.  Explicitly requesting
+/// QOS_CLASS_USER_INTERACTIVE restores parity with terminals like Ghostty.
+fn set_qos_user_interactive() {
+    #[cfg(target_os = "macos")]
+    {
+        const QOS_CLASS_USER_INTERACTIVE: libc::c_uint = 0x21;
+        extern "C" {
+            fn pthread_set_qos_class_self_np(
+                qos_class: libc::c_uint,
+                relative_priority: libc::c_int,
+            ) -> libc::c_int;
+        }
+        unsafe {
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_pty(
     shell: &str,
@@ -1088,6 +1109,7 @@ fn spawn_pty(
                 libc::close(slave);
             }
         }
+        set_qos_user_interactive();
         let effective_dir = dir.map(String::from);
         if let Some(d) = effective_dir {
             if let Ok(dir_c) = CString::new(d) {
@@ -1245,6 +1267,7 @@ fn respawn_child(
                 libc::close(slave);
             }
         }
+        set_qos_user_interactive();
         std::env::set_var("TERM", "xterm-256color");
         std::env::set_var("COLORTERM", "truecolor");
         std::env::remove_var("COLUMNS");

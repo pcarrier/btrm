@@ -10,27 +10,34 @@ server-side authentication or user accounts.
 
 ## Deploy
 
-Install [flyctl](https://fly.io/docs/flyctl/install/), then:
+Install [flyctl](https://fly.io/docs/flyctl/install/), provision Redis, then
+run the setup script:
 
 ```bash
-./bin/setup-blitz-signaling
+# Create a Redis instance (interactive — flyctl will prompt for options)
+flyctl redis create
+
+# Deploy (REDIS_URL is required on first run)
+REDIS_URL=redis://... ./bin/setup-blitz-signaling
 ```
 
-This creates the Fly app, provisions Redis, and deploys. The script is
-idempotent — re-running it skips already-provisioned resources and redeploys.
+The script is idempotent — re-running it skips secrets that are already set
+and redeploys.
 
-Optionally set Cloudflare TURN credentials first:
+Optional env vars for setup:
 
-```bash
-export CF_TURN_TOKEN_ID=...
-export CF_TURN_API_TOKEN=...
-./bin/setup-blitz-signaling
-```
+| Variable            | Description                              |
+| ------------------- | ---------------------------------------- |
+| `REDIS_URL`         | Redis connection URL (required first run)|
+| `CF_TURN_TOKEN_ID`  | Cloudflare TURN key ID                   |
+| `CF_TURN_API_TOKEN` | Cloudflare TURN API token                |
+| `FLY_ORG`           | Fly.io org (default: `personal`)         |
+| `FLY_REGION`        | Primary region (default: `iad`)          |
 
 To enable continuous deployment from GitHub Actions:
 
 ```bash
-fly tokens create deploy -a blitz-signaling
+flyctl tokens create deploy -a blitz-signaling
 gh secret set FLY_API_TOKEN --repo <owner>/<repo>
 ```
 

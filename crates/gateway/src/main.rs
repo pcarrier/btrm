@@ -443,7 +443,7 @@ async fn run_webtransport_loop(state: AppState, addr: &str, has_explicit_cert: b
                 wt::quinn::EndpointConfig::default(),
                 Some(config),
                 sock,
-                Arc::new(wt::quinn::default_runtime().unwrap()),
+                wt::quinn::default_runtime().unwrap(),
             ) {
                 Ok(ep) => {
                     eprintln!("webtransport: listening on [{v6_addr}] (IPv6/QUIC)");

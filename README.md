@@ -1,6 +1,6 @@
 # blit
 
-Stream terminals to a browser. The server parses PTY output, diffs it, and sends only what changed — LZ4-compressed, per-client paced, WebGL-rendered.
+Fast for humans, easy for agents, runs anywhere there's a browser. The server parses PTY output, diffs it, and sends only what changed — LZ4-compressed, per-client paced, WebGL-rendered. AI agents get a full set of [non-interactive CLI subcommands](SKILLS.md) to create, control, and read terminal sessions programmatically. Embed the React component in any web app with [`blit-react`](EMBEDDING.md).
 
 ```bash
 blit-server &

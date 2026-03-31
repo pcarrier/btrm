@@ -45,44 +45,43 @@ These are the two ways to read terminal output. Getting this distinction right i
 
 **Rule of thumb:** Use `history --from-end 0 --limit N` when you need recent output. Use `show` when you only care about what's visible right now (e.g. checking for a prompt).
 
-## Running commands and waiting for output
+## Running commands
 
-`blit start` creates a PTY and prints its session ID. Without a command argument, it starts the user's default shell. To execute a shell command and read its output:
+`blit start` creates a PTY and prints its session ID. Pass a command directly or omit it to start the user's default shell:
 
 ```bash
-ID=$(blit start --cols 200)
-blit send "$ID" "ls -la\n"
-sleep 0.5                    # wait for output
-blit history "$ID" --from-end 0 --limit 20
-blit close "$ID"
+ID=$(blit start --cols 200 ls -la)     # run a command
+ID=$(blit start --cols 200)            # start a shell
 ```
 
-The `sleep` is necessary because `send` returns immediately after delivering keystrokes to the PTY. There is no built-in "wait for output to settle" mechanism.
+The command runs asynchronously — `start` returns as soon as the PTY is created, not when the command finishes. Poll with `show` or `history` to read output.
 
-### Detecting when a command has finished
+### Waiting for output
 
-The STATUS column in `blit list` only reflects the session's overall exit status (shown after the shell itself exits), not whether an individual command within the session has completed. To detect command completion, poll the output for a shell prompt:
+There is no built-in "wait for command to finish" mechanism. Poll until the session exits or a known marker appears:
 
 ```bash
-# Poll until shell prompt appears (up to 10 seconds)
+# For one-shot commands: poll until the process exits
+for i in $(seq 1 50); do
+  blit list | grep -P "^$ID\t" | grep -q 'exited' && break
+  sleep 0.2
+done
+blit history "$ID" --from-end 0 --limit 20
+
+# For interactive sessions: poll for a shell prompt
 for i in $(seq 1 50); do
   blit history "$ID" --from-end 0 --limit 3 | grep -q '\$ $' && break
   sleep 0.2
 done
-```
 
-For commands with known end markers, match on those instead:
-
-```bash
-# Wait for a build to finish (look for "BUILD SUCCESS" or "BUILD FAILURE")
+# For commands with known end markers
 for i in $(seq 1 150); do
-  OUTPUT=$(blit history "$ID" --from-end 0 --limit 5)
-  echo "$OUTPUT" | grep -qE 'BUILD (SUCCESS|FAILURE)' && break
+  blit history "$ID" --from-end 0 --limit 5 | grep -qE 'BUILD (SUCCESS|FAILURE)' && break
   sleep 0.2
 done
 ```
 
-**Do not assume a command has finished after `send`.** Always poll with `show` or `history` to confirm.
+**Do not assume a command has finished after `start` or `send`.** Always poll to confirm.
 
 ## Session lifecycle
 

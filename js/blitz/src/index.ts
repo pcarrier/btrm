@@ -6,6 +6,9 @@ const PORT = parseInt(process.env.PORT || "8000", 10);
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const CF_TURN_TOKEN_ID = process.env.CF_TURN_TOKEN_ID;
 const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN;
+const MESSAGE_TEMPLATE =
+  process.env.MESSAGE_TEMPLATE ||
+  "Welcome to blitz! Terminals are now available at https://blit.sh/#{secret}";
 const ICE_TTL = 86400;
 const SESSION_TTL = 600;
 const MAX_PAYLOAD_BYTES = 65536;
@@ -201,6 +204,10 @@ const server = Bun.serve<ClientData>({
       } catch {
         return new Response("redis unreachable", { status: 503 });
       }
+    }
+
+    if (url.pathname === "/message") {
+      return Response.json({ template: MESSAGE_TEMPLATE });
     }
 
     if (url.pathname === "/ice") {

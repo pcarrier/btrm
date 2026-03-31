@@ -90,6 +90,19 @@ By default it returns Google's public STUN servers. If `CF_TURN_TOKEN_ID` and
 | `REDIS_URL`         | `redis://localhost:6379` | Redis connection URL              |
 | `CF_TURN_TOKEN_ID`  | _(unset)_                | Cloudflare TURN key ID            |
 | `CF_TURN_API_TOKEN` | _(unset)_                | Cloudflare TURN API bearer token  |
+| `MESSAGE_TEMPLATE`  | _(see below)_            | Template returned by `GET /message` |
+
+## Message template
+
+`GET /message` returns a message template that clients can display when a
+terminal session is shared:
+
+```jsonc
+{"template": "Welcome to blitz! Terminals are now available at https://blit.sh/#{secret}"}
+```
+
+The `{secret}` placeholder is intended to be replaced client-side with the
+actual session secret. Override the default via the `MESSAGE_TEMPLATE` env var.
 
 ## Architecture
 

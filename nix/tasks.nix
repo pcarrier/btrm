@@ -240,6 +240,15 @@ in {
     '';
   };
 
+  deploy-blitz-signaling = pkgs.writeShellApplication {
+    name = "deploy-blitz-signaling";
+    runtimeInputs = [ pkgs.flyctl ];
+    text = ''
+      cd js/blitz
+      flyctl deploy "$@"
+    '';
+  };
+
   tests = pkgs.writeShellApplication {
     name = "blit-tests";
     runtimeInputs = [ rustToolchain pkgs.nodejs pkgs.pnpm pkgs.scdoc pkgs.python3 pkgs.bun ];

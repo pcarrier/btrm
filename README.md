@@ -1,6 +1,6 @@
 # blit
 
-Stream terminals to a browser. The server parses PTY output, diffs it, and sends only what changed — LZ4-compressed, per-client paced, WebGL-rendered.
+Agent-friendly terminal streaming — as fast as the network and browser allow. The server parses PTY output, diffs it, and sends only what changed — LZ4-compressed, per-client paced, WebGL-rendered. Adapts to any transport (WebSocket, WebTransport, WebRTC, Unix socket, SSH) and security model. AI agents get a full set of [non-interactive CLI subcommands](SKILLS.md) to create, control, and read terminal sessions programmatically. Embed the React component in any web app with [`blit-react`](EMBEDDING.md).
 
 ```bash
 blit-server &
@@ -165,6 +165,8 @@ blit --ssh myhost show 1
 ```
 
 Output is plain text with no decoration — designed to be easy for scripts and LLMs to parse. Errors go to stderr; non-zero exit on failure.
+
+If you're building an AI agent that drives terminals, [SKILLS.md](SKILLS.md) is a ready-made skill definition — drop it into your agent's tool list and it can create, control, and read blit sessions out of the box.
 
 ## What lives in this repo
 

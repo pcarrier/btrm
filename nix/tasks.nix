@@ -256,14 +256,15 @@ in {
       root=$(git rev-parse --show-toplevel)
       APP="blitz-signaling"
       REGION="''${FLY_REGION:-iad}"
+      ORG="''${FLY_ORG:-personal}"
 
       echo "=== Creating Fly app: $APP ==="
-      flyctl apps create "$APP" --machines 2>/dev/null || echo "App $APP already exists, continuing..."
+      flyctl apps create "$APP" --machines --org "$ORG" 2>/dev/null || echo "App $APP already exists, continuing..."
 
       if ! flyctl secrets list -a "$APP" 2>/dev/null | grep -q REDIS_URL; then
         echo ""
         echo "=== Provisioning Upstash Redis ==="
-        output=$(flyctl redis create --name "$APP-redis" --region "$REGION" --no-replicas 2>&1) || {
+        output=$(flyctl redis create --name "$APP-redis" --region "$REGION" --no-replicas --org "$ORG" 2>&1) || {
           echo "$output"
           echo ""
           echo "ERROR: Redis provisioning failed. Set REDIS_URL manually and re-run:"

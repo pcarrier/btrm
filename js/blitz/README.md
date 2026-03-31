@@ -1,4 +1,4 @@
-# blitz
+# blitz-signaling
 
 WebRTC signaling relay for blit terminal sharing. Routes WebRTC signaling
 messages (offers, answers, ICE candidates) between peers over WebSocket.
@@ -30,6 +30,23 @@ All signaling messages are NaCl-signed and addressed to a specific session:
 
 Peers receive `peer_left` when the other side disconnects.
 
+## ICE server configuration
+
+`GET /ice` returns STUN/TURN server configuration for clients to use when
+establishing WebRTC peer connections.
+
+By default it returns Google's public STUN servers. If `CF_TURN_TOKEN_ID` and
+`CF_TURN_API_TOKEN` are set, it fetches short-lived TURN credentials from
+[Cloudflare Calls](https://developers.cloudflare.com/calls/turn/) instead:
+
+```jsonc
+// Without Cloudflare TURN
+{"iceServers": [{"urls": "stun:stun.l.google.com:19302"}, ...]}
+
+// With Cloudflare TURN
+{"iceServers": [{"urls": "turn:...", "username": "...", "credential": "..."}, ...]}
+```
+
 ## Running locally
 
 ```bash
@@ -47,10 +64,12 @@ to point at a Redis instance.
 
 ## Configuration
 
-| Variable    | Default                  | Description            |
-| ----------- | ------------------------ | ---------------------- |
-| `PORT`      | `8000`                   | HTTP/WebSocket port    |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL   |
+| Variable            | Default                  | Description                       |
+| ------------------- | ------------------------ | --------------------------------- |
+| `PORT`              | `8000`                   | HTTP/WebSocket port               |
+| `REDIS_URL`         | `redis://localhost:6379` | Redis connection URL              |
+| `CF_TURN_TOKEN_ID`  | _(unset)_                | Cloudflare TURN key ID            |
+| `CF_TURN_API_TOKEN` | _(unset)_                | Cloudflare TURN API bearer token  |
 
 ## Deployment
 
@@ -58,8 +77,8 @@ The Dockerfile builds a minimal image suitable for any container platform:
 
 ```bash
 cd js/blitz
-docker build -t blitz .
-docker run -p 8000:8000 -e REDIS_URL=redis://your-redis:6379 blitz
+docker build -t blitz-signaling .
+docker run -p 8000:8000 -e REDIS_URL=redis://your-redis:6379 blitz-signaling
 ```
 
 ### Fly.io (easiest)
@@ -78,6 +97,9 @@ fly redis create --name blitz-redis
 
 # Set the connection string (printed by the previous command)
 fly secrets set REDIS_URL=redis://...
+
+# Optional: enable Cloudflare TURN
+fly secrets set CF_TURN_TOKEN_ID=... CF_TURN_API_TOKEN=...
 
 # Deploy
 fly deploy

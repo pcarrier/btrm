@@ -4,8 +4,40 @@ import nacl from "tweetnacl";
 
 const PORT = parseInt(process.env.PORT || "8000", 10);
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const CF_TURN_TOKEN_ID = process.env.CF_TURN_TOKEN_ID;
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN;
+const ICE_TTL = 86400;
 const SESSION_TTL = 600;
 const MAX_PAYLOAD_BYTES = 65536;
+
+const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+];
+
+async function getIceServers() {
+  if (!CF_TURN_TOKEN_ID || !CF_TURN_API_TOKEN) {
+    return { iceServers: DEFAULT_ICE_SERVERS };
+  }
+
+  const res = await fetch(
+    `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN_TOKEN_ID}/credentials/generate-ice-servers`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CF_TURN_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ttl: ICE_TTL }),
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Cloudflare TURN API returned ${res.status}`);
+  }
+
+  return await res.json();
+}
 
 const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: 3 });
 const pubRedis = new Redis(REDIS_URL, { maxRetriesPerRequest: 3 });
@@ -159,6 +191,15 @@ const server = Bun.serve<ClientData>({
         return new Response("ok", { status: 200 });
       } catch {
         return new Response("redis unreachable", { status: 503 });
+      }
+    }
+
+    if (url.pathname === "/ice") {
+      try {
+        const config = await getIceServers();
+        return Response.json(config);
+      } catch {
+        return Response.json({ iceServers: DEFAULT_ICE_SERVERS });
       }
     }
 
@@ -325,4 +366,4 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
-Bun.write(Bun.stdout, `Blitz service listening on port ${PORT}\n`);
+Bun.write(Bun.stdout, `Blitz signaling service listening on port ${PORT}\n`);

@@ -44,8 +44,8 @@ Every `nix run` target has a corresponding script in `bin/`:
 ```bash
 ./bin/build-debs             # .deb packages -> dist/debs/
 ./bin/build-tarballs         # static tarballs -> dist/tarballs/
-./bin/browser-publish        # npm publish blit-browser
-./bin/react-publish          # npm publish blit-react
+./bin/browser-publish        # npm publish @blit-sh/browser
+./bin/react-publish          # npm publish @blit-sh/react
 ```
 
 `build-debs` and `build-tarballs` accept an optional output directory argument (default `dist/debs` and `dist/tarballs`).
@@ -95,7 +95,7 @@ Every Rust crate is a single source file (`lib.rs` or `main.rs`) except `blit-cl
 
 | Directory     | What                                                                                                                 |
 | ------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `js/react/`   | `blit-react` npm package — React library with hooks, transports, WebGL renderer. Tests in `js/react/src/__tests__/`. |
+| `js/react/`   | `@blit-sh/react` npm package — React library with hooks, transports, WebGL renderer. Tests in `js/react/src/__tests__/`. |
 | `js/web-app/` | Vite + React SPA — reference browser UI with BSP tiled layouts, overlays, status bar                                 |
 | `e2e/`        | Playwright tests against the full stack (6 spec files)                                                               |
 | `nix/`        | Nix packaging: `common.nix` (toolchain), `packages.nix` (build defs), `tasks.nix` (CI tasks), NixOS/Darwin modules   |

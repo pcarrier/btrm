@@ -25,8 +25,8 @@ The server is the stateful half. It owns PTYs, scrollback, parsed terminal state
 | ----------------------- | -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `blit-remote`           | `crates/remote/`           | lib           | Wire protocol: message builders/parsers, frame containers, state primitives, LZ4 compression                         |
 | `blit-alacritty`        | `crates/alacritty-driver/` | lib           | Terminal parsing backend wrapping `alacritty_terminal`; snapshot generation, scrollback, title/mode tracking, search |
-| `blit-browser`          | `crates/browser/`          | cdylib (WASM) | Applies compressed frame diffs, produces WebGL vertex data, manages glyph atlas                                      |
-| `blit-react`            | `js/react/`                | npm           | Workspace-based React client library: connections, sessions, transports, rendering                                   |
+| `@blit-sh/browser`      | `crates/browser/`          | cdylib (WASM) | Applies compressed frame diffs, produces WebGL vertex data, manages glyph atlas                                      |
+| `@blit-sh/react`        | `js/react/`                | npm           | Workspace-based React client library: connections, sessions, transports, rendering                                   |
 | `blit-server`           | `crates/server/`           | bin           | PTY host and frame scheduler. Listens on Unix socket.                                                                |
 | `blit-gateway`          | `crates/gateway/`          | bin           | WebSocket/WebTransport proxy with passphrase auth                                                                    |
 | `blit` (CLI)            | `crates/cli/`              | bin           | Browser/console client, agent subcommands, SSH tunneling, embedded gateway, `server`/`share` subcommands             |
@@ -47,7 +47,7 @@ graph TD
     remote --> demo[blit-demo]
 
     alacritty --> server[blit-server]
-    browser --> react[blit-react]
+    browser --> react[@blit-sh/react]
     react --> webapp[web-app]
 
     fonts[blit-fonts] --> webserver[blit-webserver]

@@ -133,7 +133,8 @@ if (lock.packages?.[""]?.version !== expected) {
   console.error(`release: expected js/react/package-lock.json packages[""] to be at version ${expected}`);
   process.exit(1);
 }
-if (lock.packages?.["../../crates/browser/pkg"]?.version !== expected) {
+const browserEntry = lock.packages?.["../../crates/browser/pkg"];
+if (browserEntry && browserEntry.version !== expected) {
   console.error(`release: expected js/react/package-lock.json packages["../../crates/browser/pkg"] to be at version ${expected}`);
   process.exit(1);
 }

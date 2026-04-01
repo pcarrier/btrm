@@ -8,8 +8,8 @@
  */
 
 import nacl from "tweetnacl";
-import { createWebRtcDataChannelTransport } from "blit-react";
-import type { BlitTransport, ConnectionStatus } from "blit-react";
+import { createWebRtcDataChannelTransport } from "@blit-sh/react";
+import type { BlitTransport, ConnectionStatus } from "@blit-sh/react";
 
 const PBKDF2_SALT = new TextEncoder().encode("https://blit.sh");
 const PBKDF2_ROUNDS = 100_000;

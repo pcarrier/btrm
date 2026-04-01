@@ -12,14 +12,14 @@ import {
   SEARCH_SOURCE_TITLE,
   SEARCH_SOURCE_VISIBLE,
   useBlitWorkspace,
-} from "blit-react";
+} from "@blit-sh/react";
 import type {
   BlitSearchResult,
   BlitSession,
   BlitTerminalHandle,
   SessionId,
   TerminalPalette,
-} from "blit-react";
+} from "@blit-sh/react";
 import { OverlayBackdrop, OverlayPanel } from "./Overlay";
 import {
   overlayChromeStyles,

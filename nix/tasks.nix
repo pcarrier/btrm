@@ -22,7 +22,7 @@ let
 
       cat > "$tmp/package.json" <<'PKGJSON'
 {
-  "name": "blit-browser",
+  "name": "@blit-sh/browser",
   "version": "${version}",
   "type": "module",
   "description": "Low-latency terminal streaming — browser WASM renderer",
@@ -56,13 +56,13 @@ PKGJSON
       mkdir -p "$wasm"
       cp ${browserWasm}/blit_browser.js ${browserWasm}/blit_browser.d.ts "$wasm"/
       cp ${browserWasm}/blit_browser_bg.wasm.d.ts "$wasm"/ 2>/dev/null || true
-      echo '{"name":"blit-browser","version":"${version}","main":"blit_browser.js","types":"blit_browser.d.ts"}' > "$wasm/package.json"
+      echo '{"name":"@blit-sh/browser","version":"${version}","main":"blit_browser.js","types":"blit_browser.d.ts"}' > "$wasm/package.json"
 
       cp -a ${../js/react}/* "$tmp"/
       chmod -R u+w "$tmp"
 
       cd "$tmp"
-      ${pkgs.nodejs}/bin/npm pkg set "devDependencies.blit-browser=file:$wasm"
+      ${pkgs.nodejs}/bin/npm pkg set "devDependencies.@blit-sh/browser=file:$wasm"
       npm install
       npm run build
 
@@ -135,10 +135,10 @@ CTRL
     name = "blit-publish-npm-packages";
     runtimeInputs = [ pkgs.nodejs ];
     text = ''
-      echo "=== Publishing blit-browser ==="
+      echo "=== Publishing @blit-sh/browser ==="
       ${browser-publish}/bin/browser-publish "$@"
       echo ""
-      echo "=== Publishing blit-react ==="
+      echo "=== Publishing @blit-sh/react ==="
       ${react-publish}/bin/react-publish "$@"
     '';
   };
@@ -324,7 +324,7 @@ in {
       echo "=== React tests ==="
       mkdir -p crates/browser/pkg
       if [ ! -f crates/browser/pkg/package.json ]; then
-        echo '{"name":"blit-browser","version":"0.0.0","main":"blit_browser.js"}' > crates/browser/pkg/package.json
+        echo '{"name":"@blit-sh/browser","version":"0.0.0","main":"blit_browser.js"}' > crates/browser/pkg/package.json
       fi
       if [ ! -f crates/browser/pkg/blit_browser.js ]; then
         touch crates/browser/pkg/blit_browser.js

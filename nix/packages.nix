@@ -258,13 +258,12 @@
       publishDemo = pkgs.writeShellApplication {
         name = "publish-demo";
         runtimeInputs = [ pkgs.skopeo ];
-        text = ''
-          CONTAINERS_POLICY_FILE="$(mktemp)"
-          export CONTAINERS_POLICY_FILE
-          echo '{"default":[{"type":"insecureAcceptAnything"}]}' > "$CONTAINERS_POLICY_FILE"
-          skopeo copy "docker-archive:${demoImage}" docker://docker.io/grab/blit-demo:latest
+        text = let
+          policy = pkgs.writeText "containers-policy.json" ''{"default":[{"type":"insecureAcceptAnything"}]}'';
+        in ''
+          skopeo --policy ${policy} copy "docker-archive:${demoImage}" docker://docker.io/grab/blit-demo:latest
           if [[ "''${1:-}" != "" ]]; then
-            skopeo copy "docker-archive:${demoImage}" "docker://docker.io/grab/blit-demo:$1"
+            skopeo --policy ${policy} copy "docker-archive:${demoImage}" "docker://docker.io/grab/blit-demo:$1"
           fi
         '';
       };

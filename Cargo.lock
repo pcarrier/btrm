@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "alacritty_terminal"
 version = "0.25.1"
-source = "git+https://github.com/indent-com/alacritty.git?branch=blit%2Femoji-width-fix#cda52e8375da293a3ce11a784319c763944e009f"
+source = "git+https://github.com/indent-com/alacritty.git?branch=blit%2Femoji-width-fix#49b9406474e237b7717bec98fd58e4e4b00b269f"
 dependencies = [
  "base64",
  "bitflags 2.11.0",

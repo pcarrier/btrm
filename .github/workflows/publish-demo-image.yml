@@ -13,17 +13,16 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Build image
-        run: nix build .#demo-image
-
-      - name: Push to Docker Hub
+      - name: Login to Docker Hub
+        run: skopeo login docker.io -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_TOKEN"
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Publish
         run: |
-          skopeo login docker.io -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_TOKEN"
-          skopeo copy docker-archive:result docker://docker.io/grab/blit-demo:latest
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            skopeo copy docker-archive:result "docker://docker.io/grab/blit-demo:${VERSION}"
+            nix run .#publish-demo -- "${GITHUB_REF#refs/tags/v}"
+          else
+            nix run .#publish-demo
           fi

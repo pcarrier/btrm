@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-
-nix build .#demo-image
-skopeo copy docker-archive:result docker://docker.io/grab/blit-demo:latest
-
-if [[ "${1:-}" != "" ]]; then
-  skopeo copy docker-archive:result "docker://docker.io/grab/blit-demo:$1"
-fi
+exec nix run .#publish-demo -- "$@"

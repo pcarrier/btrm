@@ -204,63 +204,75 @@
       };
     in
     {
+      demo-image = let
+        fishConfig = pkgs.writeTextDir "etc/fish/config.fish" ''
+          function fish_greeting
+              cat /etc/blit-welcome 2>/dev/null
+          end
+        '';
+        welcomeFile = pkgs.writeTextDir "etc/blit-welcome" (
+          if builtins.pathExists ../welcome
+          then builtins.readFile ../welcome
+          else ""
+        );
+        passwd = pkgs.writeTextDir "etc/passwd" "blit:x:1000:1000:blit:/home/blit:/bin/fish\n";
+        group = pkgs.writeTextDir "etc/group" "blit:x:1000:\n";
+      in
+      pkgs.dockerTools.buildLayeredImage {
+        name = "grab/blit-demo";
+        tag = "latest";
+        contents = [
+          pkgs.busybox
+          pkgs.fish
+          pkgs.htop
+          pkgs.neovim
+          pkgs.git
+          pkgs.curl
+          pkgs.jq
+          pkgs.tree
+          blit-cli
+          fishConfig
+          welcomeFile
+          passwd
+          group
+        ];
+        fakeRootCommands = ''
+          mkdir -p ./home/blit ./tmp
+          chown 1000:1000 ./home/blit
+          chmod 1777 ./tmp
+        '';
+        config = {
+          Env = [
+            "SHELL=/bin/fish"
+            "USER=blit"
+            "HOME=/home/blit"
+            "TERM=xterm-256color"
+          ];
+          User = "1000:1000";
+          WorkingDir = "/home/blit";
+          ExposedPorts = { "3264/tcp" = {}; };
+          Entrypoint = [ "blit" "share" ];
+        };
+      };
+
+      publish-demo = pkgs.writeShellApplication {
+        name = "publish-demo";
+        runtimeInputs = [ pkgs.skopeo ];
+        text = ''
+          image="${demo-image}"
+          skopeo copy "docker-archive:$image" docker://docker.io/grab/blit-demo:latest
+          if [[ "''${1:-}" != "" ]]; then
+            skopeo copy "docker-archive:$image" "docker://docker.io/grab/blit-demo:$1"
+          fi
+        '';
+      };
+
       packages = {
         blit = blit-cli;
         inherit blit-server blit-cli blit-gateway blit-webrtc-forwarder;
         inherit blit-server-static blit-cli-static blit-gateway-static blit-webrtc-forwarder-static;
+        inherit demo-image publish-demo;
         default = blit-cli;
-        demo-image = let
-          fishConfig = pkgs.writeTextDir "etc/fish/config.fish" ''
-            function fish_greeting
-                cat /etc/blit-welcome 2>/dev/null
-            end
-          '';
-          welcomeFile = pkgs.writeTextDir "etc/blit-welcome" (
-            if builtins.pathExists ../welcome
-            then builtins.readFile ../welcome
-            else ""
-          );
-          passwd = pkgs.writeTextDir "etc/passwd" "blit:x:1000:1000:blit:/home/blit:/bin/fish\n";
-          group = pkgs.writeTextDir "etc/group" "blit:x:1000:\n";
-        in
-        pkgs.dockerTools.buildLayeredImage {
-          name = "grab/blit-demo";
-          tag = "latest";
-          contents = [
-            pkgs.busybox
-            pkgs.fish
-            pkgs.htop
-            pkgs.neovim
-            pkgs.git
-            pkgs.curl
-            pkgs.jq
-            pkgs.tree
-            blit-server
-            blit-cli
-            blit-gateway
-            fishConfig
-            welcomeFile
-            passwd
-            group
-          ];
-          fakeRootCommands = ''
-            mkdir -p ./home/blit ./tmp
-            chown 1000:1000 ./home/blit
-            chmod 1777 ./tmp
-          '';
-          config = {
-            Env = [
-              "SHELL=/bin/fish"
-              "USER=blit"
-              "HOME=/home/blit"
-              "TERM=xterm-256color"
-            ];
-            User = "1000:1000";
-            WorkingDir = "/home/blit";
-            ExposedPorts = { "3264/tcp" = {}; };
-            Entrypoint = [ "/bin/sh" "-c" "blit-server & exec blit share" ];
-          };
-        };
       } // tasks;
 
       devShells.default = pkgs.mkShell {

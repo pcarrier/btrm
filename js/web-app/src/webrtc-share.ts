@@ -100,6 +100,8 @@ export function createShareTransport(
   let _status: ConnectionStatus = "connecting";
   let _lastError: string | null = null;
   let inner: BlitTransport | null = null;
+  let ws: WebSocket | null = null;
+  let pc: RTCPeerConnection | null = null;
   let disposed = false;
   let started = false;
   const earlyMessages: ArrayBuffer[] = [];
@@ -130,7 +132,7 @@ export function createShareTransport(
       if (disposed) return;
 
       const wsUrl = `${hubWsUrl.replace(/\/$/, "")}/channel/${pubHex}/consumer`;
-      const ws = new WebSocket(wsUrl);
+      ws = new WebSocket(wsUrl);
 
       await new Promise<void>((resolve, reject) => {
         ws.onopen = () => resolve();
@@ -166,7 +168,7 @@ export function createShareTransport(
       }
 
       // Create RTCPeerConnection and data channel transport
-      const pc = new RTCPeerConnection({ iceServers });
+      pc = new RTCPeerConnection({ iceServers });
       const transport = createWebRtcDataChannelTransport(pc);
       inner = transport;
 
@@ -221,14 +223,18 @@ export function createShareTransport(
           ).then(() => {
             remoteDescSet = true;
             for (const c of pendingCandidates) {
-              pc.addIceCandidate(new RTCIceCandidate(c));
+              pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
             }
             pendingCandidates.length = 0;
+          }).catch((err) => {
+            if (disposed) return;
+            _lastError = err instanceof Error ? err.message : String(err);
+            setStatus("error");
           });
         } else if (m.data.candidate) {
           const candidate = m.data.candidate as RTCIceCandidateInit;
           if (remoteDescSet) {
-            pc.addIceCandidate(new RTCIceCandidate(candidate));
+            pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
           } else {
             pendingCandidates.push(candidate);
           }
@@ -298,6 +304,8 @@ export function createShareTransport(
 
     close() {
       disposed = true;
+      ws?.close();
+      pc?.close();
       inner?.close();
       setStatus("disconnected");
     },

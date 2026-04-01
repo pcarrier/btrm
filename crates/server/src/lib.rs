@@ -2832,6 +2832,7 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                         pty.child_pid = child;
                         pty.reader_handle = reader;
                         pty.byte_rx = byte_rx;
+                        pty.driver.reset_modes();
                         pty.exited = false;
                         pty.exit_status = blit_remote::EXIT_STATUS_UNKNOWN;
                         pty.lflag_cache = pty_lflag(master);

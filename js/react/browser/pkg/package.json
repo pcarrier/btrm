@@ -1,5 +1,5 @@
 {
-  "name": "blit-browser",
+  "name": "@blit-sh/browser",
   "version": "0.0.0",
   "main": "blit_browser.js"
 }

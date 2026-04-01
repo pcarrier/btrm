@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { WebSocketTransport, WebTransportTransport } from "blit-react";
-import type { BlitTransport } from "blit-react";
-import type { BlitWasmModule } from "blit-react";
+import { WebSocketTransport, WebTransportTransport } from "@blit-sh/react";
+import type { BlitTransport } from "@blit-sh/react";
+import type { BlitWasmModule } from "@blit-sh/react";
 import {
   PASS_KEY,
   readStorage,

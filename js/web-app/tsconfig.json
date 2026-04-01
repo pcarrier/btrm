@@ -13,8 +13,8 @@
     "isolatedModules": true,
     "noEmit": true,
     "paths": {
-      "blit-react": ["../react/src/index.ts"],
-      "blit-browser": ["../../crates/browser/pkg/blit_browser.d.ts"]
+      "@blit-sh/react": ["../react/src/index.ts"],
+      "@blit-sh/browser": ["../../crates/browser/pkg/blit_browser.d.ts"]
     }
   },
   "include": ["src"]

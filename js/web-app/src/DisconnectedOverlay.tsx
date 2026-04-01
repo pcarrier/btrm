@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { ConnectionStatus, TerminalPalette } from "blit-react";
+import type { ConnectionStatus, TerminalPalette } from "@blit-sh/react";
 import { disconnectedStyles, themeFor, uiScale, z } from "./theme";
 import { OverlayBackdrop, OverlayPanel } from "./Overlay";
 import { t, tp } from "./i18n";

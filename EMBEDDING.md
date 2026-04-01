@@ -2,9 +2,9 @@
 
 There are two distinct dimensions: embedding the frontend into your app, and embedding `blit-server` into your own service.
 
-## Your app, our components: `blit-react`
+## Your app, our components: `@blit-sh/react`
 
-`blit-react` is workspace-first. A `BlitWorkspace` owns connections, each connection owns sessions, and each `BlitTerminal` renders a session by ID.
+`@blit-sh/react` is workspace-first. A `BlitWorkspace` owns connections, each connection owns sessions, and each `BlitTerminal` renders a session by ID.
 
 ```tsx
 import {
@@ -15,7 +15,7 @@ import {
   useBlitFocusedSession,
   useBlitSessions,
   useBlitWorkspace,
-} from "blit-react";
+} from "@blit-sh/react";
 import { useEffect, useMemo } from "react";
 
 function EmbeddedBlit({ wasm, passphrase }: { wasm: any; passphrase: string }) {

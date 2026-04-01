@@ -144,7 +144,7 @@
           cp ${browserWasm}/blit_browser_bg.wasm crates/browser/pkg/
           cp ${browserWasm}/blit_browser.d.ts crates/browser/pkg/
           cp ${browserWasm}/blit_browser_bg.wasm.d.ts crates/browser/pkg/
-          echo '{"name":"blit-browser","version":"${version}","main":"blit_browser.js","types":"blit_browser.d.ts"}' > crates/browser/pkg/package.json
+          echo '{"name":"@blit-sh/browser","version":"${version}","main":"blit_browser.js","types":"blit_browser.d.ts"}' > crates/browser/pkg/package.json
           for d in ${browserWasm}/snippets/blit-browser-*/; do
             name=$(basename "$d")
             mkdir -p "crates/browser/pkg/snippets/$name"

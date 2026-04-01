@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import type { Ref } from "react";
-import type { Terminal } from "blit-browser";
+import type { Terminal } from "@blit-sh/browser";
 import type { BlitTerminalProps, TerminalPalette } from "./types";
 import type { ConnectionStatus } from "./types";
 import { DEFAULT_FONT, DEFAULT_FONT_SIZE } from "./types";

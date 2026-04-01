@@ -79,7 +79,7 @@ cargo build --release -p blit-cli
 
 Each client is paced independently based on render metrics it reports back: display rate, frame apply time, backlog depth. A phone on 3G doesn't stall a workstation on localhost. The focused session gets full frame rate; background sessions throttle down. Keystrokes go straight to the PTY — latency is bounded by link RTT.
 
-`blit` opens the browser with an embedded gateway. For persistent multi-user browser access, `blit-gateway` is a standalone proxy that handles passphrase auth, serves the web app, and optionally enables QUIC. `blit-server` can also run standalone for headless/daemon use. For embedding in your own app, [`blit-react`](EMBEDDING.md) is the React integration library.
+`blit` opens the browser with an embedded gateway. For persistent multi-user browser access, `blit-gateway` is a standalone proxy that handles passphrase auth, serves the web app, and optionally enables QUIC. `blit-server` can also run standalone for headless/daemon use. For embedding in your own app, [`@blit-sh/react`](EMBEDDING.md) is the React integration library.
 
 For wire protocol details, frame encoding, and transport internals, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -185,7 +185,7 @@ sudo systemctl enable --now blit@alice.socket
 | `crates/alacritty-driver/` | `blit-alacritty`        | Terminal parsing backed by `alacritty_terminal`                  |
 | `crates/fonts/`            | `blit-fonts`            | Font discovery and metadata                                      |
 | `crates/webserver/`        | `blit-webserver`        | Shared HTTP helpers for serving assets and fonts                 |
-| `js/react/`                | `blit-react`            | React client library ([EMBEDDING.md](EMBEDDING.md))              |
+| `js/react/`                | `@blit-sh/react`        | React client library ([EMBEDDING.md](EMBEDDING.md))              |
 | `js/web-app/`              |                         | Browser UI                                                       |
 
 ## Contributing

@@ -1,4 +1,4 @@
-import type { SessionId } from "blit-react";
+import type { SessionId } from "@blit-sh/react";
 import type { BSPNode, BSPSplit, BSPChild, BSPLeaf } from "./dsl";
 import { parseDSL } from "./dsl";
 

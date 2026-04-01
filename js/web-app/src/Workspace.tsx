@@ -10,7 +10,7 @@ import {
   useBlitWorkspace,
   useBlitWorkspaceState,
   DEFAULT_FONT,
-} from "blit-react";
+} from "@blit-sh/react";
 import type {
   BlitTransport,
   BlitTerminalHandle,
@@ -18,7 +18,7 @@ import type {
   BlitWasmModule,
   SessionId,
   TerminalPalette,
-} from "blit-react";
+} from "@blit-sh/react";
 import { useMetrics } from "./useMetrics";
 import {
   PALETTE_KEY,

@@ -1,5 +1,5 @@
 {
-  "name": "blit-react",
+  "name": "@blit-sh/react",
   "version": "0.16.3",
   "type": "module",
   "main": "dist/index.js",
@@ -56,7 +56,7 @@
     "test:watch": "vitest"
   },
   "peerDependencies": {
-    "blit-browser": ">=0.9.0",
+    "@blit-sh/browser": ">=0.9.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"
   },
@@ -64,7 +64,7 @@
     "@testing-library/react": "^16",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "blit-browser": "file:../../crates/browser/pkg",
+    "@blit-sh/browser": "file:../../crates/browser/pkg",
     "jsdom": "^29",
     "react": "^19",
     "react-dom": "^19",

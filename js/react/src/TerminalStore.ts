@@ -1,4 +1,4 @@
-import type { Terminal } from "blit-browser";
+import type { Terminal } from "@blit-sh/browser";
 import { DEFAULT_FONT, DEFAULT_FONT_SIZE } from "./types";
 import type { ConnectionStatus, TerminalPalette } from "./types";
 import {
@@ -10,7 +10,7 @@ import {
 } from "./protocol";
 import { createGlRenderer, type GlRenderer } from "./gl-renderer";
 
-export type BlitWasmModule = typeof import("blit-browser");
+export type BlitWasmModule = typeof import("@blit-sh/browser");
 
 export type TerminalDirtyListener = (ptyId: number) => void;
 

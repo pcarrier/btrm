@@ -280,6 +280,8 @@
         text = ''
           version="''${1:-}"
           skopeo --policy ${skopeoPolicy} login docker.io -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_TOKEN"
+          mkdir -p "$HOME/.docker"
+          skopeo --policy ${skopeoPolicy} login docker.io -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_TOKEN" --authfile "$HOME/.docker/config.json"
           manifest-tool push from-args \
             --platforms linux/amd64,linux/arm64 \
             --template "grab/blit-demo:latest-ARCH" \

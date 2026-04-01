@@ -2,7 +2,8 @@ use blit_alacritty::{SearchResult as AlacrittySearchResult, TerminalDriver as Al
 use blit_remote::{
     build_update_msg, msg_hello, FrameState, C2S_ACK, C2S_CLIENT_METRICS, C2S_CLOSE, C2S_CREATE,
     C2S_CREATE2, C2S_CREATE_AT, C2S_CREATE_N, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_MOUSE,
-    C2S_READ, C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH, C2S_SUBSCRIBE, C2S_UNSUBSCRIBE,
+    C2S_KILL, C2S_READ, C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH, C2S_SUBSCRIBE,
+    C2S_UNSUBSCRIBE,
     CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY, FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH,
     FEATURE_RESTART, READ_ANSI, READ_TAIL, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_LIST,
     S2C_READY, S2C_SEARCH_RESULTS, S2C_TEXT, S2C_TITLE,
@@ -987,10 +988,14 @@ impl Session {
         let mut ids: Vec<u16> = self.ptys.keys().copied().collect();
         ids.sort();
         for id in ids {
-            let tag = self.ptys[&id].tag.as_bytes();
+            let pty = &self.ptys[&id];
+            let tag = pty.tag.as_bytes();
             msg.extend_from_slice(&id.to_le_bytes());
             msg.extend_from_slice(&(tag.len() as u16).to_le_bytes());
             msg.extend_from_slice(tag);
+            let cmd = pty.command.as_deref().unwrap_or("").as_bytes();
+            msg.extend_from_slice(&(cmd.len() as u16).to_le_bytes());
+            msg.extend_from_slice(cmd);
         }
         msg
     }
@@ -2926,6 +2931,17 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     msg.extend_from_slice(text.as_bytes());
                     if let Some(client) = sess.clients.get(&client_id) {
                         let _ = client.tx.try_send(msg);
+                    }
+                }
+            }
+            C2S_KILL if data.len() >= 7 => {
+                let pid = u16::from_le_bytes([data[1], data[2]]);
+                let signal = i32::from_le_bytes([data[3], data[4], data[5], data[6]]);
+                if let Some(pty) = sess.ptys.get(&pid) {
+                    if !pty.exited {
+                        unsafe {
+                            libc::kill(pty.child_pid, signal);
+                        }
                     }
                 }
             }

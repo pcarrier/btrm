@@ -16,6 +16,7 @@ import {
 import type {
   BlitSearchResult,
   BlitSession,
+  BlitTerminalHandle,
   SessionId,
   TerminalPalette,
 } from "blit-react";
@@ -272,6 +273,78 @@ function ActionGlyph({
   }
 }
 
+function PreviewTerminal({
+  sessionId,
+  palette,
+}: {
+  sessionId: SessionId;
+  palette: TerminalPalette;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<BlitTerminalHandle>(null);
+  const [termSize, setTermSize] = useState<{ w: number; h: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const update = () => {
+      const canvas = container.querySelector("canvas");
+      if (!canvas || canvas.width === 0 || canvas.height === 0) return;
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const scale = Math.min(cw / canvas.width, ch / canvas.height, 1);
+      const w = Math.floor(canvas.width * scale);
+      const h = Math.floor(canvas.height * scale);
+      setTermSize((prev) =>
+        prev && prev.w === w && prev.h === h ? prev : { w, h },
+      );
+    };
+    const obs = new ResizeObserver(update);
+    obs.observe(container);
+    const mo = new MutationObserver(update);
+    mo.observe(container, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["width", "height"],
+    });
+    update();
+    return () => {
+      obs.disconnect();
+      mo.disconnect();
+    };
+  }, [sessionId]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        backgroundColor: `rgb(${palette.bg[0]},${palette.bg[1]},${palette.bg[2]})`,
+      }}
+    >
+      <BlitTerminal
+        ref={termRef}
+        sessionId={sessionId}
+        readOnly
+        showCursor={false}
+        style={
+          termSize
+            ? { width: termSize.w, height: termSize.h }
+            : { width: "100%", height: "100%" }
+        }
+      />
+    </div>
+  );
+}
+
 export function SwitcherOverlay({
   sessions,
   focusedSessionId,
@@ -352,6 +425,9 @@ export function SwitcherOverlay({
   );
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [layoutMode, setLayoutMode] = useState(false);
+  const [killPickerSessionId, setKillPickerSessionId] = useState<
+    SessionId | null
+  >(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -486,9 +562,10 @@ export function SwitcherOverlay({
         key: `session:${session.id}`,
         title: sessionName(session),
         subtitle:
-          session.state === "exited"
+          session.command ??
+          (session.state === "exited"
             ? t("switcher.exitedTerminal")
-            : t("switcher.openTerminal"),
+            : t("switcher.openTerminal")),
         sessionId: session.id,
         exited: session.state === "exited",
         focused: session.id === focusedSessionId,
@@ -502,7 +579,8 @@ export function SwitcherOverlay({
     for (const session of visibleSessions) {
       if (
         session.tag.toLowerCase().includes(needle) ||
-        (session.title ?? "").toLowerCase().includes(needle)
+        (session.title ?? "").toLowerCase().includes(needle) ||
+        (session.command ?? "").toLowerCase().includes(needle)
       ) {
         seen.add(session.id);
         matches.push({
@@ -510,9 +588,10 @@ export function SwitcherOverlay({
           key: `session:${session.id}`,
           title: sessionName(session),
           subtitle:
-            session.state === "exited"
+            session.command ??
+            (session.state === "exited"
               ? t("switcher.exitedTerminal")
-              : t("switcher.openTerminal"),
+              : t("switcher.openTerminal")),
           sessionId: session.id,
           exited: session.state === "exited",
           focused: session.id === focusedSessionId,
@@ -530,9 +609,10 @@ export function SwitcherOverlay({
         key: `session:${session.id}`,
         title: sessionName(session),
         subtitle:
-          session.state === "exited"
+          session.command ??
+          (session.state === "exited"
             ? t("switcher.exitedTerminal")
-            : t("switcher.openTerminal"),
+            : t("switcher.openTerminal")),
         sessionId: session.id,
         exited: session.state === "exited",
         context: result.context,
@@ -717,6 +797,7 @@ export function SwitcherOverlay({
 
   useEffect(() => {
     setSelectedIdx(0);
+    setKillPickerSessionId(null);
   }, [query]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -791,7 +872,7 @@ export function SwitcherOverlay({
           width={iconSize}
           height={iconSize}
           color={theme.fg}
-          opacity={selected ? 0.82 : 0.56}
+          bg={theme.bg}
         />
       ) : item.type === "session" ? (
         <BlitTerminal
@@ -813,9 +894,8 @@ export function SwitcherOverlay({
             width={iconSize}
             height={iconSize}
             color={theme.fg}
-            opacity={selected ? 0.32 : 0.2}
+            bg={theme.bg}
             highlightIndex={item.paneIndex}
-            highlightOpacity={selected ? 0.82 : 0.56}
           />
         ) : (
           <PaneGlyph empty={item.empty} fg={theme.fg} dimFg={theme.dimFg} />
@@ -1229,6 +1309,79 @@ export function SwitcherOverlay({
                             )}
                           </div>
 
+
+                          {item.type === "session" &&
+                            !item.exited &&
+                            (killPickerSessionId === item.sessionId ? (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 2,
+                                  alignSelf: "center",
+                                }}
+                              >
+                                {(
+                                  [
+                                    ["TERM", 15],
+                                    ["KILL", 9],
+                                    ["INT", 2],
+                                    ["HUP", 1],
+                                    ["USR1", 10],
+                                    ["USR2", 12],
+                                  ] as const
+                                ).map(([name, sig]) => (
+                                  <button
+                                    key={name}
+                                    type="button"
+                                    title={name}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      workspace.killSession(
+                                        item.sessionId,
+                                        sig,
+                                      );
+                                      setKillPickerSessionId(null);
+                                    }}
+                                    style={{
+                                      background: railBg,
+                                      border: `1px solid ${theme.subtleBorder}`,
+                                      color: "inherit",
+                                      cursor: "pointer",
+                                      opacity: 0.75,
+                                      fontSize: fsSm,
+                                      padding: "1px 4px",
+                                      fontFamily: "inherit",
+                                      borderRadius: 0,
+                                    }}
+                                  >
+                                    {name}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                title={t("switcher.kill")}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setKillPickerSessionId(item.sessionId);
+                                }}
+                                style={{
+                                  background: railBg,
+                                  border: `1px solid ${theme.subtleBorder}`,
+                                  color: "inherit",
+                                  cursor: "pointer",
+                                  opacity: 0.75,
+                                  fontSize: fsSm,
+                                  padding: "1px 5px",
+                                  fontFamily: "inherit",
+                                  alignSelf: "center",
+                                  borderRadius: 0,
+                                }}
+                              >
+                                k
+                              </button>
+                            ))}
                           {item.type === "session" && (
                             <button
                               type="button"
@@ -1348,7 +1501,7 @@ export function SwitcherOverlay({
                       width={160}
                       height={96}
                       color={theme.fg}
-                      opacity={0.68}
+                      bg={theme.bg}
                     />
                   </div>
                   <div
@@ -1433,9 +1586,8 @@ export function SwitcherOverlay({
                         width={160}
                         height={96}
                         color={theme.fg}
-                        opacity={0.2}
+                        bg={theme.bg}
                         highlightIndex={selectedItem.paneIndex}
-                        highlightOpacity={0.82}
                       />
                     </div>
                   )}
@@ -1483,17 +1635,9 @@ export function SwitcherOverlay({
                       )}
                     </div>
                   </div>
-                  <BlitTerminal
+                  <PreviewTerminal
                     sessionId={selectedItem.sessionId}
-                    readOnly
-                    showCursor={false}
-                    style={{
-                      width: "100%",
-                      flex: 1,
-                      minHeight: 0,
-                      pointerEvents: "none",
-                      alignSelf: "center",
-                    }}
+                    palette={palette}
                   />
                   {selectedItem.context && (
                     <div style={{ fontSize: fsSm, color: theme.dimFg }}>

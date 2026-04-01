@@ -88,6 +88,7 @@ export type BlitSession = {
   ptyId: number;
   tag: string;
   title: string | null;
+  command: string | null;
   state: "creating" | "active" | "exited" | "closed";
 };
 
@@ -170,6 +171,7 @@ export const C2S_SEARCH = 0x15;
 export const C2S_CREATE_AT = 0x16;
 export const C2S_CREATE_N = 0x17;
 export const C2S_CREATE2 = 0x18;
+export const C2S_KILL = 0x1a;
 export const CREATE2_HAS_SRC_PTY = 1 << 0;
 export const CREATE2_HAS_COMMAND = 1 << 1;
 

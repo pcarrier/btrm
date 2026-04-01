@@ -20,11 +20,12 @@ processes:
   gateway:
     command: cargo watch -w crates/gateway/src -w crates/webserver/src -x "run -p blit-gateway --release"
     environment:
-      - BLIT_PASS=${BLIT_PASS:-dev}
-      - BLIT_SOCK=/tmp/blit-dev.sock
       - BLIT_ADDR=127.0.0.1:3266
       - BLIT_CORS=*
+      - BLIT_PASS=${BLIT_PASS:-dev}
       - BLIT_QUIC=1
+      - BLIT_SOCK=/tmp/blit-dev.sock
+      - BLIT_STORE_CONFIG=1
     depends_on:
       server:
         condition: process_started

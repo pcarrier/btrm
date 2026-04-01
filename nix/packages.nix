@@ -232,6 +232,7 @@
           pkgs.curl
           pkgs.jq
           pkgs.tree
+          pkgs.ncdu
           blit-cli
           fishConfig
           welcomeFile

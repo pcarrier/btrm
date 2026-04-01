@@ -209,10 +209,7 @@
         inherit blit-server blit-cli blit-gateway blit-webrtc-forwarder;
         inherit blit-server-static blit-cli-static blit-gateway-static blit-webrtc-forwarder-static;
         default = blit-cli;
-      } // tasks;
-
-      demo-image =
-        let
+        demo-image = let
           fishConfig = pkgs.writeTextDir "etc/fish/config.fish" ''
             function fish_greeting
                 cat /etc/blit-welcome 2>/dev/null
@@ -225,8 +222,11 @@
           );
           passwd = pkgs.writeTextDir "etc/passwd" "blit:x:1000:1000:blit:/home/blit:/bin/fish\n";
           group = pkgs.writeTextDir "etc/group" "blit:x:1000:\n";
-          homeDir = pkgs.runCommand "home-blit" {} "mkdir -p $out/home/blit";
-          tmpDir = pkgs.runCommand "tmp-dir" {} "mkdir -p $out/tmp";
+          homeDir = pkgs.runCommand "home-blit" {} ''
+            mkdir -p $out/home/blit $out/tmp
+            chmod 1777 $out/tmp
+            chown 1000:1000 $out/home/blit
+          '';
         in
         pkgs.dockerTools.buildLayeredImage {
           name = "blit-demo";
@@ -247,7 +247,6 @@
             passwd
             group
             homeDir
-            tmpDir
           ];
           config = {
             Env = [
@@ -262,6 +261,7 @@
             Entrypoint = [ "/bin/sh" "-c" "blit-server & exec blit-gateway" ];
           };
         };
+      } // tasks;
 
       devShells.default = pkgs.mkShell {
         buildInputs = [

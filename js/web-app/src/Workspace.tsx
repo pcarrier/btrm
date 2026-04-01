@@ -507,9 +507,8 @@ function WorkspaceScreen({
 
   const createInPane = useCallback(
     async (paneId: string, command?: string) => {
-      setPendingPaneTargetId(paneId);
       try {
-        await workspace.createSession({
+        const session = await workspace.createSession({
           connectionId: primaryConnectionId,
           rows: termRef.current?.rows ?? 24,
           cols: termRef.current?.cols ?? 80,
@@ -518,6 +517,8 @@ function WorkspaceScreen({
             ? { cwdFromSessionId: workspaceState.focusedSessionId }
             : {}),
         });
+        moveSessionToPaneRef.current?.(session.id, paneId);
+        workspace.focusSession(session.id);
       } catch {}
     },
     [
@@ -574,7 +575,11 @@ function WorkspaceScreen({
       }
       if (mod && e.shiftKey && e.key === "Enter") {
         e.preventDefault();
-        void createAndFocus();
+        if (activeLayoutRef.current && bspFocusedPaneId) {
+          void createInPane(bspFocusedPaneId);
+        } else {
+          void createAndFocus();
+        }
         return;
       }
       if (
@@ -637,8 +642,10 @@ function WorkspaceScreen({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
+    bspFocusedPaneId,
     cancelOverlay,
     createAndFocus,
+    createInPane,
     focusedSession,
     handleRestartOrClose,
     toggleDebug,

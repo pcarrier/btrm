@@ -2,23 +2,21 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import {
   BlitTerminal,
   BlitWorkspaceProvider,
-  BlitWorkspace,
-  PALETTES,
   useBlitConnection,
   useBlitFocusedSession,
   useBlitSessions,
   useBlitWorkspace,
   useBlitWorkspaceState,
-  DEFAULT_FONT,
 } from "@blit-sh/react";
+import type { BlitTerminalHandle } from "@blit-sh/react";
+import { BlitWorkspace, PALETTES, DEFAULT_FONT } from "@blit-sh/core";
 import type {
   BlitTransport,
-  BlitTerminalHandle,
   BlitSession,
   BlitWasmModule,
   SessionId,
   TerminalPalette,
-} from "@blit-sh/react";
+} from "@blit-sh/core";
 import { useMetrics } from "./useMetrics";
 import {
   PALETTE_KEY,

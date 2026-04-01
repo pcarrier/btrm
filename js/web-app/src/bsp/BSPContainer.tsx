@@ -12,9 +12,8 @@ import {
   useBlitConnection,
   useBlitSessions,
   useBlitWorkspace,
-  type SessionId,
-  type TerminalPalette,
 } from "@blit-sh/react";
+import type { SessionId, TerminalPalette } from "@blit-sh/core";
 import type { BSPNode, BSPChild, BSPSplit, BSPLeaf } from "@blit-sh/core/bsp";
 import { leafCount, serializeDSL } from "@blit-sh/core/bsp";
 import type { BSPAssignments, BSPLayout } from "./layout";

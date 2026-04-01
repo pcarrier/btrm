@@ -1,5 +1,3 @@
-export * from "@blit-sh/core";
-
 export { BlitTerminal } from "./BlitTerminal";
 export type { BlitTerminalHandle } from "./BlitTerminal";
 

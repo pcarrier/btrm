@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlitTransport } from "@blit-sh/react";
+import type { BlitTransport } from "@blit-sh/core";
 
 export interface RenderSample {
   t: number; // timestamp (ms, relative to page load)

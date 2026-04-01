@@ -202,8 +202,7 @@
                 blit-webrtc-forwarder-static
                 manPages webAppDist rustToolchain;
       };
-    in
-    {
+
       demoImage = let
         fishConfig = pkgs.writeTextDir "etc/fish/config.fish" ''
           function fish_greeting
@@ -265,7 +264,8 @@
           fi
         '';
       };
-
+    in
+    {
       packages = {
         blit = blit-cli;
         inherit blit-server blit-cli blit-gateway blit-webrtc-forwarder;

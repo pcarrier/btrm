@@ -255,14 +255,13 @@
         };
       };
 
-      publish-demo = pkgs.writeShellApplication {
+      publish-demo = let image = demo-image; in pkgs.writeShellApplication {
         name = "publish-demo";
         runtimeInputs = [ pkgs.skopeo ];
         text = ''
-          image="${demo-image}"
-          skopeo copy "docker-archive:$image" docker://docker.io/grab/blit-demo:latest
+          skopeo copy "docker-archive:${image}" docker://docker.io/grab/blit-demo:latest
           if [[ "''${1:-}" != "" ]]; then
-            skopeo copy "docker-archive:$image" "docker://docker.io/grab/blit-demo:$1"
+            skopeo copy "docker-archive:${image}" "docker://docker.io/grab/blit-demo:$1"
           fi
         '';
       };

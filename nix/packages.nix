@@ -261,6 +261,7 @@
         text = let
           policy = pkgs.writeText "containers-policy.json" ''{"default":[{"type":"insecureAcceptAnything"}]}'';
         in ''
+          skopeo --policy ${policy} login docker.io -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_TOKEN"
           skopeo --policy ${policy} copy "docker-archive:${demoImage}" docker://docker.io/grab/blit-demo:latest
           if [[ "''${1:-}" != "" ]]; then
             skopeo --policy ${policy} copy "docker-archive:${demoImage}" "docker://docker.io/grab/blit-demo:$1"

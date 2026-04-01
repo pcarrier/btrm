@@ -184,6 +184,24 @@ sudo systemctl enable --now blit@alice.socket
 
 Building from source, running tests, dev environment setup, code conventions, and release process are all covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Docker sandbox
+
+A minimal demo image is published to Docker Hub as `grab/blit-demo`. It runs unprivileged and launches `blit share` on startup, printing a URL anyone can open.
+
+```bash
+docker run --rm -it grab/blit-demo
+```
+
+The image includes fish (default shell), busybox, htop, neovim, git, curl, jq, and tree.
+
+To build locally:
+
+```bash
+nix build .#demo-image
+docker load < result
+docker run --rm -it grab/blit-demo
+```
+
 ## nix-darwin
 
 ```nix

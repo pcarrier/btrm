@@ -14,6 +14,8 @@ dependencies = [
 [[package]]
 name = "alacritty_terminal"
 version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46319972e74179d707445f64aaa2893bbf6a111de3a9af29b7eb382f8b39e282"
 dependencies = [
  "base64",
  "bitflags 2.11.0",
@@ -3711,3 +3713,8 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "alacritty_terminal"
+version = "0.25.1-dev"
+source = "git+https://github.com/indent-com/alacritty.git?branch=blit%2Femoji-width-fix#7fb5c30a3267b1cefd4812417ae198f7d905937b"

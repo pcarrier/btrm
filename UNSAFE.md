@@ -1,125 +1,58 @@
 # Unsafe code in blit
 
-This document maps all `unsafe` usage in the project. The goal is to make it easy to audit: where unsafe code lives, why it exists, and which crates are entirely safe.
+Unsafe code is confined to three crates (`server`, `cli`, `demo`) that need direct POSIX terminal and process APIs. The remaining seven crates contain zero `unsafe` blocks.
 
-## Overview
+This document focuses on the non-obvious parts — the invariants that are easy to break.
 
-Most of the codebase is safe Rust. Unsafe code is confined to three crates that need direct access to POSIX terminal and process APIs. The remaining crates (`remote`, `browser`, `gateway`, `alacritty-driver`, `fonts`, `webserver`, `webrtc-forwarder`) contain zero `unsafe` blocks.
+## The `waitpid` race
 
-```mermaid
-graph LR
-    subgraph "No unsafe"
-        remote[remote<br>wire protocol]
-        browser[browser<br>WASM runtime]
-        gateway[gateway<br>WS/WT proxy]
-        alacritty[alacritty-driver<br>terminal parser]
-        fonts[fonts<br>font discovery]
-        webserver[webserver<br>HTTP helpers]
-        webrtc[webrtc-forwarder<br>WebRTC bridge]
-    end
+The server has two independent call sites for `waitpid`:
 
-    subgraph "Contains unsafe"
-        server["server<br>~25 blocks"]
-        cli["cli<br>5 blocks"]
-        demo["demo<br>~19 blocks"]
-    end
+1. **Per-PTY cleanup** (`cleanup_pty`) — sends `SIGHUP`, closes the master fd, then calls `waitpid(child_pid, WNOHANG)` for the specific child.
+2. **Background zombie reaper** — calls `waitpid(-1, WNOHANG)` every 5 seconds to sweep any zombies.
 
-    server -.->|libc| PTY[PTY lifecycle<br>fork/exec/openpty<br>ioctl/kill/waitpid]
-    cli -.->|libc| TERM[Terminal raw mode<br>tcgetattr/tcsetattr]
-    demo -.->|libc| TERM
-```
+These intentionally race. The reaper can collect a child before `cleanup_pty` gets to it — that's fine because `cleanup_pty` uses `WNOHANG` and tolerates `ECHILD`. Neither call site blocks. If you change either to use blocking `waitpid`, you'll deadlock.
 
-## Safe crates
+## The fork/exec sequence
 
-These crates have no `unsafe` code at all:
-
-| Crate | Role | Why it stays safe |
-| --- | --- | --- |
-| `remote` | Wire protocol, frame state, cell encoding | Pure data transformation — no I/O, no FFI |
-| `browser` | WASM terminal runtime, WebGL vertex data | Runs in browser sandbox; wasm-bindgen handles FFI |
-| `gateway` | WebSocket/WebTransport proxy | Built on axum/tokio — all safe async I/O |
-| `alacritty-driver` | Terminal parsing via `alacritty_terminal` | Wraps a safe Rust library |
-| `fonts` | Font discovery and TTF/OTF metadata | File I/O through `std::fs` |
-| `webserver` | Shared axum HTTP helpers | Thin wrappers around safe libraries |
-| `webrtc-forwarder` | WebRTC signaling bridge | WebSocket relay, no low-level system calls |
-
-## Unsafe crates
-
-### `server` (~25 unsafe blocks)
-
-[`crates/server/src/lib.rs`](crates/server/src/lib.rs) is the most unsafe-heavy file. All unsafe code exists because the server manages PTY lifecycle directly through POSIX APIs — there are no safe Rust abstractions for `openpty`, `fork`/`execvp`, or fd-passing over Unix sockets.
-
-**PTY allocation and process spawning** (`spawn_pty`, `spawn_pty_simple`):
+`spawn_pty` in [`crates/server/src/lib.rs`](crates/server/src/lib.rs) runs a specific post-fork sequence in the child that must not be reordered:
 
 ```
-openpty() -> fork() -> child: setsid/ioctl(TIOCSCTTY)/dup2/chdir/execvp
-                    -> parent: close(slave)/fcntl(O_NONBLOCK)
+child: setsid() -> ioctl(TIOCSCTTY) -> dup2(slave, 0/1/2) -> close(slave) -> chdir() -> execvp()
 ```
 
-- `openpty` allocates a master/slave PTY pair.
-- `fork` + `execvp` spawns the child shell or command.
-- The child calls `setsid`, sets the controlling terminal with `ioctl(TIOCSCTTY)`, redirects stdio with `dup2`, and execs.
-- The parent closes the slave fd and sets the master to non-blocking.
+`setsid` must come before `TIOCSCTTY` (can't set a controlling terminal without being a session leader). `dup2` must come before closing the slave fd (otherwise stdio points at nothing). `close(master)` happens first in the child because the child must not hold the master fd — if it did, reads from master in the parent would never see EOF when the child exits.
 
-**PTY I/O**:
-- `pty_write_all` — `libc::write` to the master fd (sends keystrokes to the shell).
-- `pty_reader` — `libc::read` from the master fd in a blocking loop (reads shell output).
+On the parent side, `close(slave)` is equally important — the parent must not hold the slave fd, or the master won't get a hangup when the child exits.
 
-**Resize**:
-- `ioctl(TIOCSWINSZ)` sets the terminal size, then `kill(-pgid, SIGWINCH)` notifies the foreground process group.
+## fd-passing via `recvmsg`
 
-**Process cleanup** (`cleanup_pty`):
-- `kill(pid, SIGHUP)` signals the child, `close(master_fd)` closes the PTY, `waitpid(WNOHANG)` reaps without blocking.
-- A background zombie reaper calls `waitpid(-1, WNOHANG)` every 5 seconds to catch any children the per-PTY cleanup missed.
+The server uses `SCM_RIGHTS` ancillary data to receive client connection fds over a Unix socket (from systemd socket activation or the gateway). The `recv_fd` function calls `recvmsg` with a manually constructed `msghdr` and `cmsghdr`, then extracts the fd from the control message.
 
-**Terminal state queries**:
-- `tcgetattr` reads line discipline flags (ECHO, ICANON) to detect password prompts.
-- macOS-only `proc_pidinfo(PROC_PIDVNODEPATHINFO)` gets the child's working directory.
+The received fd is immediately wrapped in `from_raw_fd` to transfer ownership to Rust. If the `from_raw_fd` call were skipped or the fd were used after being wrapped, you'd get a double-close.
 
-**Raw fd ownership**:
-- `from_raw_fd` wraps fds received via `recvmsg` (SCM_RIGHTS fd-passing) or inherited from systemd socket activation (fd 3).
+## Why `libc::write` instead of `std::io`
 
-**FFI**:
-- macOS-only `pthread_set_qos_class_self_np` — sets the thread QoS class to `USER_INTERACTIVE` for lower scheduling latency. Not exposed by the `libc` crate.
+The `cli` and `demo` crates use raw `libc::write(STDOUT_FILENO, ...)` in two places instead of `std::io::stdout()`:
 
-### `cli` (5 unsafe blocks)
+1. **`Drop` impls** that emit terminal reset sequences — `stdout().write()` takes a mutex lock, which can deadlock if the process is unwinding from a panic that already holds the lock.
+2. **`write_all_stdout`** in the frame output hot path — avoids the lock overhead on every frame.
 
-[`crates/cli/src/interactive.rs`](crates/cli/src/interactive.rs) uses unsafe for terminal raw mode in the console TUI:
+## macOS-specific FFI
 
-| Function | Calls | Purpose |
-| --- | --- | --- |
-| `term_size()` | `ioctl(TIOCGWINSZ)` | Query terminal dimensions |
-| `RawMode::enter()` | `tcgetattr` / `cfmakeraw` / `tcsetattr` | Switch stdin to raw mode (no echo, no line buffering) |
-| `Drop for RawMode` | `tcsetattr` | Restore original terminal settings |
-| `Drop for Cleanup` | `libc::write` | Emit reset escape sequences during drop (avoids `BufWriter` lock) |
-| `write_all_stdout()` | `libc::write` | Unbuffered stdout write for frame output |
+Two macOS-only calls that aren't in the `libc` crate:
 
-The raw `libc::write` calls exist because `std::io::stdout().write()` takes a lock, which can deadlock or panic inside a `Drop` impl or signal-adjacent code path.
+- **`proc_pidinfo(PROC_PIDVNODEPATHINFO)`** — gets the child process's working directory by reinterpreting a raw byte buffer as `proc_vnodepathinfo`. The pointer cast is sound only if the buffer is large enough and the syscall succeeds (checked via return value).
+- **`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)`** — declared as a local `extern "C"` function. Bumps thread priority so the frame scheduler gets lower latency. Harmless if it fails.
 
-### `demo` (~19 unsafe blocks across 4 binaries)
+## Signal handlers in `demo`
 
-The demo programs in [`crates/demo/`](crates/demo/) duplicate the same terminal raw mode pattern from `cli` (ioctl, tcgetattr/tcsetattr, read, write) since they are standalone binaries with no shared dependency on the cli crate.
-
-Notable additions beyond the standard pattern:
-
-- **`emojiblast`** registers C signal handlers via `libc::signal()` with a function pointer cast, and calls only async-signal-safe functions (`write`, `_exit`) inside the handler.
-- **`netdash`** uses `libc::poll()` for socket readiness polling with timeouts.
-
-## Why not use safe abstractions?
-
-Several crates exist for PTY management (`nix`, `pty-process`, `portable-pty`) and terminal raw mode (`crossterm`, `termion`). blit uses raw libc calls instead because:
-
-1. The server needs precise control over the fork/exec sequence — `setsid`, controlling terminal assignment, fd inheritance, and signal group management must happen in a specific order.
-2. The fd-passing protocol (`recvmsg`/`sendmsg` with `SCM_RIGHTS`) is not covered by higher-level crates.
-3. The zombie reaper intentionally races with per-PTY `waitpid` — this requires understanding the exact semantics of `WNOHANG` and process group IDs.
-4. The demo binaries are intentionally self-contained single-file programs; pulling in a terminal library would add dependencies for a handful of libc calls.
+`emojiblast` registers a C signal handler via `libc::signal()` with a function pointer cast. The handler calls only `write` and `_exit` — both async-signal-safe. Adding any allocating or locking call to this handler (including `println!` or `eprintln!`) would be undefined behavior.
 
 ## Audit checklist
 
-When modifying unsafe code in this project:
-
-- **fd leaks** — every `openpty`/`dup2`/`close` sequence must close all fds on every error path, including in the child after a failed `execvp`.
-- **Signal safety** — code in `Drop` impls and the zombie reaper must not allocate, lock, or call non-async-signal-safe functions.
-- **`waitpid` races** — the background reaper and per-PTY cleanup both call `waitpid`. Neither should block (`WNOHANG`), and both must tolerate `ECHILD`.
-- **macOS-specific** — `proc_pidinfo` and `pthread_set_qos_class_self_np` are behind `#[cfg(target_os = "macos")]`; changes must not break Linux builds.
-- **WASM crate** — `crates/browser/` targets `wasm32-unknown-unknown` and must remain free of `libc` or `std::os::unix` imports.
+- **fd leaks** — every `openpty`/`dup2`/`close` path must close all fds on failure, including in the child after a failed `execvp` (which falls through to `_exit`).
+- **`waitpid` semantics** — both call sites must use `WNOHANG` and handle the case where the other already reaped the child.
+- **`Drop` signal safety** — no allocations, no locks, no `stdout()` — use `libc::write` directly.
+- **macOS guards** — `proc_pidinfo` and `pthread_set_qos_class_self_np` must stay behind `#[cfg(target_os = "macos")]`.
+- **WASM boundary** — `crates/browser/` targets `wasm32-unknown-unknown` and must never import `libc` or `std::os::unix`.

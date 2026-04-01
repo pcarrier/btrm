@@ -114,8 +114,13 @@ impl GlyphAtlas {
                 if let Some(image) = self.swash_cache.get_image(&mut self.font_system, physical.cache_key) {
                     let gw = image.placement.width as u32;
                     let gh = image.placement.height as u32;
-                    let gx = slot_x + PADDING + (physical.x + image.placement.left) as u32;
-                    let gy = slot_y + PADDING + (physical.y - image.placement.top + self.font_size as i32) as u32;
+                    let gx_i = slot_x as i32 + PADDING as i32 + physical.x + image.placement.left;
+                    let gy_i = slot_y as i32 + PADDING as i32 + physical.y - image.placement.top + self.font_size as i32;
+                    if gx_i < 0 || gy_i < 0 {
+                        continue;
+                    }
+                    let gx = gx_i as u32;
+                    let gy = gy_i as u32;
 
                     for py in 0..gh {
                         for px in 0..gw {

@@ -56,8 +56,9 @@ pub fn render_status_bar(
 
     if let Some(name) = focused_name {
         let max_chars = ((window_width * 0.4) / cell_w) as usize;
-        let display = if name.len() > max_chars && max_chars > 1 {
-            format!("{}…", &name[..max_chars - 1])
+        let display = if name.chars().count() > max_chars && max_chars > 1 {
+            let truncated: String = name.chars().take(max_chars - 1).collect();
+            format!("{truncated}…")
         } else {
             name.to_string()
         };

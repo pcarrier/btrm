@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
+use winit::event_loop::EventLoopProxy;
 
 use crate::remotes::RemoteConfig;
 use crate::transport::{connect_remote, read_frame, write_frame};
@@ -81,15 +83,17 @@ pub struct ConnectionManager {
     pub event_tx: mpsc::UnboundedSender<(String, ServerEvent)>,
     pub event_rx: mpsc::UnboundedReceiver<(String, ServerEvent)>,
     pub connections: HashMap<String, ConnectionHandle>,
+    proxy: Arc<EventLoopProxy<()>>,
 }
 
 impl ConnectionManager {
-    pub fn new() -> Self {
+    pub fn new(proxy: EventLoopProxy<()>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         Self {
             event_tx,
             event_rx,
             connections: HashMap::new(),
+            proxy: Arc::new(proxy),
         }
     }
 
@@ -99,6 +103,7 @@ impl ConnectionManager {
         let event_tx = self.event_tx.clone();
         let remote_clone = remote.clone();
         let hub = hub.to_string();
+        let proxy = self.proxy.clone();
 
         self.connections.insert(
             name.clone(),
@@ -109,7 +114,7 @@ impl ConnectionManager {
             },
         );
 
-        tokio::spawn(connection_task(name, remote_clone, hub, cmd_rx, event_tx));
+        tokio::spawn(connection_task(name, remote_clone, hub, cmd_rx, event_tx, proxy));
     }
 
     pub fn disconnect(&mut self, name: &str) {
@@ -139,21 +144,27 @@ async fn connection_task(
     hub: String,
     mut cmd_rx: mpsc::UnboundedReceiver<Command>,
     event_tx: mpsc::UnboundedSender<(String, ServerEvent)>,
+    proxy: Arc<EventLoopProxy<()>>,
 ) {
-    let _ = event_tx.send((name.clone(), ServerEvent::StatusChanged(ConnectionStatus::Connecting)));
+    let send = |event: (String, ServerEvent)| {
+        let _ = event_tx.send(event);
+        let _ = proxy.send_event(());
+    };
+
+    send((name.clone(), ServerEvent::StatusChanged(ConnectionStatus::Connecting)));
 
     let transport = match connect_remote(&remote, &hub).await {
         Ok(t) => {
-            let _ = event_tx.send((name.clone(), ServerEvent::StatusChanged(ConnectionStatus::Connected)));
+            send((name.clone(), ServerEvent::StatusChanged(ConnectionStatus::Connected)));
             t
         }
         Err(e) => {
-            let _ = event_tx.send((
+            send((
                 name.clone(),
                 ServerEvent::StatusChanged(ConnectionStatus::Disconnected(e)),
             ));
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let _ = event_tx.send((name.clone(), ServerEvent::ReconnectNeeded));
+            send((name.clone(), ServerEvent::ReconnectNeeded));
             return;
         }
     };
@@ -165,6 +176,7 @@ async fn connection_task(
 
     let name_r = name.clone();
     let event_tx_r = event_tx.clone();
+    let proxy_r = proxy.clone();
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = match read_frame(&mut reader).await {
@@ -178,6 +190,7 @@ async fn connection_task(
                 if event_tx_r.send((name_r.clone(), evt)).is_err() {
                     break;
                 }
+                let _ = proxy_r.send_event(());
             }
         }
     });
@@ -200,9 +213,11 @@ async fn connection_task(
         name.clone(),
         ServerEvent::StatusChanged(ConnectionStatus::Disconnected("connection lost".into())),
     ));
+    let _ = proxy.send_event(());
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     let _ = event_tx.send((name.clone(), ServerEvent::ReconnectNeeded));
+    let _ = proxy.send_event(());
 }
 
 fn parse_server_frame(data: &[u8]) -> Option<ServerEvent> {

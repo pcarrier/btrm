@@ -38,9 +38,10 @@ fn main() {
     let cli = Cli::parse();
     let remotes = load_remotes(cli.config.as_deref());
 
-    let event_loop = EventLoop::new().expect("failed to create event loop");
+    let event_loop = EventLoop::<()>::with_user_event().build().expect("failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Wait);
+    let proxy = event_loop.create_proxy();
 
-    let mut app = App::new(remotes, cli.hub);
+    let mut app = App::new(remotes, cli.hub, proxy);
     event_loop.run_app(&mut app).expect("event loop error");
 }

@@ -5,7 +5,7 @@ use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
@@ -45,7 +45,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(remotes: Vec<RemoteConfig>, hub: String) -> Self {
+    pub fn new(remotes: Vec<RemoteConfig>, hub: String, proxy: EventLoopProxy<()>) -> Self {
         Self {
             window: None,
             surface: None,
@@ -57,7 +57,7 @@ impl App {
             sessions: HashMap::new(),
             titles: HashMap::new(),
             exited: HashSet::new(),
-            connection_mgr: ConnectionManager::new(),
+            connection_mgr: ConnectionManager::new(proxy),
             overlay: None,
             palette: &palette::PALETTES[0],
             font_family: "monospace".into(),
@@ -460,7 +460,16 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<()> for App {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+        self.process_server_events();
+        if self.needs_redraw {
+            if let Some(ref w) = self.window {
+                w.request_redraw();
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;

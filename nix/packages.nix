@@ -224,7 +224,7 @@
           group = pkgs.writeTextDir "etc/group" "blit:x:1000:\n";
         in
         pkgs.dockerTools.buildLayeredImage {
-          name = "blit-demo";
+          name = "grab/blit-demo";
           tag = "latest";
           contents = [
             pkgs.busybox

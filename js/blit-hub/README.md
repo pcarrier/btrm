@@ -26,12 +26,12 @@ and redeploys.
 
 Optional env vars for setup:
 
-| Variable            | Description                              |
-| ------------------- | ---------------------------------------- |
-| `REDIS_URL`         | Redis connection URL (required first run)|
-| `CF_TURN_TOKEN_ID`  | Cloudflare TURN key ID                   |
-| `CF_TURN_API_TOKEN` | Cloudflare TURN API token                |
-| `FLY_ORG`           | Fly.io org (default: `personal`)         |
+| Variable            | Description                               |
+| ------------------- | ----------------------------------------- |
+| `REDIS_URL`         | Redis connection URL (required first run) |
+| `CF_TURN_TOKEN_ID`  | Cloudflare TURN key ID                    |
+| `CF_TURN_API_TOKEN` | Cloudflare TURN API token                 |
+| `FLY_ORG`           | Fly.io org (default: `personal`)          |
 
 To enable continuous deployment from GitHub Actions:
 
@@ -90,12 +90,12 @@ By default it returns Google's public STUN servers. If `CF_TURN_TOKEN_ID` and
 
 ## Configuration
 
-| Variable            | Default                  | Description                       |
-| ------------------- | ------------------------ | --------------------------------- |
-| `PORT`              | `8000`                   | HTTP/WebSocket port               |
-| `REDIS_URL`         | `redis://localhost:6379` | Redis connection URL              |
-| `CF_TURN_TOKEN_ID`  | _(unset)_                | Cloudflare TURN key ID            |
-| `CF_TURN_API_TOKEN` | _(unset)_                | Cloudflare TURN API bearer token  |
+| Variable            | Default                  | Description                         |
+| ------------------- | ------------------------ | ----------------------------------- |
+| `PORT`              | `8000`                   | HTTP/WebSocket port                 |
+| `REDIS_URL`         | `redis://localhost:6379` | Redis connection URL                |
+| `CF_TURN_TOKEN_ID`  | _(unset)_                | Cloudflare TURN key ID              |
+| `CF_TURN_API_TOKEN` | _(unset)_                | Cloudflare TURN API bearer token    |
 | `MESSAGE_TEMPLATE`  | _(see below)_            | Template returned by `GET /message` |
 
 ## Message template
@@ -104,7 +104,9 @@ By default it returns Google's public STUN servers. If `CF_TURN_TOKEN_ID` and
 terminal session is shared:
 
 ```jsonc
-{"template": "Welcome to blit! Terminals are now available at https://blit.sh/#{secret}"}
+{
+  "template": "Welcome to blit! Terminals are now available at https://blit.sh/#{secret}",
+}
 ```
 
 The `{secret}` placeholder is intended to be replaced client-side with the

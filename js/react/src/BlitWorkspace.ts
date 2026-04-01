@@ -163,6 +163,12 @@ export class BlitWorkspace {
     this.requireConnection(session.connectionId).restartSession(sessionId);
   }
 
+  killSession(sessionId: SessionId, signal = 15): void {
+    const session = this.getSession(sessionId);
+    if (!session) return;
+    this.requireConnection(session.connectionId).killSession(sessionId, signal);
+  }
+
   focusSession(sessionId: SessionId | null): void {
     if (sessionId === null) {
       this.snapshot = {

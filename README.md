@@ -3,7 +3,7 @@
 Terminal streaming for browsers and AI agents. One binary, nothing to configure.
 
 ```bash
-curl https://blit.sh/install | sh
+curl https://install.blit.sh | sh
 blit # opens a browser
 ```
 
@@ -32,7 +32,7 @@ The server auto-starts when needed.
 ## Install
 
 ```bash
-curl https://blit.sh/install | sh
+curl https://install.blit.sh | sh
 ```
 
 ### macOS (Homebrew)
@@ -44,8 +44,8 @@ brew install indent-com/tap/blit
 ### Debian / Ubuntu (APT)
 
 ```bash
-curl -fsSL https://repo.blit.sh/blit.gpg | sudo gpg --dearmor -o /usr/share/keyrings/blit.gpg
-echo "deb [signed-by=/usr/share/keyrings/blit.gpg arch=$(dpkg --print-architecture)] https://repo.blit.sh/ stable main" \
+curl -fsSL https://install.blit.sh/blit.gpg | sudo gpg --dearmor -o /usr/share/keyrings/blit.gpg
+echo "deb [signed-by=/usr/share/keyrings/blit.gpg arch=$(dpkg --print-architecture)] https://install.blit.sh/ stable main" \
   | sudo tee /etc/apt/sources.list.d/blit.list
 sudo apt update && sudo apt install blit
 ```
@@ -100,6 +100,9 @@ blit close 3                             # Close and remove a PTY
 
 blit share                               # Share via WebRTC (prints URL)
 blit share --passphrase mysecret         # Share with a specific passphrase
+blit share --verbose                     # Share with connection diagnostics
+
+blit upgrade                             # Upgrade blit to the latest version
 
 blit --ssh myhost list                   # Against a remote host
 blit --ssh myhost start htop
@@ -147,19 +150,19 @@ sudo systemctl enable --now blit@alice.socket
 
 ## How it compares
 
-|                               | blit                             | ttyd                | gotty               | Eternal Terminal      | Mosh                  | xterm.js + node-pty  |
-| ----------------------------- | -------------------------------- | ------------------- | ------------------- | --------------------- | --------------------- | -------------------- |
-| Architecture                  | Single binary                    | Single binary       | Single binary       | Client + daemon       | Client + server       | Library (BYO server) |
-| Multiple PTYs                 | ✅ First-class                   | ❌ One per instance | ❌ One per instance | ❌ One per connection | ❌ One per connection | ⚠️ Manual            |
-| Browser access                | ✅                               | ✅                  | ✅                  | ❌                    | ❌                    | ✅                   |
-| Delta updates                 | ✅ Only changed cells            | ❌                  | ❌                  | ❌                    | ✅ State diffs        | ❌                   |
-| LZ4 compression               | ✅                               | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
-| Per-client backpressure       | ✅ Render-metric pacing          | ❌                  | ❌                  | ⚠️ SSH flow control   | ❌                    | ❌                   |
-| WebGL rendering               | ✅                               | ❌                  | ❌                  | ❌                    | ❌                    | ⚠️ Addon             |
-| Transport                     | WS, WebTransport, WebRTC, Unix   | WebSocket           | WebSocket           | TCP                   | UDP                   | WebSocket            |
-| Embeddable (React)            | ✅                               | ❌                  | ❌                  | ❌                    | ❌                    | ✅                   |
-| Agent / CLI subcommands       | ✅                               | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
-| SSH tunneling built-in        | ✅                               | ❌                  | ❌                  | ✅                    | ✅                    | ❌                   |
+|                         | blit                           | ttyd                | gotty               | Eternal Terminal      | Mosh                  | xterm.js + node-pty  |
+| ----------------------- | ------------------------------ | ------------------- | ------------------- | --------------------- | --------------------- | -------------------- |
+| Architecture            | Single binary                  | Single binary       | Single binary       | Client + daemon       | Client + server       | Library (BYO server) |
+| Multiple PTYs           | ✅ First-class                 | ❌ One per instance | ❌ One per instance | ❌ One per connection | ❌ One per connection | ⚠️ Manual            |
+| Browser access          | ✅                             | ✅                  | ✅                  | ❌                    | ❌                    | ✅                   |
+| Delta updates           | ✅ Only changed cells          | ❌                  | ❌                  | ❌                    | ✅ State diffs        | ❌                   |
+| LZ4 compression         | ✅                             | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
+| Per-client backpressure | ✅ Render-metric pacing        | ❌                  | ❌                  | ⚠️ SSH flow control   | ❌                    | ❌                   |
+| WebGL rendering         | ✅                             | ❌                  | ❌                  | ❌                    | ❌                    | ⚠️ Addon             |
+| Transport               | WS, WebTransport, WebRTC, Unix | WebSocket           | WebSocket           | TCP                   | UDP                   | WebSocket            |
+| Embeddable (React)      | ✅                             | ❌                  | ❌                  | ❌                    | ❌                    | ✅                   |
+| Agent / CLI subcommands | ✅                             | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
+| SSH tunneling built-in  | ✅                             | ❌                  | ❌                  | ✅                    | ✅                    | ❌                   |
 
 ## What lives in this repo
 

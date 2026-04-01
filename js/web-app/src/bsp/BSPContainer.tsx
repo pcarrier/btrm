@@ -71,9 +71,7 @@ export function BSPContainer({
   focusedSessionId,
   lruSessionIds,
   manageVisibility = true,
-  preferredEmptyPaneId = null,
   onAssignmentsChange,
-  onPreferredEmptyPaneResolved,
   onFocusSession,
   onCreateInPane,
   onFocusBySession,
@@ -91,9 +89,7 @@ export function BSPContainer({
   focusedSessionId: SessionId | null;
   lruSessionIds: readonly SessionId[];
   manageVisibility?: boolean;
-  preferredEmptyPaneId?: string | null;
   onAssignmentsChange?: (assignments: BSPAssignments) => void;
-  onPreferredEmptyPaneResolved?: () => void;
   onFocusSession: (id: SessionId | null) => void;
   onCreateInPane?: (paneId: string, command?: string) => void;
   /** Called with control functions so the parent can direct pane focus/assignments. */
@@ -132,7 +128,9 @@ export function BSPContainer({
   });
   // Evaluate the lazy initializer
   if (typeof pendingHashRef.current === "function") {
-    pendingHashRef.current = (pendingHashRef.current as () => Record<string, string> | null)();
+    pendingHashRef.current = (
+      pendingHashRef.current as () => Record<string, string> | null
+    )();
   }
 
   const [layoutState, setLayoutState] = useState<BSPAssignments>(() => {
@@ -198,10 +196,16 @@ export function BSPContainer({
     let resolved = 0;
     for (const paneId of paneIds) {
       const ref = pending[paneId];
-      if (!ref) { assignments[paneId] = null; continue; }
+      if (!ref) {
+        assignments[paneId] = null;
+        continue;
+      }
       // ref is "connectionId:ptyId" — split on last colon since connectionId might contain colons
       const lastColon = ref.lastIndexOf(":");
-      if (lastColon <= 0) { assignments[paneId] = null; continue; }
+      if (lastColon <= 0) {
+        assignments[paneId] = null;
+        continue;
+      }
       const connId = ref.slice(0, lastColon);
       const ptyId = parseInt(ref.slice(lastColon + 1), 10);
       const session = liveSessions.find(
@@ -231,27 +235,6 @@ export function BSPContainer({
       return sameAssignments(previous, next) ? previous : next;
     });
   }, [connected, liveSessionIds, knownSessionIds, panes]);
-
-  // When a new session is created targeting a specific pane, assign the first
-  // unassigned live session there once it appears.
-  useEffect(() => {
-    if (!preferredEmptyPaneId || !paneIds.includes(preferredEmptyPaneId))
-      return;
-    setLayoutState((previous) => {
-      if (previous.assignments[preferredEmptyPaneId] != null) return previous;
-      const assigned = new Set(
-        Object.values(previous.assignments).filter(Boolean),
-      );
-      const unassigned = liveSessionIds.find((id) => !assigned.has(id));
-      if (!unassigned) return previous;
-      return {
-        assignments: {
-          ...previous.assignments,
-          [preferredEmptyPaneId]: unassigned,
-        },
-      };
-    });
-  }, [preferredEmptyPaneId, liveSessionIds, paneIds]);
 
   const assignedInPaneOrder = useMemo(
     () =>
@@ -366,22 +349,6 @@ export function BSPContainer({
     if (!manageVisibility) return;
     workspace.setVisibleSessions(assignedInPaneOrder);
   }, [assignedInPaneOrder, knownSessionIds, manageVisibility, workspace]);
-
-  useEffect(() => {
-    if (!preferredEmptyPaneId || !onPreferredEmptyPaneResolved) return;
-    if (!paneIds.includes(preferredEmptyPaneId)) {
-      onPreferredEmptyPaneResolved();
-      return;
-    }
-    if (layoutState.assignments[preferredEmptyPaneId] != null) {
-      onPreferredEmptyPaneResolved();
-    }
-  }, [
-    layoutState.assignments,
-    onPreferredEmptyPaneResolved,
-    paneIds,
-    preferredEmptyPaneId,
-  ]);
 
   const updateRoot = useCallback(
     (next: BSPNode) => {

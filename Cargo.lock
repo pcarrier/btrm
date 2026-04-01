@@ -294,6 +294,7 @@ dependencies = [
  "libc",
  "rand 0.10.0",
  "regex",
+ "reqwest",
  "rustls",
  "tokio",
  "uuid",

@@ -196,6 +196,9 @@ enum Command {
         #[arg(long)]
         quiet: bool,
     },
+
+    /// Upgrade blit to the latest version
+    Upgrade,
 }
 
 #[tokio::main]
@@ -236,6 +239,12 @@ async fn main() {
                 }),
             };
             blit_server::run(config).await;
+        }
+        Some(Command::Upgrade) => {
+            if let Err(e) = cmd_upgrade().await {
+                eprintln!("blit: {e}");
+                std::process::exit(1);
+            }
         }
         Some(Command::Share {
             passphrase,
@@ -351,7 +360,7 @@ async fn main() {
                         std::process::exit(1);
                     }
                 },
-                Command::Server { .. } | Command::Share { .. } => unreachable!(),
+                Command::Server { .. } | Command::Share { .. } | Command::Upgrade => unreachable!(),
             };
             if let Err(e) = result {
                 eprintln!("blit: {e}");
@@ -369,5 +378,39 @@ async fn main() {
                 interactive::run_browser(&conn.socket, &conn.tcp, &conn.ssh, cli.port).await;
             }
         }
+    }
+}
+
+async fn cmd_upgrade() -> Result<(), Box<dyn std::error::Error>> {
+    let exe_path = std::env::current_exe()?;
+    let install_dir = exe_path
+        .parent()
+        .ok_or("cannot determine binary directory")?;
+
+    let script = reqwest::get("https://blit.sh/install")
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+
+    let tmp = std::env::temp_dir().join("blit-install.sh");
+    std::fs::write(&tmp, &script)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new("sh")
+            .arg(&tmp)
+            .env("BLIT_INSTALL_DIR", install_dir)
+            .exec();
+        Err(format!("exec failed: {err}").into())
+    }
+    #[cfg(not(unix))]
+    {
+        let status = std::process::Command::new("sh")
+            .arg(&tmp)
+            .env("BLIT_INSTALL_DIR", install_dir)
+            .status()?;
+        std::process::exit(status.code().unwrap_or(1));
     }
 }

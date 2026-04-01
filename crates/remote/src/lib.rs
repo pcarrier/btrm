@@ -426,7 +426,7 @@ impl FrameState {
                 col += 1;
             }
             result.push_str(line.trim_end());
-            if row < end_row.min(self.rows.saturating_sub(1)) {
+            if row < end_row.min(self.rows.saturating_sub(1)) && !self.is_wrapped(row) {
                 result.push('\n');
             }
         }

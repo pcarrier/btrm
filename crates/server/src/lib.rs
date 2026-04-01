@@ -26,6 +26,7 @@ pub struct Config {
     pub scrollback: usize,
     pub socket_path: String,
     pub fd_channel: Option<RawFd>,
+    pub verbose: bool,
 }
 
 fn pty_write_all(fd: libc::c_int, mut data: &[u8]) {
@@ -1636,7 +1637,7 @@ fn recv_fd(channel: RawFd) -> RecvFdResult {
     }
 }
 
-fn bind_socket(sock_path: &str) -> UnixListener {
+fn bind_socket(sock_path: &str, verbose: bool) -> UnixListener {
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path).unwrap_or_else(|e| {
         eprintln!("blit-server: cannot bind to {sock_path}: {e}");
@@ -1645,7 +1646,9 @@ fn bind_socket(sock_path: &str) -> UnixListener {
     if let Err(e) = std::fs::set_permissions(sock_path, std::fs::Permissions::from_mode(0o700)) {
         eprintln!("blit-server: warning: cannot set socket permissions: {e}");
     }
-    eprintln!("listening on {sock_path}");
+    if verbose {
+        eprintln!("listening on {sock_path}");
+    }
     listener
 }
 
@@ -1689,7 +1692,9 @@ pub async fn run(config: Config) {
 
     if let Some(channel_fd) = state.0.fd_channel {
         use std::os::unix::io::FromRawFd;
-        eprintln!("accepting clients via fd-channel (fd {channel_fd})");
+        if state.0.verbose {
+            eprintln!("accepting clients via fd-channel (fd {channel_fd})");
+        }
         let channel = unsafe { std::os::unix::net::UnixStream::from_raw_fd(channel_fd) };
         channel.set_nonblocking(true).unwrap();
         let async_channel = AsyncFd::new(channel).unwrap();
@@ -1719,7 +1724,9 @@ pub async fn run(config: Config) {
                 }
             }
         }
-        eprintln!("fd-channel closed, shutting down");
+        if state.0.verbose {
+            eprintln!("fd-channel closed, shutting down");
+        }
         return;
     }
 
@@ -1731,14 +1738,18 @@ pub async fn run(config: Config) {
             use std::os::unix::io::FromRawFd;
             let std_listener = unsafe { std::os::unix::net::UnixListener::from_raw_fd(3) };
             std_listener.set_nonblocking(true).unwrap();
-            eprintln!("using socket activation (fd 3)");
+            if state.0.verbose {
+                eprintln!("using socket activation (fd 3)");
+            }
             UnixListener::from_std(std_listener).unwrap()
         } else {
-            eprintln!("LISTEN_FDS={fds}, expected 1; falling back to bind");
-            bind_socket(&state.0.socket_path)
+            if state.0.verbose {
+                eprintln!("LISTEN_FDS={fds}, expected 1; falling back to bind");
+            }
+            bind_socket(&state.0.socket_path, state.0.verbose)
         }
     } else {
-        bind_socket(&state.0.socket_path)
+        bind_socket(&state.0.socket_path, state.0.verbose)
     };
 
     loop {
@@ -2224,7 +2235,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
         }
     }
 
-    eprintln!("client connected");
+    if state.0.verbose {
+        eprintln!("client connected");
+    }
 
     while let Some(data) = read_frame(&mut reader).await {
         if data.is_empty() {
@@ -2988,7 +3001,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
         }
     }
     sender.abort();
-    eprintln!("client disconnected");
+    if state.0.verbose {
+        eprintln!("client disconnected");
+    }
 }
 
 #[cfg(test)]

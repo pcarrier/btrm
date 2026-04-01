@@ -761,49 +761,15 @@ impl TerminalDriver {
             let grid_row = &grid[line_idx];
             let row_start = row * cols;
 
-            let mut emoji_wide_cols = Vec::new();
             for col_idx in 0..cols {
                 let cell = &grid_row[Column(col_idx)];
-                if !cell.flags.contains(CellFlags::WIDE_CHAR)
-                    && cell.c > '\x7f'
-                    && cell
-                        .zerowidth()
-                        .map_or(false, |zw| zw.contains(&'\u{FE0F}'))
-                {
-                    emoji_wide_cols.push(col_idx);
-                }
-            }
-
-            let mut dst = 0;
-            for col_idx in 0..cols {
-                if dst >= cols {
-                    break;
-                }
-                let cell = &grid_row[Column(col_idx)];
-                let flat = row_start + dst;
+                let flat = row_start + col_idx;
                 encode_cell(
                     cell,
                     &mut cells[flat * CELL_SIZE..][..CELL_SIZE],
                     flat,
                     &mut overflow,
                 );
-
-                let is_wide = cell.flags.contains(CellFlags::WIDE_CHAR)
-                    || emoji_wide_cols.contains(&col_idx);
-
-                if is_wide && !cell.flags.contains(CellFlags::WIDE_CHAR) {
-                    cells[flat * CELL_SIZE + 1] |= 1 << 1;
-                }
-
-                dst += 1;
-
-                if is_wide && dst < cols {
-                    let spacer_flat = row_start + dst;
-                    let buf = &mut cells[spacer_flat * CELL_SIZE..][..CELL_SIZE];
-                    buf.fill(0);
-                    buf[1] |= 1 << 2;
-                    dst += 1;
-                }
             }
 
             // Line wrapping

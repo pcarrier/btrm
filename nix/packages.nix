@@ -107,6 +107,20 @@
         cargoPkg = "blit-server";
       };
 
+      blit-webrtc-forwarder = rustPlatform.buildRustPackage {
+        pname = "blit-webrtc-forwarder";
+        inherit version;
+        src = ../.;
+        cargoBuildFlags = [ "-p" "blit-webrtc-forwarder" ];
+        cargoLock = cargoLockConfig;
+        doCheck = false;
+      };
+
+      blit-webrtc-forwarder-static = mkStaticBin {
+        pname = "blit-webrtc-forwarder";
+        cargoPkg = "blit-webrtc-forwarder";
+      };
+
       reactNpmDeps = pkgs.fetchNpmDeps {
         src = ../js/react;
         hash = "sha256-OsY6BuJzLlNkQ1kKNSjFa9+86nzozIL1flH24/oXOMA=";
@@ -185,13 +199,14 @@
       tasks = import ./tasks.nix {
         inherit pkgs version browserWasm blit-server blit-gateway
                 blit-server-static blit-cli-static blit-gateway-static
+                blit-webrtc-forwarder-static
                 manPages webAppDist rustToolchain;
       };
     in
     {
       packages = {
-        inherit blit-server blit-cli blit-gateway;
-        inherit blit-server-static blit-cli-static blit-gateway-static;
+        inherit blit-server blit-cli blit-gateway blit-webrtc-forwarder;
+        inherit blit-server-static blit-cli-static blit-gateway-static blit-webrtc-forwarder-static;
         default = blit-cli;
       } // tasks;
 
@@ -215,6 +230,7 @@
           pkgs.scdoc
           pkgs.wasm-bindgen-cli
           pkgs.wasm-pack
+          pkgs.flyctl
         ];
 
         shellHook = ''

@@ -1,5 +1,6 @@
 { pkgs, version, browserWasm, blit-server, blit-gateway
 , blit-server-static, blit-cli-static, blit-gateway-static
+, blit-webrtc-forwarder-static
 , manPages, webAppDist, rustToolchain
 }:
 let
@@ -124,6 +125,12 @@ CTRL
     binPkg = blit-gateway-static;
     description = "blit WebSocket gateway";
   };
+
+  blit-webrtc-forwarder-deb = mkDeb {
+    pname = "blit-webrtc-forwarder";
+    binPkg = blit-webrtc-forwarder-static;
+    description = "blit WebRTC forwarder";
+  };
   publish-npm-packages = pkgs.writeShellApplication {
     name = "blit-publish-npm-packages";
     runtimeInputs = [ pkgs.nodejs ];
@@ -167,20 +174,21 @@ CTRL
       sleep 30
 
       publish blit-server
+      publish blit-webrtc-forwarder
       publish blit-cli
       publish blit-gateway
     '';
   };
 in {
   inherit browser-publish react-publish publish-npm-packages publish-crates;
-  inherit blit-server-deb blit-cli-deb blit-gateway-deb;
+  inherit blit-server-deb blit-cli-deb blit-gateway-deb blit-webrtc-forwarder-deb;
 
   build-debs = pkgs.writeShellApplication {
     name = "blit-build-debs";
     text = ''
       outdir="''${1:-dist/debs}"
       mkdir -p "$outdir"
-      for pkg in ${blit-server-deb} ${blit-cli-deb} ${blit-gateway-deb}; do
+      for pkg in ${blit-server-deb} ${blit-cli-deb} ${blit-gateway-deb} ${blit-webrtc-forwarder-deb}; do
         cp "$pkg"/*.deb "$outdir"/
       done
       echo ""
@@ -196,7 +204,7 @@ in {
     in ''
       outdir="''${1:-dist/tarballs}"
       mkdir -p "$outdir"
-      for pkg in ${blit-server-static} ${blit-cli-static} ${blit-gateway-static}; do
+      for pkg in ${blit-server-static} ${blit-cli-static} ${blit-gateway-static} ${blit-webrtc-forwarder-static}; do
         for bin in "$pkg"/bin/*; do
           name=$(basename "$bin")
           tar -czf "$outdir/''${name}_${version}_${os}_${arch}.tar.gz" -C "$pkg/bin" "$name"

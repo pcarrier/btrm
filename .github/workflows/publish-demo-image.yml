@@ -16,18 +16,14 @@ jobs:
       - name: Build image
         run: nix build .#demo-image
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Load and push
+      - name: Push to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          docker load < result
+          skopeo login docker.io -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_TOKEN"
+          skopeo copy docker-archive:result docker://docker.io/grab/blit-demo:latest
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
-            docker tag grab/blit-demo:latest "grab/blit-demo:${VERSION}"
-            docker push "grab/blit-demo:${VERSION}"
+            skopeo copy docker-archive:result "docker://docker.io/grab/blit-demo:${VERSION}"
           fi
-          docker push grab/blit-demo:latest

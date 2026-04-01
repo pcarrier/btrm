@@ -236,6 +236,7 @@
             pkgs.jq
             pkgs.tree
             blit-server
+            blit-cli
             blit-gateway
             fishConfig
             welcomeFile
@@ -257,7 +258,7 @@
             User = "1000:1000";
             WorkingDir = "/home/blit";
             ExposedPorts = { "3264/tcp" = {}; };
-            Entrypoint = [ "/bin/sh" "-c" "blit-server & exec blit-gateway" ];
+            Entrypoint = [ "/bin/sh" "-c" "blit-server & exec blit share" ];
           };
         };
       } // tasks;

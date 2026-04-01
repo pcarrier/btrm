@@ -769,8 +769,18 @@ impl TerminalDriver {
                     &mut overflow,
                 );
 
-                // Mark wide char spacers
-                if cell.flags.contains(CellFlags::WIDE_CHAR) && col_idx + 1 < cols {
+                let is_wide = cell.flags.contains(CellFlags::WIDE_CHAR)
+                    || (!cell.flags.contains(CellFlags::WIDE_CHAR)
+                        && cell.c > '\x7f'
+                        && cell
+                            .zerowidth()
+                            .map_or(false, |zw| zw.contains(&'\u{FE0F}')));
+
+                if is_wide && !cell.flags.contains(CellFlags::WIDE_CHAR) {
+                    cells[flat * CELL_SIZE + 1] |= 1 << 1;
+                }
+
+                if is_wide && col_idx + 1 < cols {
                     let spacer_flat = row * cols + col_idx + 1;
                     let buf = &mut cells[spacer_flat * CELL_SIZE..][..CELL_SIZE];
                     buf.fill(0);

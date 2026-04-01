@@ -939,7 +939,8 @@ impl Terminal {
                 col += 1;
             }
             html.push_str(line.trim_end());
-            if row < end_row.min(self.inner.rows().saturating_sub(1)) {
+            if row < end_row.min(self.inner.rows().saturating_sub(1)) && !self.inner.is_wrapped(row)
+            {
                 html.push('\n');
             }
         }
@@ -983,7 +984,9 @@ impl Terminal {
                 col += 1;
             }
             result.push_str(line.trim_end());
-            if row < end_row.min(self.inner.rows().saturating_sub(1)) {
+            if row < end_row.min(self.inner.rows().saturating_sub(1))
+                && !self.inner.is_wrapped(row)
+            {
                 result.push('\n');
             }
         }

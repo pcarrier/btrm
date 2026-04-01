@@ -21,7 +21,12 @@ async function deriveKeypair(passphrase: string): Promise<nacl.SignKeyPair> {
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: PBKDF2_SALT, iterations: PBKDF2_ROUNDS, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: PBKDF2_SALT,
+      iterations: PBKDF2_ROUNDS,
+      hash: "SHA-256",
+    },
     key,
     256,
   );
@@ -133,7 +138,10 @@ export function createShareTransport(
         if (disposed) reject(new Error("disposed"));
       });
 
-      if (disposed) { ws.close(); return; }
+      if (disposed) {
+        ws.close();
+        return;
+      }
 
       // Wait for registered + peer_joined
       const producerSessionId = await new Promise<string>((resolve, reject) => {
@@ -148,10 +156,14 @@ export function createShareTransport(
             reject(new Error(m.message ?? "signaling error"));
           }
         };
-        ws.onclose = () => reject(new Error("signaling closed before peer joined"));
+        ws.onclose = () =>
+          reject(new Error("signaling closed before peer joined"));
       });
 
-      if (disposed) { ws.close(); return; }
+      if (disposed) {
+        ws.close();
+        return;
+      }
 
       // Create RTCPeerConnection and data channel transport
       const pc = new RTCPeerConnection({ iceServers });
@@ -159,7 +171,9 @@ export function createShareTransport(
       inner = transport;
 
       // Forward inner transport events
-      transport.addEventListener("message", (data: ArrayBuffer) => dispatch(data));
+      transport.addEventListener("message", (data: ArrayBuffer) =>
+        dispatch(data),
+      );
       transport.addEventListener("statuschange", (s: ConnectionStatus) => {
         if (disposed) return;
         setStatus(s);
@@ -171,7 +185,9 @@ export function createShareTransport(
 
       // Send the offer via signaling
       const sdpData = { sdp: { type: offer.type, sdp: offer.sdp } };
-      ws.send(buildSignedMessage(keypair.secretKey, producerSessionId, sdpData));
+      ws.send(
+        buildSignedMessage(keypair.secretKey, producerSessionId, sdpData),
+      );
 
       // Buffer ICE candidates that arrive before we have the remote description
       const pendingCandidates: RTCIceCandidateInit[] = [];
@@ -182,7 +198,11 @@ export function createShareTransport(
         if (!e.candidate || disposed) return;
         const candidateData = { candidate: e.candidate.toJSON() };
         ws.send(
-          buildSignedMessage(keypair.secretKey, producerSessionId, candidateData),
+          buildSignedMessage(
+            keypair.secretKey,
+            producerSessionId,
+            candidateData,
+          ),
         );
       };
 
@@ -238,23 +258,37 @@ export function createShareTransport(
       inner?.connect();
     },
 
-    get status() { return _status; },
-    get authRejected() { return false; },
-    get lastError() { return _lastError; },
+    get status() {
+      return _status;
+    },
+    get authRejected() {
+      return false;
+    },
+    get lastError() {
+      return _lastError;
+    },
 
     addEventListener(type: string, listener: (data: never) => void) {
       if (type === "message") {
-        messageListeners.add(listener as unknown as (data: ArrayBuffer) => void);
+        messageListeners.add(
+          listener as unknown as (data: ArrayBuffer) => void,
+        );
       } else if (type === "statuschange") {
-        statusListeners.add(listener as unknown as (status: ConnectionStatus) => void);
+        statusListeners.add(
+          listener as unknown as (status: ConnectionStatus) => void,
+        );
       }
     },
 
     removeEventListener(type: string, listener: (data: never) => void) {
       if (type === "message") {
-        messageListeners.delete(listener as unknown as (data: ArrayBuffer) => void);
+        messageListeners.delete(
+          listener as unknown as (data: ArrayBuffer) => void,
+        );
       } else if (type === "statuschange") {
-        statusListeners.delete(listener as unknown as (status: ConnectionStatus) => void);
+        statusListeners.delete(
+          listener as unknown as (status: ConnectionStatus) => void,
+        );
       }
     },
 

@@ -3,6 +3,7 @@ import {
   BlitTerminal,
   BlitWorkspaceProvider,
   BlitWorkspace,
+  PALETTES,
   useBlitConnection,
   useBlitFocusedSession,
   useBlitSessions,
@@ -24,6 +25,7 @@ import {
   FONT_KEY,
   FONT_SIZE_KEY,
   writeStorage,
+  useConfigValue,
   preferredPalette,
   preferredFont,
   preferredFontSize,
@@ -154,15 +156,32 @@ function WorkspaceScreen({
   activeLayoutRef.current = activeLayout;
   const [layoutAssignments, setLayoutAssignments] =
     useState<BSPAssignments | null>(null);
-  const [pendingPaneTargetId, setPendingPaneTargetId] = useState<string | null>(
-    null,
-  );
   const toggleDebug = useCallback(() => setDebugPanel((value) => !value), []);
   const fontRequestVersionRef = useRef(0);
   const paletteOverlayOriginRef = useRef<TerminalPalette | null>(null);
   const fontOverlayOriginRef = useRef<{ family: string; size: number } | null>(
     null,
   );
+
+  const remotePaletteId = useConfigValue(PALETTE_KEY);
+  const remoteFont = useConfigValue(FONT_KEY);
+  const remoteFontSize = useConfigValue(FONT_SIZE_KEY);
+
+  useEffect(() => {
+    if (!remotePaletteId) return;
+    const p = PALETTES.find((x) => x.id === remotePaletteId);
+    if (p) setPalette(p);
+  }, [remotePaletteId]);
+
+  useEffect(() => {
+    if (remoteFont?.trim()) setFont(remoteFont.trim());
+  }, [remoteFont]);
+
+  useEffect(() => {
+    if (!remoteFontSize) return;
+    const n = parseInt(remoteFontSize, 10);
+    if (n > 0) setFontSize(n);
+  }, [remoteFontSize]);
 
   const resolvedFontWithFallback =
     resolvedFont === DEFAULT_FONT
@@ -294,7 +313,6 @@ function WorkspaceScreen({
   useEffect(() => {
     if (activeLayout) return;
     setLayoutAssignments(null);
-    setPendingPaneTargetId(null);
   }, [activeLayout]);
 
   useEffect(() => {
@@ -521,11 +539,7 @@ function WorkspaceScreen({
         workspace.focusSession(session.id);
       } catch {}
     },
-    [
-      primaryConnectionId,
-      workspace,
-      workspaceState.focusedSessionId,
-    ],
+    [primaryConnectionId, workspace, workspaceState.focusedSessionId],
   );
 
   const selectPane = useCallback(
@@ -722,9 +736,7 @@ function WorkspaceScreen({
               focusedSessionId={workspaceState.focusedSessionId}
               lruSessionIds={lruRef.current}
               manageVisibility={overlay !== "expose"}
-              preferredEmptyPaneId={pendingPaneTargetId}
               onAssignmentsChange={setLayoutAssignments}
-              onPreferredEmptyPaneResolved={() => setPendingPaneTargetId(null)}
               onFocusSession={(id) => workspace.focusSession(id)}
               onFocusBySession={(fn) => {
                 focusBySessionRef.current = fn;
@@ -829,14 +841,12 @@ function WorkspaceScreen({
               closeOverlay();
             }}
             onApplyLayout={(l) => {
-              setPendingPaneTargetId(null);
               setActiveLayout(l);
               saveActiveLayout(l);
               saveToHistory(l);
               closeOverlay();
             }}
             onClearLayout={() => {
-              setPendingPaneTargetId(null);
               setLayoutAssignments(null);
               setActiveLayout(null);
               saveActiveLayout(null);

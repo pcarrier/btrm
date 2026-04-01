@@ -65,19 +65,19 @@ There is no `rustfmt.toml` or `.clippy.toml` — default rustfmt and `clippy -D 
 
 `./bin/dev` starts the full stack with hot-reloading via `process-compose`:
 
-| Process        | What it does                                                | Port / socket        |
-| -------------- | ----------------------------------------------------------- | -------------------- |
+| Process        | What it does                                                      | Port / socket        |
+| -------------- | ----------------------------------------------------------------- | -------------------- |
 | `browser-wasm` | Watches `crates/browser/src` + `crates/remote/src`, rebuilds WASM | n/a                  |
-| `server`       | `cargo watch` running `blit-server --release`               | `/tmp/blit-dev.sock` |
-| `gateway`      | `cargo watch` running `blit-gateway --release` (pass=`dev`) | `127.0.0.1:3266`     |
-| `web-app`      | Vite dev server for `js/web-app/`                         | printed by Vite      |
+| `server`       | `cargo watch` running `blit-server --release`                     | `/tmp/blit-dev.sock` |
+| `gateway`      | `cargo watch` running `blit-gateway --release` (pass=`dev`)       | `127.0.0.1:3266`     |
+| `web-app`      | Vite dev server for `js/web-app/`                                 | printed by Vite      |
 
 ## Project structure
 
 Every Rust crate is a single source file (`lib.rs` or `main.rs`) except `blit-cli` which is split into four and `blit-demo` which has extra binaries in `src/bin/`. There are no multi-level module trees.
 
-| File                          | Lines | Role                                                                                                             |
-| ----------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------- |
+| File                                 | Lines | Role                                                                                                             |
+| ------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------- |
 | `crates/server/src/main.rs`          | ~4400 | PTY host: fork/exec, frame scheduling, protocol handlers, congestion control                                     |
 | `crates/remote/src/lib.rs`           | ~3000 | Wire protocol: constants, message builders/parsers, `FrameState`/`TerminalState`, cell encoding, text extraction |
 | `crates/cli/src/interactive.rs`      | ~1650 | Console TUI and browser mode                                                                                     |
@@ -93,15 +93,15 @@ Every Rust crate is a single source file (`lib.rs` or `main.rs`) except `blit-cl
 
 ### Non-Rust code
 
-| Directory  | What                                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------ |
-| `js/react/`   | `blit-react` npm package — React library with hooks, transports, WebGL renderer. Tests in `js/react/src/__tests__/`.  |
-| `js/web-app/` | Vite + React SPA — reference browser UI with BSP tiled layouts, overlays, status bar                               |
-| `e2e/`     | Playwright tests against the full stack (6 spec files)                                                             |
-| `nix/`     | Nix packaging: `common.nix` (toolchain), `packages.nix` (build defs), `tasks.nix` (CI tasks), NixOS/Darwin modules |
-| `systemd/` | Socket-activated unit files (user-level and system-level templates)                                                |
-| `man/`     | scdoc man pages for `blit`, `blit-server`, `blit-gateway`                                                          |
-| `bin/`     | Shell scripts wrapping `nix run` tasks plus the `release` orchestrator                                             |
+| Directory     | What                                                                                                                 |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `js/react/`   | `blit-react` npm package — React library with hooks, transports, WebGL renderer. Tests in `js/react/src/__tests__/`. |
+| `js/web-app/` | Vite + React SPA — reference browser UI with BSP tiled layouts, overlays, status bar                                 |
+| `e2e/`        | Playwright tests against the full stack (6 spec files)                                                               |
+| `nix/`        | Nix packaging: `common.nix` (toolchain), `packages.nix` (build defs), `tasks.nix` (CI tasks), NixOS/Darwin modules   |
+| `systemd/`    | Socket-activated unit files (user-level and system-level templates)                                                  |
+| `man/`        | scdoc man pages for `blit`, `blit-server`, `blit-gateway`                                                            |
+| `bin/`        | Shell scripts wrapping `nix run` tasks plus the `release` orchestrator                                               |
 
 ## Code conventions
 

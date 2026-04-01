@@ -1,4 +1,5 @@
 Reading material:
+
 - ARCHITECTURE.md
 - CONTRIBUTING.md
 - EMBEDDING.md

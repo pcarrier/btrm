@@ -4,7 +4,10 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-const wasmPath = resolve(__dirname, "../../crates/browser/pkg/blit_browser_bg.wasm");
+const wasmPath = resolve(
+  __dirname,
+  "../../crates/browser/pkg/blit_browser_bg.wasm",
+);
 const snippetsDir = resolve(__dirname, "../../crates/browser/pkg/snippets");
 const isDev =
   process.env.NODE_ENV !== "production" && !process.argv.includes("build");
@@ -51,7 +54,10 @@ export default bin.buffer;
   resolve: {
     alias: {
       "blit-react": resolve(__dirname, "../react/src"),
-      "blit-browser": resolve(__dirname, "../../crates/browser/pkg/blit_browser.js"),
+      "blit-browser": resolve(
+        __dirname,
+        "../../crates/browser/pkg/blit_browser.js",
+      ),
     },
     dedupe: ["react", "react-dom"],
   },

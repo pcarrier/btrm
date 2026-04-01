@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use blit_remote::{
-    msg_ack, msg_close, msg_create_n_command, msg_input, msg_read, msg_resize, msg_restart,
-    msg_subscribe, parse_server_msg, ServerMsg, TerminalState, EXIT_STATUS_UNKNOWN, S2C_EXITED,
-    S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE, S2C_UPDATE,
+    msg_ack, msg_close, msg_create_n_command, msg_input, msg_kill, msg_read, msg_resize,
+    msg_restart, msg_subscribe, parse_server_msg, ServerMsg, TerminalState, EXIT_STATUS_UNKNOWN,
+    S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE, S2C_UPDATE,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -12,6 +12,7 @@ use crate::transport::{read_frame, write_frame, Transport};
 struct PtyInfo {
     id: u16,
     tag: String,
+    command: String,
 }
 
 struct AgentConn {
@@ -51,6 +52,7 @@ impl AgentConn {
                             .map(|e| PtyInfo {
                                 id: e.pty_id,
                                 tag: e.tag.to_string(),
+                                command: e.command.to_string(),
                             })
                             .collect();
                     }
@@ -126,14 +128,14 @@ impl AgentConn {
 pub async fn cmd_list(transport: Transport) -> Result<(), String> {
     let conn = AgentConn::connect(transport).await?;
 
-    println!("ID\tTAG\tTITLE\tSTATUS");
+    println!("ID\tTAG\tTITLE\tCOMMAND\tSTATUS");
     for pty in &conn.ptys {
         let title = conn.titles.get(&pty.id).map(|s| s.as_str()).unwrap_or("");
         let status = match conn.exited.get(&pty.id) {
             None => "running".to_string(),
             Some(&s) => format_exit_status(s),
         };
-        println!("{}\t{}\t{}\t{}", pty.id, pty.tag, title, status);
+        println!("{}\t{}\t{}\t{}\t{}", pty.id, pty.tag, title, pty.command, status);
     }
     Ok(())
 }
@@ -303,6 +305,41 @@ pub async fn cmd_close(transport: Transport, id: u16) -> Result<(), String> {
                 return Ok(());
             }
         }
+    }
+}
+
+pub async fn cmd_kill(transport: Transport, id: u16, signal: &str) -> Result<(), String> {
+    let signum = parse_signal(signal)?;
+    let mut conn = AgentConn::connect(transport).await?;
+
+    if !conn.has_pty(id) {
+        return Err(format!("pty {id} not found"));
+    }
+
+    if conn.exited.contains_key(&id) {
+        return Err(format!("pty {id} has already exited"));
+    }
+
+    conn.send(&msg_kill(id, signum)).await?;
+    Ok(())
+}
+
+fn parse_signal(s: &str) -> Result<i32, String> {
+    if let Ok(n) = s.parse::<i32>() {
+        return Ok(n);
+    }
+    let name = s.strip_prefix("SIG").unwrap_or(s);
+    match name {
+        "HUP" => Ok(1),
+        "INT" => Ok(2),
+        "QUIT" => Ok(3),
+        "KILL" => Ok(9),
+        "USR1" => Ok(10),
+        "USR2" => Ok(12),
+        "TERM" => Ok(15),
+        "CONT" => Ok(18),
+        "STOP" => Ok(19),
+        _ => Err(format!("unknown signal: {s}")),
     }
 }
 

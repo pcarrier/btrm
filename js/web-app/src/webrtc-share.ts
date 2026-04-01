@@ -223,7 +223,7 @@ export function createShareTransport(
           ).then(() => {
             remoteDescSet = true;
             for (const c of pendingCandidates) {
-              pc.addIceCandidate(new RTCIceCandidate(c));
+              pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
             }
             pendingCandidates.length = 0;
           }).catch((err) => {
@@ -234,7 +234,7 @@ export function createShareTransport(
         } else if (m.data.candidate) {
           const candidate = m.data.candidate as RTCIceCandidateInit;
           if (remoteDescSet) {
-            pc.addIceCandidate(new RTCIceCandidate(candidate));
+            pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
           } else {
             pendingCandidates.push(candidate);
           }

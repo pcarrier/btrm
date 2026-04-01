@@ -11,35 +11,6 @@ description: >
 
 Drive terminal sessions programmatically through stateless CLI subcommands. Each subcommand opens a fresh connection, performs one operation, and exits.
 
-
-## `show` vs `history`
-
-These are the two ways to read terminal output. Getting this distinction right is critical.
-
-| | `show` | `history` |
-|---|---|---|
-| **What it returns** | Current viewport — exactly what a human would see on screen right now | Full scrollback buffer + viewport |
-| **When to use** | Quick glance at current state (e.g. is the prompt back?) | Reading command output that may have scrolled off-screen |
-| **Gotcha** | If a command produced more output than fits on screen, earlier output is lost | Without `--limit`, returns everything — can be megabytes for long-running sessions. Unless processing the output, always use `--limit` with `--from-end` or `--from-start` to cap output size. |
-
-**Rule of thumb:** Use `history --from-end 0 --limit N` when you need recent output. Use `show` when you only care about what's visible right now (e.g. checking for a prompt).
-
-### Pagination
-
-`history` supports pagination from either direction:
-
-```bash
-# Forward pagination (from oldest)
-blit history 3 --from-start 0 --limit 100    # lines 0-99
-blit history 3 --from-start 100 --limit 100  # lines 100-199
-
-# Backward pagination (from newest)
-blit history 3 --from-end 0 --limit 100      # last 100 lines
-blit history 3 --from-end 100 --limit 100    # 100 lines before those
-```
-
-Without `--from-start` or `--from-end`, all lines are returned.
-
 ## Running commands
 
 `blit start` creates a PTY and prints its session ID. Pass a command directly or omit it to start the user's default shell:
@@ -50,6 +21,8 @@ ID=$(blit start --cols 200)            # start a shell
 ```
 
 **Always start sessions with `--cols 200`** (or wider). The default is 80 columns, which causes line wrapping that makes output difficult to parse. Pass `--cols` to `show`/`history` to resize an existing session before reading.
+
+Tag sessions with `-t` so you can identify them in `list` output without tracking IDs.
 
 The command runs asynchronously — `start` returns as soon as the PTY is created, not when the command finishes. Use `--wait --timeout N` on `start` or `blit wait` separately to block until completion.
 
@@ -82,6 +55,36 @@ blit wait "$ID" --timeout 60 --pattern '\$ $'
 Exit codes: `blit wait` (and `start --wait`) exits with the PTY's exit code on normal exit, 124 on timeout, and prints the exit status to stdout (e.g. `exited(0)`, `signal(9)`). With `--pattern`, it prints the matching line instead and exits 0.
 
 **Do not assume a command has finished after `start` or `send`.** Always use `wait` to confirm.
+
+## `show` vs `history`
+
+These are the two ways to read terminal output. Getting this distinction right is critical.
+
+| | `show` | `history` |
+|---|---|---|
+| **What it returns** | Current viewport — exactly what a human would see on screen right now | Full scrollback buffer + viewport |
+| **When to use** | Quick glance at current state (e.g. is the prompt back?) | Reading command output that may have scrolled off-screen |
+| **Gotcha** | If a command produced more output than fits on screen, earlier output is lost | Without `--limit`, returns everything — can be megabytes for long-running sessions. Unless processing the output, always use `--limit` with `--from-end` or `--from-start` to cap output size. |
+
+**Rule of thumb:** Use `history --from-end 0 --limit N` when you need recent output. Use `show` when you only care about what's visible right now (e.g. checking for a prompt).
+
+### Pagination
+
+`history` supports pagination from either direction:
+
+```bash
+# Forward pagination (from oldest)
+blit history 3 --from-start 0 --limit 100    # lines 0-99
+blit history 3 --from-start 100 --limit 100  # lines 100-199
+
+# Backward pagination (from newest)
+blit history 3 --from-end 0 --limit 100      # last 100 lines
+blit history 3 --from-end 100 --limit 100    # 100 lines before those
+```
+
+Without `--from-start` or `--from-end`, all lines are returned.
+
+By default, `show` and `history` return plain text with colors stripped. Pass `--ansi` to preserve ANSI SGR escape sequences (colors, bold, underline, etc). This is useful when color carries semantic meaning (e.g. red errors in compiler output, colored diffs).
 
 ## Session lifecycle
 
@@ -132,6 +135,8 @@ blit --ssh dev-server start bash
 - `send`, `restart`, `kill`, and `close` produce no stdout on success. `send` and `kill` return an error if the session has already exited.
 - `wait` prints the exit status (e.g. `exited(0)`) on success, or the matching line when `--pattern` is used. Exit code 124 on timeout.
 - All errors go to stderr. Exit code is non-zero on failure.
+- Check exit status in `list`. The STATUS column shows `exited(0)` for success, `exited(1)` for failure, `signal(9)` for SIGKILL, etc.
+- Do not try to parse `show` or `history` output as structured data. It is terminal text with possible line wrapping and cursor artifacts.
 
 ## Escape sequences
 
@@ -153,12 +158,3 @@ For multi-byte payloads or binary data, pipe through stdin:
 printf '\x1b:wq\n' | blit send 3 -
 ```
 
-## ANSI mode
-
-By default, `show` and `history` return plain text with colors stripped. Pass `--ansi` to preserve ANSI SGR escape sequences (colors, bold, underline, etc). This is useful when color carries semantic meaning (e.g. red errors in compiler output, colored diffs).
-
-## Guidelines
-
-- Tag sessions with `-t` so you can identify them in `list` output without tracking IDs.
-- Check exit status in `list`. The STATUS column shows `exited(0)` for success, `exited(1)` for failure, `signal(9)` for SIGKILL, etc.
-- Do not try to parse `show` or `history` output as structured data. It is terminal text with possible line wrapping and cursor artifacts.

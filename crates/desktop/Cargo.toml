@@ -1,0 +1,27 @@
+[package]
+name = "blit-desktop"
+version = "0.16.3"
+edition = "2021"
+description = "blit native desktop terminal"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "blit-desktop"
+path = "src/main.rs"
+
+[dependencies]
+blit-remote = { workspace = true }
+blit-fonts = { workspace = true }
+blit-server = { workspace = true }
+blit-webrtc-forwarder = { workspace = true }
+winit = "0.30"
+wgpu = "25"
+cosmic-text = "0.12"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+libc = "0.2"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

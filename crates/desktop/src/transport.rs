@@ -1,0 +1,170 @@
+use crate::remotes::{RemoteConfig, RemoteKind};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+
+pub enum Transport {
+    Unix(tokio::net::UnixStream),
+    Tcp(tokio::net::TcpStream),
+    Ssh(tokio::process::Child),
+    Share(tokio::io::DuplexStream),
+}
+
+impl Transport {
+    pub fn split(
+        self,
+    ) -> (
+        Box<dyn AsyncRead + Unpin + Send>,
+        Box<dyn AsyncWrite + Unpin + Send>,
+    ) {
+        match self {
+            Transport::Unix(s) => {
+                let (r, w) = tokio::io::split(s);
+                (Box::new(r), Box::new(w))
+            }
+            Transport::Tcp(s) => {
+                let (r, w) = tokio::io::split(s);
+                (Box::new(r), Box::new(w))
+            }
+            Transport::Ssh(mut child) => {
+                let stdout = child.stdout.take().expect("ssh stdout");
+                let stdin = child.stdin.take().expect("ssh stdin");
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+                (Box::new(stdout), Box::new(stdin))
+            }
+            Transport::Share(s) => {
+                let (r, w) = tokio::io::split(s);
+                (Box::new(r), Box::new(w))
+            }
+        }
+    }
+}
+
+pub fn default_local_socket() -> String {
+    if let Ok(p) = std::env::var("BLIT_SOCK") {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("TMPDIR") {
+        let p = format!("{dir}/blit.sock");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
+    if let Ok(user) = std::env::var("USER") {
+        let p = format!("/tmp/blit-{user}.sock");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+        let sys = format!("/run/blit/{user}.sock");
+        if std::path::Path::new(&sys).exists() {
+            return sys;
+        }
+    }
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return format!("{dir}/blit.sock");
+    }
+    "/tmp/blit.sock".into()
+}
+
+pub async fn read_frame(r: &mut (impl AsyncRead + Unpin)) -> Option<Vec<u8>> {
+    let mut hdr = [0u8; 4];
+    r.read_exact(&mut hdr).await.ok()?;
+    let len = u32::from_le_bytes(hdr) as usize;
+    if len == 0 {
+        return Some(vec![]);
+    }
+    if len > MAX_FRAME_SIZE {
+        return None;
+    }
+    let mut buf = vec![0u8; len];
+    r.read_exact(&mut buf).await.ok()?;
+    Some(buf)
+}
+
+pub fn make_frame(payload: &[u8]) -> Vec<u8> {
+    debug_assert!(payload.len() <= u32::MAX as usize);
+    let mut v = Vec::with_capacity(4 + payload.len());
+    v.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    v.extend_from_slice(payload);
+    v
+}
+
+pub async fn write_frame(w: &mut (impl AsyncWrite + Unpin), payload: &[u8]) -> bool {
+    w.write_all(&make_frame(payload)).await.is_ok()
+}
+
+pub async fn ensure_local_server(socket_path: &str) -> Result<(), String> {
+    if std::path::Path::new(socket_path).exists() {
+        return Ok(());
+    }
+    let config = blit_server::Config {
+        shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+        shell_flags: std::env::var("BLIT_SHELL_FLAGS").unwrap_or_else(|_| "li".into()),
+        scrollback: std::env::var("BLIT_SCROLLBACK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10_000),
+        socket_path: socket_path.to_string(),
+        fd_channel: None,
+    };
+    tokio::spawn(blit_server::run(config));
+    for _ in 0..100 {
+        if std::path::Path::new(socket_path).exists() {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err("server did not create socket in time".into())
+}
+
+const DEFAULT_HUB: &str = "https://hub.blit.sh";
+
+pub async fn connect_remote(remote: &RemoteConfig, hub: &str) -> Result<Transport, String> {
+    match &remote.kind {
+        RemoteKind::Share { passphrase, hub: custom_hub } => {
+            let h = custom_hub.as_deref().unwrap_or(if hub.is_empty() { DEFAULT_HUB } else { hub });
+            let hub_url = blit_webrtc_forwarder::normalize_hub(h);
+            let stream = blit_webrtc_forwarder::client::connect(passphrase, &hub_url)
+                .await
+                .map_err(|e| format!("share: {e}"))?;
+            Ok(Transport::Share(stream))
+        }
+        RemoteKind::Unix { socket } => {
+            let path = socket.clone().unwrap_or_else(default_local_socket);
+            if !std::path::Path::new(&path).exists() {
+                ensure_local_server(&path).await?;
+            }
+            Ok(Transport::Unix(
+                tokio::net::UnixStream::connect(&path)
+                    .await
+                    .map_err(|e| format!("cannot connect to {path}: {e}"))?,
+            ))
+        }
+        RemoteKind::Tcp { address } => {
+            let s = tokio::net::TcpStream::connect(address.as_str())
+                .await
+                .map_err(|e| format!("cannot connect to {address}: {e}"))?;
+            let _ = s.set_nodelay(true);
+            Ok(Transport::Tcp(s))
+        }
+        RemoteKind::Ssh { host } => {
+            let bridge = r#"sh -c 'if [ -n "$BLIT_SOCK" ]; then S="$BLIT_SOCK"; elif [ -n "$TMPDIR" ] && [ -S "$TMPDIR/blit.sock" ]; then S="$TMPDIR/blit.sock"; elif [ -S "/tmp/blit-$(id -un).sock" ]; then S="/tmp/blit-$(id -un).sock"; elif [ -S "/run/blit/$(id -un).sock" ]; then S="/run/blit/$(id -un).sock"; elif [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/blit.sock" ]; then S="$XDG_RUNTIME_DIR/blit.sock"; else S=/tmp/blit.sock; fi; if ! [ -S "$S" ]; then if command -v blit >/dev/null 2>&1; then blit server &  i=0; while ! [ -S "$S" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; elif command -v blit-server >/dev/null 2>&1; then blit-server & i=0; while ! [ -S "$S" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; fi; fi; exec nc -U "$S" 2>/dev/null || socat - "UNIX-CONNECT:$S"'"#;
+            let child = tokio::process::Command::new("ssh")
+                .arg("-T")
+                .arg("-o").arg("ControlMaster=auto")
+                .arg("-o").arg("ControlPath=/tmp/blit-ssh-%r@%h:%p")
+                .arg("-o").arg("ControlPersist=300")
+                .arg(host)
+                .arg("--")
+                .arg(bridge)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("ssh: {e}"))?;
+            Ok(Transport::Ssh(child))
+        }
+    }
+}

@@ -11,6 +11,7 @@ members = [
     "crates/fonts",
     "crates/webserver",
     "crates/webrtc-forwarder",
+    "crates/desktop",
 ]
 
 [workspace.package]

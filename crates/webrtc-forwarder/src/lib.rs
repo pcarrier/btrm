@@ -22,7 +22,7 @@ pub fn default_local_ip() -> Option<std::net::IpAddr> {
     probe.connect("192.0.2.1:80").ok()?;
     Some(probe.local_addr().ok()?.ip())
 }
-pub const DEFAULT_URL_TEMPLATE: &str = "https://blit.sh/#{secret}";
+const DEFAULT_MESSAGE_TEMPLATE: &str = "https://blit.sh/#{secret}";
 
 pub fn normalize_hub(raw: &str) -> String {
     let trimmed = raw.trim_end_matches('/');
@@ -45,7 +45,7 @@ pub struct Config {
     pub sock_path: String,
     pub signal_url: String,
     pub passphrase: String,
-    pub url_template: Option<String>,
+    pub message_override: Option<String>,
     pub quiet: bool,
 }
 
@@ -69,14 +69,46 @@ struct PeerState {
     established: Arc<AtomicBool>,
 }
 
+struct Message {
+    template: String,
+    fatal: bool,
+}
+
+async fn fetch_message(signal_url_base: &str) -> Option<Message> {
+    let base = signal_url_base
+        .trim_end_matches('/')
+        .replace("wss://", "https://")
+        .replace("ws://", "http://");
+    let url = format!("{base}/message");
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("User-Agent", format!("blit/{}", env!("CARGO_PKG_VERSION")))
+        .send()
+        .await
+        .ok()?;
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let template = body.get("template")?.as_str()?.to_string();
+    let fatal = body.get("fatal").and_then(|v| v.as_bool()).unwrap_or(false);
+    Some(Message { template, fatal })
+}
+
 pub async fn run(config: Config) {
     let signing_key = derive_signing_key(&config.passphrase);
     let public_key_hex = hex_encode(signing_key.verifying_key().as_bytes());
 
     if !config.quiet {
-        if let Some(template) = &config.url_template {
-            let url = template.replace("{secret}", &config.passphrase);
-            println!("{url}");
+        let (template, fatal) = match &config.message_override {
+            Some(t) => (t.clone(), false),
+            None => match fetch_message(&config.signal_url).await {
+                Some(msg) => (msg.template, msg.fatal),
+                None => (DEFAULT_MESSAGE_TEMPLATE.to_string(), false),
+            },
+        };
+        let rendered = template.replace("{secret}", &config.passphrase);
+        println!("{rendered}");
+        if fatal {
+            std::process::exit(1);
         }
     }
 

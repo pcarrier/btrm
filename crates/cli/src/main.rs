@@ -265,7 +265,7 @@ async fn main() {
                 sock_path,
                 signal_url,
                 passphrase,
-                url_template: Some(blit_webrtc_forwarder::DEFAULT_URL_TEMPLATE.to_string()),
+                message_override: None,
                 quiet,
             })
             .await;

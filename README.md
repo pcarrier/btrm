@@ -190,7 +190,7 @@ sudo systemctl enable --now blit@alice.socket
 
 ## Contributing
 
-Building from source, running tests, dev environment setup, code conventions, and release process are all covered in [CONTRIBUTING.md](CONTRIBUTING.md).
+Building from source, running tests, dev environment setup, code conventions, and release process are all covered in [CONTRIBUTING.md](CONTRIBUTING.md). CI/CD pipelines, the install site, and the signaling hub are documented in [SERVICES.md](SERVICES.md).
 
 ## Docker sandbox
 

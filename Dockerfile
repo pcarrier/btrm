@@ -10,11 +10,12 @@ RUN cargo build --release -p blit-server -p blit-gateway
 
 FROM alpine:latest
 RUN apk add --no-cache \
-    coreutils procps curl mpv fish bash \
+    coreutils procps curl fish bash \
     grep sed gawk findutils less \
     htop vim git jq wget tree file
 COPY --from=build /src/target/release/blit-server /usr/local/bin/
 COPY --from=build /src/target/release/blit-gateway /usr/local/bin/
+COPY config/fish/config.fish /etc/fish/config.fish
 ENV SHELL=/usr/bin/fish
 EXPOSE 3264
 ENTRYPOINT ["sh", "-c", "blit-server & exec blit-gateway"]

@@ -1460,7 +1460,7 @@ async fn cleanup_pty(pty_id: u16, state: &AppState) {
         }
         pty.exited = true;
         // Reset mouse mode etc. so the client stops sending mouse events
-        // to the now-dead shell (e.g. mpv exits without disabling ?1003).
+        // to the now-dead shell (e.g. a program exits without disabling ?1003).
         pty.driver.reset_modes();
         unsafe {
             libc::kill(pty.child_pid, libc::SIGHUP);

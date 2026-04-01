@@ -11,34 +11,6 @@ description: >
 
 Drive terminal sessions programmatically through stateless CLI subcommands. Each subcommand opens a fresh connection, performs one operation, and exits.
 
-## Quick reference
-
-```bash
-blit list                                 # TSV: ID  TAG  TITLE  STATUS
-blit start --cols 200                     # start default shell, print session ID
-blit start --cols 200 htop                # start a specific command
-blit start -t build --cols 200 make -j8   # tag it for later reference
-blit start --rows 40 --cols 200 htop      # control terminal dimensions
-blit start --cols 200 --wait --timeout 60 make -j8  # start and block until exit
-blit show 3                               # current viewport text (plain)
-blit show 3 --ansi                        # current viewport with ANSI colors
-blit history 3                            # full scrollback + viewport
-blit history 3 --from-end 0 --limit 50    # last 50 lines
-blit history 3 --from-start 0 --limit 50  # first 50 lines
-blit send 3 "ls -la\n"                    # type a command (note the \n)
-blit show 3 --rows 40 --cols 200          # resize before capturing viewport
-blit history 3 --cols 200                 # resize before reading scrollback
-blit wait 3 --timeout 30                  # block until session exits
-blit wait 3 --timeout 60 --pattern 'BUILD (SUCCESS|FAILURE)'  # wait for output pattern
-blit restart 3                            # restart an exited session
-blit close 3                              # destroy the session
-blit server                               # run blit-server in-process
-blit share                                # share terminal via WebRTC (auto-starts server)
-blit share --passphrase mysecret          # share with a specific passphrase
-blit share --verbose                      # share with connection diagnostics on stderr
-```
-
-**Always start sessions with `--cols 200`** (or wider). The default is 80 columns, which causes line wrapping that makes output difficult to parse. Pass `--cols` to `show`/`history` to resize an existing session before reading.
 
 ## `show` vs `history`
 
@@ -52,6 +24,22 @@ These are the two ways to read terminal output. Getting this distinction right i
 
 **Rule of thumb:** Use `history --from-end 0 --limit N` when you need recent output. Use `show` when you only care about what's visible right now (e.g. checking for a prompt).
 
+### Pagination
+
+`history` supports pagination from either direction:
+
+```bash
+# Forward pagination (from oldest)
+blit history 3 --from-start 0 --limit 100    # lines 0-99
+blit history 3 --from-start 100 --limit 100  # lines 100-199
+
+# Backward pagination (from newest)
+blit history 3 --from-end 0 --limit 100      # last 100 lines
+blit history 3 --from-end 100 --limit 100    # 100 lines before those
+```
+
+Without `--from-start` or `--from-end`, all lines are returned.
+
 ## Running commands
 
 `blit start` creates a PTY and prints its session ID. Pass a command directly or omit it to start the user's default shell:
@@ -60,6 +48,8 @@ These are the two ways to read terminal output. Getting this distinction right i
 ID=$(blit start --cols 200 ls -la)     # run a command
 ID=$(blit start --cols 200)            # start a shell
 ```
+
+**Always start sessions with `--cols 200`** (or wider). The default is 80 columns, which causes line wrapping that makes output difficult to parse. Pass `--cols` to `show`/`history` to resize an existing session before reading.
 
 The command runs asynchronously — `start` returns as soon as the PTY is created, not when the command finishes. Use `--wait --timeout N` on `start` or `blit wait` separately to block until completion.
 
@@ -99,6 +89,7 @@ Sessions persist as long as the blit daemon is running. They are **not** cleaned
 
 - A session stays alive until you `close` it or the process inside it exits.
 - If the process exits on its own, the session remains in the `list` output with an `exited(N)` status. It still consumes resources until explicitly closed.
+- Use `blit kill ID [SIGNAL]` to send a signal to the session's leader process without tearing down the session. Accepts signal names (`TERM`, `KILL`, `INT`, `HUP`, `USR1`, etc.) or numbers (`9`, `15`). Defaults to `TERM`. Use this instead of `close` when you want to signal the process but keep the session around (e.g. to read its final output or wait for it to exit).
 - Use `blit restart ID` to re-run an exited session with its original command, size, and tag. Fails if the session is still running. Restart reuses the same session ID but does **not** clear terminal scrollback — old output persists and new output writes on top. Use `close` + `start` if you need a clean slate.
 - Sessions do **not** persist across daemon restarts.
 - **Clean up after yourself.** Always `close` sessions when you are done. Leaked sessions accumulate and waste resources.
@@ -138,7 +129,7 @@ blit --ssh dev-server start bash
   - STATUS column: `running`, `exited(N)` (normal exit with code N), `signal(N)` (killed by signal N), or `exited` (exit status unknown).
 - `start` prints a single integer (the new session ID) to stdout.
 - `show` and `history` print terminal text to stdout, one line per terminal row. Trailing whitespace per row is trimmed.
-- `send`, `restart`, and `close` produce no stdout on success. `send` returns an error if the session has exited.
+- `send`, `restart`, `kill`, and `close` produce no stdout on success. `send` and `kill` return an error if the session has already exited.
 - `wait` prints the exit status (e.g. `exited(0)`) on success, or the matching line when `--pattern` is used. Exit code 124 on timeout.
 - All errors go to stderr. Exit code is non-zero on failure.
 
@@ -161,22 +152,6 @@ For multi-byte payloads or binary data, pipe through stdin:
 ```bash
 printf '\x1b:wq\n' | blit send 3 -
 ```
-
-## Pagination
-
-`history` supports pagination from either direction:
-
-```bash
-# Forward pagination (from oldest)
-blit history 3 --from-start 0 --limit 100    # lines 0-99
-blit history 3 --from-start 100 --limit 100  # lines 100-199
-
-# Backward pagination (from newest)
-blit history 3 --from-end 0 --limit 100      # last 100 lines
-blit history 3 --from-end 100 --limit 100    # 100 lines before those
-```
-
-Without `--from-start` or `--from-end`, all lines are returned.
 
 ## ANSI mode
 

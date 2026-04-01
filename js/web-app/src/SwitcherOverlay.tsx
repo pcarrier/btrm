@@ -425,6 +425,9 @@ export function SwitcherOverlay({
   );
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [layoutMode, setLayoutMode] = useState(false);
+  const [killPickerSessionId, setKillPickerSessionId] = useState<
+    SessionId | null
+  >(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -794,6 +797,7 @@ export function SwitcherOverlay({
 
   useEffect(() => {
     setSelectedIdx(0);
+    setKillPickerSessionId(null);
   }, [query]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -1305,6 +1309,79 @@ export function SwitcherOverlay({
                             )}
                           </div>
 
+
+                          {item.type === "session" &&
+                            !item.exited &&
+                            (killPickerSessionId === item.sessionId ? (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 2,
+                                  alignSelf: "center",
+                                }}
+                              >
+                                {(
+                                  [
+                                    ["TERM", 15],
+                                    ["KILL", 9],
+                                    ["INT", 2],
+                                    ["HUP", 1],
+                                    ["USR1", 10],
+                                    ["USR2", 12],
+                                  ] as const
+                                ).map(([name, sig]) => (
+                                  <button
+                                    key={name}
+                                    type="button"
+                                    title={name}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      workspace.killSession(
+                                        item.sessionId,
+                                        sig,
+                                      );
+                                      setKillPickerSessionId(null);
+                                    }}
+                                    style={{
+                                      background: railBg,
+                                      border: `1px solid ${theme.subtleBorder}`,
+                                      color: "inherit",
+                                      cursor: "pointer",
+                                      opacity: 0.75,
+                                      fontSize: fsSm,
+                                      padding: "1px 4px",
+                                      fontFamily: "inherit",
+                                      borderRadius: 0,
+                                    }}
+                                  >
+                                    {name}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                title={t("switcher.kill")}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setKillPickerSessionId(item.sessionId);
+                                }}
+                                style={{
+                                  background: railBg,
+                                  border: `1px solid ${theme.subtleBorder}`,
+                                  color: "inherit",
+                                  cursor: "pointer",
+                                  opacity: 0.75,
+                                  fontSize: fsSm,
+                                  padding: "1px 5px",
+                                  fontFamily: "inherit",
+                                  alignSelf: "center",
+                                  borderRadius: 0,
+                                }}
+                              >
+                                k
+                              </button>
+                            ))}
                           {item.type === "session" && (
                             <button
                               type="button"

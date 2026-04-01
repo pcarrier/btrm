@@ -12,8 +12,8 @@ use winit::window::{Window, WindowId};
 use crate::connection::{Command, ConnectionManager, ConnectionStatus, ServerEvent, SessionKey};
 use crate::input::{self, AppAction};
 use crate::overlay::{self, OverlayKind, SwitcherOverlay};
-use crate::palette::{self, Palette};
-use crate::remotes::RemoteConfig;
+use crate::palette::{find_palette, Palette};
+use crate::remotes::{RemoteConfig, UserConfig};
 use crate::renderer::Renderer;
 use crate::terminal::{self, Terminal};
 
@@ -45,7 +45,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(remotes: Vec<RemoteConfig>, hub: String, proxy: EventLoopProxy<()>) -> Self {
+    pub fn new(remotes: Vec<RemoteConfig>, hub: String, proxy: EventLoopProxy<()>, user_config: UserConfig) -> Self {
         Self {
             window: None,
             surface: None,
@@ -59,9 +59,9 @@ impl App {
             exited: HashSet::new(),
             connection_mgr: ConnectionManager::new(proxy),
             overlay: None,
-            palette: &palette::PALETTES[0],
-            font_family: "monospace".into(),
-            font_size: 14.0,
+            palette: find_palette(&user_config.palette),
+            font_family: user_config.font_family,
+            font_size: user_config.font_size,
             focused: None,
             lru: Vec::new(),
             modifiers: ModifiersState::empty(),

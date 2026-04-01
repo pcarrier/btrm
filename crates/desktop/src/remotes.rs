@@ -2,6 +2,131 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
+pub struct UserConfig {
+    pub font_family: String,
+    pub font_size: f32,
+    pub palette: String,
+    pub layouts: Vec<LayoutEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LayoutEntry {
+    pub name: String,
+    pub dsl: String,
+}
+
+impl Default for UserConfig {
+    fn default() -> Self {
+        Self {
+            font_family: "monospace".into(),
+            font_size: 14.0,
+            palette: "default".into(),
+            layouts: Vec::new(),
+        }
+    }
+}
+
+pub fn default_blit_conf_path() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        return PathBuf::from(xdg).join("blit").join("blit.conf");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".config").join("blit").join("blit.conf");
+    }
+    PathBuf::from("/etc/blit/blit.conf")
+}
+
+pub fn load_user_config(path: Option<&Path>) -> UserConfig {
+    let p = match path {
+        Some(p) => p.to_path_buf(),
+        None => default_blit_conf_path(),
+    };
+    let content = match std::fs::read_to_string(&p) {
+        Ok(c) => c,
+        Err(_) => return UserConfig::default(),
+    };
+    let mut cfg = UserConfig::default();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(eq) = line.find('=') {
+            let key = line[..eq].trim();
+            let val = line[eq + 1..].trim();
+            match key {
+                "blit.fontFamily" => cfg.font_family = val.to_string(),
+                "blit.fontSize" => {
+                    if let Ok(sz) = val.parse::<f32>() {
+                        cfg.font_size = sz;
+                    }
+                }
+                "blit.palette" => cfg.palette = val.to_string(),
+                "blit.layouts" => cfg.layouts = parse_layouts_json(val),
+                _ => {}
+            }
+        }
+    }
+    cfg
+}
+
+fn parse_layouts_json(val: &str) -> Vec<LayoutEntry> {
+    let mut entries = Vec::new();
+    let val = val.trim();
+    if !val.starts_with('[') {
+        return entries;
+    }
+    let mut depth = 0i32;
+    let mut obj_start = None;
+    for (i, ch) in val.char_indices() {
+        match ch {
+            '{' => {
+                if depth == 1 {
+                    obj_start = Some(i);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(start) = obj_start.take() {
+                        let obj = &val[start..=i];
+                        if let Some(entry) = parse_layout_obj(obj) {
+                            entries.push(entry);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    entries
+}
+
+fn parse_layout_obj(obj: &str) -> Option<LayoutEntry> {
+    let extract = |key: &str| -> Option<String> {
+        let needle = format!("\"{key}\":\"");
+        if let Some(start) = obj.find(&needle) {
+            let rest = &obj[start + needle.len()..];
+            if let Some(end) = rest.find('"') {
+                return Some(rest[..end].to_string());
+            }
+        }
+        let needle2 = format!("\"{key}\" : \"");
+        if let Some(start) = obj.find(&needle2) {
+            let rest = &obj[start + needle2.len()..];
+            if let Some(end) = rest.find('"') {
+                return Some(rest[..end].to_string());
+            }
+        }
+        None
+    };
+    let name = extract("name")?;
+    let dsl = extract("dsl")?;
+    Some(LayoutEntry { name, dsl })
+}
+
+#[derive(Clone, Debug)]
 pub struct RemoteConfig {
     pub name: String,
     pub kind: RemoteKind,

@@ -189,7 +189,7 @@ Building from source, running tests, dev environment setup, code conventions, an
 A minimal demo image is published to Docker Hub as `grab/blit-demo`. It runs unprivileged and launches `blit share` on startup, printing a URL anyone can open.
 
 ```bash
-docker run --rm -it grab/blit-demo
+docker run --rm grab/blit-demo
 ```
 
 The image includes fish (default shell), busybox, htop, neovim, git, curl, jq, and tree.
@@ -199,7 +199,7 @@ To build locally:
 ```bash
 nix build .#demo-image
 docker load < result
-docker run --rm -it grab/blit-demo
+docker run --rm grab/blit-demo
 ```
 
 ## nix-darwin

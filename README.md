@@ -2,6 +2,14 @@
 
 Terminal streaming for browsers and AI agents. One binary, nothing to configure.
 
+Try it now — no install needed:
+
+```bash
+docker run --rm grab/blit-demo
+```
+
+Or install and run locally:
+
 ```bash
 curl https://install.blit.sh | sh
 blit # opens a browser
@@ -186,13 +194,7 @@ Building from source, running tests, dev environment setup, code conventions, an
 
 ## Docker sandbox
 
-A minimal demo image is published to Docker Hub as `grab/blit-demo`. It runs unprivileged and launches `blit share` on startup, printing a URL anyone can open.
-
-```bash
-docker run --rm grab/blit-demo
-```
-
-The image includes fish (default shell), busybox, htop, neovim, git, curl, jq, and tree.
+The `grab/blit-demo` image runs unprivileged and launches `blit share` on startup. It includes fish, busybox, htop, neovim, git, curl, jq, and tree.
 
 To build locally:
 

@@ -387,7 +387,7 @@ async fn cmd_upgrade() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .ok_or("cannot determine binary directory")?;
 
-    let script = reqwest::get("https://blit.sh/install")
+    let script = reqwest::get("https://install.blit.sh")
         .await?
         .error_for_status()?
         .text()

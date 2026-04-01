@@ -142,7 +142,7 @@ is generated.
 
 _upgrade_
 Upgrade _blit_ to the latest version. Downloads and runs the install
-script from _https://blit.sh/install_, installing into the same
+script from _https://install.blit.sh_, installing into the same
 directory as the currently running binary.
 
 # ENVIRONMENT

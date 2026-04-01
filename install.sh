@@ -1,9 +1,9 @@
 #!/bin/sh
 # Install blit — https://blit.sh
-# Usage: curl https://blit.sh/install | sh
+# Usage: curl https://install.blit.sh | sh
 set -eu
 
-REPO="https://repo.blit.sh"
+REPO="https://install.blit.sh"
 INSTALL_DIR="${BLIT_INSTALL_DIR:-/usr/local/bin}"
 
 main() {

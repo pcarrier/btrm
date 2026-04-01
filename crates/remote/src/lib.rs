@@ -67,6 +67,9 @@ pub const CREATE2_HAS_COMMAND: u8 = 1 << 1;
 pub const C2S_READ: u8 = 0x19;
 pub const READ_ANSI: u8 = 1 << 0;
 pub const READ_TAIL: u8 = 1 << 1;
+/// Send a signal to a PTY's session leader: [0x1A][pty_id:2][signal:4]
+/// signal is a raw libc signal number (e.g. SIGTERM=15, SIGKILL=9).
+pub const C2S_KILL: u8 = 0x1A;
 
 pub const S2C_UPDATE: u8 = 0x00;
 pub const S2C_CREATED: u8 = 0x01;
@@ -1196,6 +1199,7 @@ pub enum ServerMsg<'a> {
 pub struct PtyListEntry<'a> {
     pub pty_id: u16,
     pub tag: &'a str,
+    pub command: &'a str,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1285,7 +1289,21 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
                 }
                 let tag = std::str::from_utf8(&data[offset..offset + tag_len]).unwrap_or_default();
                 offset += tag_len;
-                entries.push(PtyListEntry { pty_id, tag });
+                let command = if offset + 2 <= data.len() {
+                    let cmd_len =
+                        u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
+                    offset += 2;
+                    let cmd = if offset + cmd_len <= data.len() {
+                        std::str::from_utf8(&data[offset..offset + cmd_len]).unwrap_or_default()
+                    } else {
+                        ""
+                    };
+                    offset += cmd_len;
+                    cmd
+                } else {
+                    ""
+                };
+                entries.push(PtyListEntry { pty_id, tag, command });
             }
             Some(ServerMsg::List { entries })
         }
@@ -1478,6 +1496,14 @@ pub fn msg_close(pty_id: u16) -> Vec<u8> {
     let mut msg = Vec::with_capacity(3);
     msg.push(C2S_CLOSE);
     msg.extend_from_slice(&pty_id.to_le_bytes());
+    msg
+}
+
+pub fn msg_kill(pty_id: u16, signal: i32) -> Vec<u8> {
+    let mut msg = Vec::with_capacity(7);
+    msg.push(C2S_KILL);
+    msg.extend_from_slice(&pty_id.to_le_bytes());
+    msg.extend_from_slice(&signal.to_le_bytes());
     msg
 }
 

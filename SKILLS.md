@@ -128,7 +128,8 @@ blit --ssh dev-server start bash
 
 ## Output conventions
 
-- `list` prints tab-separated values with a header row. Parse on `\t`.
+- `list` prints tab-separated values with a header row (`ID`, `TAG`, `TITLE`, `COMMAND`, `STATUS`). Parse on `\t`.
+  - COMMAND column: the command passed to `start`, or empty for default-shell sessions.
   - STATUS column: `running`, `exited(N)` (normal exit with code N), `signal(N)` (killed by signal N), or `exited` (exit status unknown).
 - `start` prints a single integer (the new session ID) to stdout.
 - `show` and `history` print terminal text to stdout, one line per terminal row. Trailing whitespace per row is trimmed.

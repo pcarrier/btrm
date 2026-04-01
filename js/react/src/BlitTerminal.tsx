@@ -1225,8 +1225,7 @@ export function BlitTerminal({
         clearSelection();
         selecting = true;
         selectingRef.current = true;
-        // Don't freeze yet — freeze on first drag movement so clicks
-        // don't pause full-screen terminal apps.
+
         const cell = mouseToCell(e);
         const detail = Math.min(e.detail, 3) as 1 | 2 | 3;
         selGranularity = detail;
@@ -1282,10 +1281,6 @@ export function BlitTerminal({
         }
       }
       if (selecting) {
-        // Freeze on first drag so selection text is stable, but not
-        // on mousedown alone (which would pause full-screen terminal apps).
-        if (sessionId !== null && blitConn && !blitConn.isFrozen(sessionId))
-          blitConn.freeze(sessionId);
 
         const rect = canvas.getBoundingClientRect();
         if (e.clientY < rect.top) {
@@ -1350,7 +1345,6 @@ export function BlitTerminal({
           copySelection();
         }
         clearSelection();
-        if (sessionId !== null && blitConn) blitConn.thaw(sessionId);
       }
       if (canvas.contains(e.target as Node)) {
         inputRef.current?.focus();
@@ -1462,7 +1456,6 @@ export function BlitTerminal({
         selecting = false;
         selectingRef.current = false;
         clearSelection();
-        if (sessionId !== null && blitConn) blitConn.thaw(sessionId);
       }
     };
 

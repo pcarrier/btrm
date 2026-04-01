@@ -6,20 +6,19 @@ import {
   useRef,
   type KeyboardEvent,
 } from "react";
+import { BlitTerminal, useBlitWorkspace } from "@blit-sh/react";
+import type { BlitTerminalHandle } from "@blit-sh/react";
 import {
-  BlitTerminal,
   SEARCH_SOURCE_SCROLLBACK,
   SEARCH_SOURCE_TITLE,
   SEARCH_SOURCE_VISIBLE,
-  useBlitWorkspace,
-} from "@blit-sh/react";
+} from "@blit-sh/core";
 import type {
   BlitSearchResult,
   BlitSession,
-  BlitTerminalHandle,
   SessionId,
   TerminalPalette,
-} from "@blit-sh/react";
+} from "@blit-sh/core";
 import { OverlayBackdrop, OverlayPanel } from "./Overlay";
 import {
   overlayChromeStyles,
@@ -36,7 +35,7 @@ import {
   type BSPAssignments,
   type BSPLayout,
 } from "./bsp/layout";
-import { leafCount } from "./bsp/dsl";
+import { leafCount } from "@blit-sh/core/bsp";
 import { t, tp } from "./i18n";
 
 const SOURCE_LABEL: Record<number, string> = {

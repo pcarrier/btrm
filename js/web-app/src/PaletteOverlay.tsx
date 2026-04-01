@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { PALETTES } from "@blit-sh/react";
-import type { TerminalPalette } from "@blit-sh/react";
+import { PALETTES } from "@blit-sh/core";
+import type { TerminalPalette } from "@blit-sh/core";
 import { themeFor, ui, uiScale } from "./theme";
 import { OverlayBackdrop, OverlayHeader, OverlayPanel } from "./Overlay";
 import { t, tp } from "./i18n";

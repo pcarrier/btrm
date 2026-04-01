@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { WebSocketTransport, WebTransportTransport } from "@blit-sh/react";
-import type { BlitTransport } from "@blit-sh/react";
-import type { BlitWasmModule } from "@blit-sh/react";
+import { WebSocketTransport, WebTransportTransport } from "@blit-sh/core";
+import type { BlitTransport } from "@blit-sh/core";
+import type { BlitWasmModule } from "@blit-sh/core";
 import {
   PASS_KEY,
   readStorage,
@@ -13,7 +13,7 @@ import {
 import { themeFor } from "./theme";
 import { t as i18n } from "./i18n";
 import { Workspace } from "./Workspace";
-import { createShareTransport } from "./webrtc-share";
+import { createShareTransport } from "@blit-sh/core";
 
 const DEFAULT_HUB = "wss://hub.blit.sh";
 

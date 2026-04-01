@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { PALETTES, DEFAULT_FONT } from "@blit-sh/react";
-import type { TerminalPalette } from "@blit-sh/react";
+import { PALETTES, DEFAULT_FONT } from "@blit-sh/core";
+import type { TerminalPalette } from "@blit-sh/core";
 
 export const PASS_KEY = "blit.passphrase";
 export const HOST_KEY = "blit.host";

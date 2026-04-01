@@ -1,5 +1,5 @@
 import type React from "react";
-import type { BlitSession, TerminalPalette } from "@blit-sh/react";
+import type { BlitSession, TerminalPalette } from "@blit-sh/core";
 
 export function sessionName(s: BlitSession): string {
   const label = s.title ?? s.command;

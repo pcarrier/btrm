@@ -3,7 +3,7 @@ import type {
   BlitSession,
   ConnectionStatus,
   TerminalPalette,
-} from "@blit-sh/react";
+} from "@blit-sh/core";
 import { formatBw } from "./useMetrics";
 import type { Metrics, RenderSample, NetSample } from "./useMetrics";
 import { sessionName, themeFor, ui, uiScale, z } from "./theme";

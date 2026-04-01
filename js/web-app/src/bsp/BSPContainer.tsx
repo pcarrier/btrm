@@ -12,11 +12,10 @@ import {
   useBlitConnection,
   useBlitSessions,
   useBlitWorkspace,
-  type SessionId,
-  type TerminalPalette,
 } from "@blit-sh/react";
-import type { BSPNode, BSPChild, BSPSplit, BSPLeaf } from "./dsl";
-import { leafCount, serializeDSL } from "./dsl";
+import type { SessionId, TerminalPalette } from "@blit-sh/core";
+import type { BSPNode, BSPChild, BSPSplit, BSPLeaf } from "@blit-sh/core/bsp";
+import { leafCount, serializeDSL } from "@blit-sh/core/bsp";
 import type { BSPAssignments, BSPLayout } from "./layout";
 import {
   adjustWeights,

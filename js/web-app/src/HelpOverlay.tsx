@@ -1,4 +1,4 @@
-import type { TerminalPalette } from "@blit-sh/react";
+import type { TerminalPalette } from "@blit-sh/core";
 import { themeFor, ui, uiScale } from "./theme";
 import { OverlayBackdrop, OverlayHeader, OverlayPanel } from "./Overlay";
 import { t } from "./i18n";

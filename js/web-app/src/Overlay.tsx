@@ -4,7 +4,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from "react";
-import type { TerminalPalette } from "@blit-sh/react";
+import type { TerminalPalette } from "@blit-sh/core";
 import { layout, overlayChromeStyles, themeFor, uiScale } from "./theme";
 import { t } from "./i18n";
 

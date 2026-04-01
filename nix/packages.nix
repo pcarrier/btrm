@@ -204,7 +204,7 @@
       };
 
       demoImage = let
-        fishConfig = pkgs.writeTextDir "etc/fish/config.fish" ''
+        fishConfig = pkgs.writeTextDir "home/blit/.config/fish/config.fish" ''
           function fish_greeting
               cat /etc/blit-welcome 2>/dev/null
           end
@@ -241,7 +241,7 @@
         ];
         fakeRootCommands = ''
           mkdir -p ./home/blit ./tmp
-          chown 1000:1000 ./home/blit
+          chown -R 1000:1000 ./home/blit
           chmod 1777 ./tmp
         '';
         config = {
@@ -250,7 +250,6 @@
             "USER=blit"
             "HOME=/home/blit"
             "TERM=xterm-256color"
-            "XDG_CONFIG_DIRS=/etc"
           ];
           User = "1000:1000";
           WorkingDir = "/home/blit";

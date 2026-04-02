@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, type FormEvent } from "react";
 import "./landing.css";
 
-const INSTALL_CMD = "curl -fsS https://install.blit.sh | sh";
+const INSTALL_CMD = "curl -f https://install.blit.sh | sh";
 
 function JoinForm() {
   const [secret, setSecret] = useState("");
@@ -205,7 +205,7 @@ export function Landing() {
         <section className="demo-section">
           <div className="demo-block">
             <div className="demo-label">Get started</div>
-            <pre className="demo-pre"><code>{`$ curl -fsS https://install.blit.sh | sh
+            <pre className="demo-pre"><code>{`$ curl -f https://install.blit.sh | sh
 $ blit                    # opens a browser
 $ blit share              # share via WebRTC
 $ blit --ssh myhost       # remote host`}</code></pre>

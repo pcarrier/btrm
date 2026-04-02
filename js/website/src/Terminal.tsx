@@ -288,15 +288,15 @@ function TabShell({
   const statusText =
     connection?.status === "connected"
       ? visibleSessions.length === 0
-        ? "Waiting for sessions..."
+        ? "Connected — waiting for terminal sessions..."
         : null
       : connection?.status === "connecting"
-        ? "Connecting..."
+        ? "Connecting — waiting for blit share..."
         : connection?.status === "error"
           ? `Error: ${connection.error ?? "unknown"}`
           : connection?.status === "disconnected"
             ? "Disconnected"
-            : "Initializing...";
+            : "Connecting...";
 
   return (
     <div

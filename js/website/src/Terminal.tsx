@@ -509,7 +509,9 @@ function TabShell({
             borderBottom: `1px solid ${border}`,
             background: bg,
             flexShrink: 0,
-            minHeight: 36,
+            minHeight: 42,
+            padding: "0 4px",
+            gap: 2,
           }}
         >
           <div style={{ display: "flex", flex: 1, overflowX: "auto", alignItems: "stretch" }}>
@@ -521,14 +523,15 @@ function TabShell({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 4,
-                  padding: "0 8px 0 12px",
+                  gap: 6,
+                  padding: "0 14px",
                   cursor: "pointer",
                   fontSize: 13,
                   fontFamily: "'Fira Code', monospace",
                   color: active ? fg : dimFg,
                   borderBottom: active ? `2px solid ${accent}` : "2px solid transparent",
-                  background: "transparent",
+                  background: active ? rgba(palette.fg, dark ? 0.06 : 0.04) : "transparent",
+                  borderRadius: "6px 6px 0 0",
                   transition: "background 0.15s",
                   whiteSpace: "nowrap",
                   userSelect: "none",
@@ -618,6 +621,26 @@ function TabShell({
           </button>
           </div>
           <ShareButton passphrase={passphrase} dimFg={dimFg} tabHover={tabHover} />
+          <button
+            onClick={() => setShowShortcuts(true)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: dimFg,
+              cursor: "pointer",
+              padding: "0 10px",
+              fontSize: 14,
+              fontFamily: "'Fira Code', monospace",
+              fontWeight: 700,
+              flexShrink: 0,
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = tabHover)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            title="Keyboard shortcuts"
+          >
+            ?
+          </button>
         </div>
       )}
 

@@ -388,8 +388,6 @@ function TabShell({
     [workspace],
   );
 
-  const [showShortcuts, setShowShortcuts] = useState(false);
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -404,9 +402,6 @@ function TabShell({
                 (idx - 1 + visibleSessions.length) % visibleSessions.length
               ];
         switchTab(next.id);
-      } else if (mod && e.key === "?") {
-        e.preventDefault();
-        setShowShortcuts((v) => !v);
       }
     };
     window.addEventListener("keydown", handler, true);

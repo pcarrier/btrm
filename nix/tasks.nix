@@ -356,20 +356,10 @@ in {
 
   lint = pkgs.writeShellApplication {
     name = "blit-lint";
-    runtimeInputs = [ rustToolchain pkgs.prettier ];
     text = ''
-      echo "=== Setting up web-app dist ==="
-      mkdir -p js/web-app/dist
-      cp ${webAppDist}/index.html js/web-app/dist/
-
-      echo "=== cargo fmt --check ==="
-      cargo fmt -- --check
+      ${fmt}/bin/blit-fmt --check
       echo ""
-      echo "=== prettier --check ==="
-      prettier --check .
-      echo ""
-      echo "=== Clippy ==="
-      cargo clippy --workspace -- -D warnings
+      ${clippy}/bin/blit-clippy
     '';
   };
 

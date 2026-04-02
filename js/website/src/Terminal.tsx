@@ -149,8 +149,7 @@ const SHORTCUTS: [string, string][] = [
   ["Mod+Shift+Enter", "New terminal"],
   ["Mod+[ / ]", "Previous / next tab"],
   ["Mod+Shift+D", "Toggle debug panel"],
-  ["Mod+Shift+?", "Toggle this panel"],
-  ["F1", "Toggle this panel"],
+  ["Ctrl+?", "Toggle this panel"],
 ];
 
 const MOD_LABEL = navigator.userAgent.includes("Mac") ? "\u2318" : "Ctrl";
@@ -450,7 +449,7 @@ function TabShell({
         e.preventDefault();
         workspace.createSession({ connectionId: CONNECTION_ID, rows: 24, cols: 80 })
           .then((s) => workspace.focusSession(s.id)).catch(() => {});
-      } else if ((mod && e.shiftKey && e.key === "?") || e.key === "F1") {
+      } else if (e.ctrlKey && e.key === "?") {
         e.preventDefault();
         setShowShortcuts((v) => !v);
       } else if (mod && !e.shiftKey && (e.key === "[" || e.key === "]")) {
@@ -676,44 +675,42 @@ function TabShell({
           <div
             style={{
               position: "absolute",
-              inset: 0,
+              bottom: 0, left: 0, right: 0,
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
               gap: 12,
               zIndex: 2,
-              background: "rgba(0,0,0,0.6)",
+              padding: "8px 0",
+              background: rgba(palette.bg, 0.85),
+              backdropFilter: "blur(4px)",
+              borderTop: `1px solid ${border}`,
               fontFamily: "'Fira Code', monospace",
               fontSize: 13,
-              color: "rgba(255,255,255,0.7)",
+              color: dimFg,
             }}
           >
-            <span style={{ fontSize: 14, color: "rgba(255,255,255,0.5)" }}>
-              Process exited
+            <span>Process exited</span>
+            <span
+              role="button"
+              tabIndex={0}
+              style={EXITED_LABEL_STYLE}
+              onClick={() => workspace.restartSession(focusedId!)}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+            >
+              Enter — reopen
             </span>
-            <div style={{ display: "flex", gap: 10 }}>
-              <span
-                role="button"
-                tabIndex={0}
-                style={EXITED_LABEL_STYLE}
-                onClick={() => workspace.restartSession(focusedId!)}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
-              >
-                Enter — reopen
-              </span>
-              <span
-                role="button"
-                tabIndex={0}
-                style={EXITED_LABEL_STYLE}
-                onClick={() => workspace.closeSession(focusedId!)}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
-              >
-                Esc — close
-              </span>
-            </div>
+            <span
+              role="button"
+              tabIndex={0}
+              style={EXITED_LABEL_STYLE}
+              onClick={() => workspace.closeSession(focusedId!)}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+            >
+              Esc — close
+            </span>
           </div>
         )}
       </div>

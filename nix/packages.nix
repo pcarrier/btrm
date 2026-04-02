@@ -133,7 +133,7 @@
 
       websiteNpmDeps = pkgs.fetchNpmDeps {
         src = ../js/website;
-        hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        hash = "sha256-Ov0ZMh+i1u56wXbO5FTd9Z5Kahqq1AIi2HCwD+gMOJM=";
       };
 
       webAppNpmDeps = pkgs.fetchNpmDeps {

@@ -84,12 +84,12 @@ fn table_slice<'a>(data: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
 }
 
 fn read_is_monospace(data: &[u8]) -> bool {
-    if let Some(post) = table_slice(data, b"post") {
-        if post.len() >= 16 {
-            let is_fixed_pitch = u32::from_be_bytes([post[12], post[13], post[14], post[15]]);
-            if is_fixed_pitch != 0 {
-                return true;
-            }
+    if let Some(post) = table_slice(data, b"post")
+        && post.len() >= 16
+    {
+        let is_fixed_pitch = u32::from_be_bytes([post[12], post[13], post[14], post[15]]);
+        if is_fixed_pitch != 0 {
+            return true;
         }
     }
 
@@ -258,10 +258,10 @@ fn subfamily_to_weight_style(subfamily: &str) -> (&'static str, &'static str) {
 }
 
 pub fn find_font_files(family: &str) -> Vec<FontVariant> {
-    if let Some(results) = find_via_fc_match(family) {
-        if !results.is_empty() {
-            return results;
-        }
+    if let Some(results) = find_via_fc_match(family)
+        && !results.is_empty()
+    {
+        return results;
     }
     let dirs = font_dirs();
     let family_lower = family.to_lowercase();
@@ -294,18 +294,18 @@ fn find_via_fc_match(family: &str) -> Option<Vec<FontVariant>> {
         if path.is_empty() || !seen.insert(path.to_owned()) {
             continue;
         }
-        if let Ok(data) = std::fs::read(path) {
-            if let Some(info) = read_font_info(&data) {
-                if !info.family.eq_ignore_ascii_case(family) {
-                    continue;
-                }
-                let (weight, style) = subfamily_to_weight_style(style_str);
-                results.push(FontVariant {
-                    path: path.to_owned(),
-                    weight: weight.to_owned(),
-                    style: style.to_owned(),
-                });
+        if let Ok(data) = std::fs::read(path)
+            && let Some(info) = read_font_info(&data)
+        {
+            if !info.family.eq_ignore_ascii_case(family) {
+                continue;
             }
+            let (weight, style) = subfamily_to_weight_style(style_str);
+            results.push(FontVariant {
+                path: path.to_owned(),
+                weight: weight.to_owned(),
+                style: style.to_owned(),
+            });
         }
     }
     if results.is_empty() {
@@ -340,19 +340,19 @@ fn find_in_dir_recursive(
             continue;
         }
 
-        if let Ok(data) = std::fs::read(&path) {
-            if let Some(info) = read_font_info(&data) {
-                let parsed_lower = info.family.to_lowercase();
-                if parsed_lower != family_lower && parsed_lower.replace(' ', "") != family_nospace {
-                    continue;
-                }
-                let (weight, style) = subfamily_to_weight_style(&info.subfamily);
-                results.push(FontVariant {
-                    path: path.to_string_lossy().into_owned(),
-                    weight: weight.to_owned(),
-                    style: style.to_owned(),
-                });
+        if let Ok(data) = std::fs::read(&path)
+            && let Some(info) = read_font_info(&data)
+        {
+            let parsed_lower = info.family.to_lowercase();
+            if parsed_lower != family_lower && parsed_lower.replace(' ', "") != family_nospace {
+                continue;
             }
+            let (weight, style) = subfamily_to_weight_style(&info.subfamily);
+            results.push(FontVariant {
+                path: path.to_string_lossy().into_owned(),
+                weight: weight.to_owned(),
+                style: style.to_owned(),
+            });
         }
     }
 }
@@ -461,10 +461,10 @@ fn scan_dir_recursive(dir: &str, families: &mut BTreeSet<String>) {
         if !matches!(ext, "ttf" | "otf" | "woff" | "woff2" | "ttc") {
             continue;
         }
-        if let Ok(data) = std::fs::read(&path) {
-            if let Some(info) = read_font_info(&data) {
-                families.insert(info.family);
-            }
+        if let Ok(data) = std::fs::read(&path)
+            && let Some(info) = read_font_info(&data)
+        {
+            families.insert(info.family);
         }
     }
 }
@@ -483,12 +483,11 @@ fn scan_monospace_dir_recursive(dir: &str, families: &mut BTreeSet<String>) {
         if !matches!(ext, "ttf" | "otf" | "woff" | "woff2" | "ttc") {
             continue;
         }
-        if let Ok(data) = std::fs::read(&path) {
-            if let Some(info) = read_font_info(&data) {
-                if info.is_monospace {
-                    families.insert(info.family);
-                }
-            }
+        if let Ok(data) = std::fs::read(&path)
+            && let Some(info) = read_font_info(&data)
+            && info.is_monospace
+        {
+            families.insert(info.family);
         }
     }
 }
@@ -537,11 +536,7 @@ pub fn font_face_css(family: &str) -> Option<String> {
             family, variant.weight, variant.style, mime, b64,
         ));
     }
-    if css.is_empty() {
-        None
-    } else {
-        Some(css)
-    }
+    if css.is_empty() { None } else { Some(css) }
 }
 
 /// Return the advance-width / units-per-em ratio for a font family's regular variant.
@@ -550,10 +545,11 @@ pub fn font_advance_ratio(family: &str) -> Option<f64> {
     let files = find_font_files_with_data(family);
     // Prefer the "normal" weight regular variant
     for (variant, data) in &files {
-        if variant.style == "normal" && (variant.weight == "400" || variant.weight == "normal") {
-            if let Some(ratio) = read_advance_ratio(data) {
-                return Some(ratio);
-            }
+        if variant.style == "normal"
+            && (variant.weight == "400" || variant.weight == "normal")
+            && let Some(ratio) = read_advance_ratio(data)
+        {
+            return Some(ratio);
         }
     }
     // Fall back to any variant

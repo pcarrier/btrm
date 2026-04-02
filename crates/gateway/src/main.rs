@@ -98,7 +98,9 @@ async fn main() {
             println!("  BLIT_QUIC       Set to 1 to enable WebTransport (QUIC/HTTP3)");
             println!("  BLIT_TLS_CERT   PEM certificate file (for WebTransport)");
             println!("  BLIT_TLS_KEY    PEM private key file (for WebTransport)");
-            println!("  BLIT_STORE_CONFIG  Set to 1 to sync browser settings to ~/.config/blit/blit.conf");
+            println!(
+                "  BLIT_STORE_CONFIG  Set to 1 to sync browser settings to ~/.config/blit/blit.conf"
+            );
             std::process::exit(0);
         }
         if arg == "--version" || arg == "-V" {

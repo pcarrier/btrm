@@ -278,9 +278,11 @@ async fn main() {
                     .collect()
             });
 
-            let sock_path = cli.connect.socket.clone().unwrap_or_else(|| {
-                blit_server::default_socket_path()
-            });
+            let sock_path = cli
+                .connect
+                .socket
+                .clone()
+                .unwrap_or_else(blit_server::default_socket_path);
             if let Err(e) = transport::ensure_local_server(&sock_path).await {
                 eprintln!("blit: {e}");
                 std::process::exit(1);
@@ -298,7 +300,15 @@ async fn main() {
         }
         Some(cmd) => {
             let conn = &cli.connect;
-            let transport = match transport::connect(&conn.socket, &conn.tcp, &conn.ssh, &conn.share, &conn.hub).await {
+            let transport = match transport::connect(
+                &conn.socket,
+                &conn.tcp,
+                &conn.ssh,
+                &conn.share,
+                &conn.hub,
+            )
+            .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     eprintln!("blit: {e}");
@@ -315,8 +325,7 @@ async fn main() {
                     wait,
                     timeout,
                 } => {
-                    let start_result =
-                        agent::cmd_start(transport, tag, command, rows, cols).await;
+                    let start_result = agent::cmd_start(transport, tag, command, rows, cols).await;
                     if wait {
                         let pty_id = match start_result {
                             Ok(id) => id,
@@ -325,14 +334,21 @@ async fn main() {
                                 std::process::exit(1);
                             }
                         };
-                        let transport2 =
-                            match transport::connect(&conn.socket, &conn.tcp, &conn.ssh, &conn.share, &conn.hub).await {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    eprintln!("blit: {e}");
-                                    std::process::exit(1);
-                                }
-                            };
+                        let transport2 = match transport::connect(
+                            &conn.socket,
+                            &conn.tcp,
+                            &conn.ssh,
+                            &conn.share,
+                            &conn.hub,
+                        )
+                        .await
+                        {
+                            Ok(t) => t,
+                            Err(e) => {
+                                eprintln!("blit: {e}");
+                                std::process::exit(1);
+                            }
+                        };
                         match agent::cmd_wait(transport2, pty_id, timeout.unwrap(), None).await {
                             Ok(code) => std::process::exit(code),
                             Err(e) => {
@@ -359,8 +375,7 @@ async fn main() {
                     cols,
                 } => {
                     let size = agent::capture_size(rows, cols);
-                    agent::cmd_history(transport, id, from_start, from_end, limit, ansi, size)
-                        .await
+                    agent::cmd_history(transport, id, from_start, from_end, limit, ansi, size).await
                 }
                 Command::Send { id, text } => {
                     let text = if text == "-" {
@@ -397,7 +412,14 @@ async fn main() {
         None => {
             let conn = &cli.connect;
             if cli.console {
-                interactive::run_console(&conn.socket, &conn.tcp, &conn.ssh, &conn.share, &conn.hub).await;
+                interactive::run_console(
+                    &conn.socket,
+                    &conn.tcp,
+                    &conn.ssh,
+                    &conn.share,
+                    &conn.hub,
+                )
+                .await;
             } else if let Some(passphrase) = &conn.share {
                 let hub = blit_webrtc_forwarder::normalize_hub(&conn.hub);
                 interactive::run_browser_share(passphrase, &hub, cli.port).await;

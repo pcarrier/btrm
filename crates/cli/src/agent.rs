@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use blit_remote::{
-    msg_ack, msg_close, msg_create_n_command, msg_input, msg_kill, msg_read, msg_resize,
-    msg_restart, msg_subscribe, parse_server_msg, ServerMsg, TerminalState, EXIT_STATUS_UNKNOWN,
-    S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE, S2C_UPDATE,
+    EXIT_STATUS_UNKNOWN, S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE,
+    S2C_UPDATE, ServerMsg, TerminalState, msg_ack, msg_close, msg_create_n_command, msg_input,
+    msg_kill, msg_read, msg_resize, msg_restart, msg_subscribe, parse_server_msg,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::transport::{read_frame, write_frame, Transport};
+use crate::transport::{Transport, read_frame, write_frame};
 
 struct PtyInfo {
     id: u16,
@@ -58,10 +58,10 @@ impl AgentConn {
                     }
                 }
                 S2C_TITLE => {
-                    if let Some(ServerMsg::Title { pty_id, title }) = parse_server_msg(&data) {
-                        if let Ok(t) = std::str::from_utf8(title) {
-                            titles.insert(pty_id, t.to_string());
-                        }
+                    if let Some(ServerMsg::Title { pty_id, title }) = parse_server_msg(&data)
+                        && let Ok(t) = std::str::from_utf8(title)
+                    {
+                        titles.insert(pty_id, t.to_string());
                     }
                 }
                 S2C_EXITED => {
@@ -107,10 +107,7 @@ impl AgentConn {
         self.ptys.iter().any(|p| p.id == id)
     }
 
-    async fn recv_deadline(
-        &mut self,
-        deadline: tokio::time::Instant,
-    ) -> Result<Vec<u8>, String> {
+    async fn recv_deadline(&mut self, deadline: tokio::time::Instant) -> Result<Vec<u8>, String> {
         tokio::time::timeout_at(deadline, read_frame(&mut self.reader))
             .await
             .map_err(|_| "timeout".to_string())?
@@ -135,7 +132,10 @@ pub async fn cmd_list(transport: Transport) -> Result<(), String> {
             None => "running".to_string(),
             Some(&s) => format_exit_status(s),
         };
-        println!("{}\t{}\t{}\t{}\t{}", pty.id, pty.tag, title, pty.command, status);
+        println!(
+            "{}\t{}\t{}\t{}\t{}",
+            pty.id, pty.tag, title, pty.command, status
+        );
     }
     Ok(())
 }
@@ -163,11 +163,10 @@ pub async fn cmd_start(
         if let Some(ServerMsg::CreatedN {
             nonce: n, pty_id, ..
         }) = parse_server_msg(&data)
+            && n == nonce
         {
-            if n == nonce {
-                println!("{pty_id}");
-                return Ok(pty_id);
-            }
+            println!("{pty_id}");
+            return Ok(pty_id);
         }
     }
 }
@@ -257,15 +256,14 @@ pub async fn cmd_history(
         if data.is_empty() {
             continue;
         }
-        if data[0] == S2C_TEXT {
-            if let Some(ServerMsg::Text { nonce: n, text, .. }) = parse_server_msg(&data) {
-                if n == nonce {
-                    if !text.is_empty() {
-                        println!("{text}");
-                    }
-                    return Ok(());
-                }
+        if data[0] == S2C_TEXT
+            && let Some(ServerMsg::Text { nonce: n, text, .. }) = parse_server_msg(&data)
+            && n == nonce
+        {
+            if !text.is_empty() {
+                println!("{text}");
             }
+            return Ok(());
         }
     }
 }
@@ -300,10 +298,10 @@ pub async fn cmd_close(transport: Transport, id: u16) -> Result<(), String> {
         if data.is_empty() {
             continue;
         }
-        if let Some(ServerMsg::Closed { pty_id }) = parse_server_msg(&data) {
-            if pty_id == id {
-                return Ok(());
-            }
+        if let Some(ServerMsg::Closed { pty_id }) = parse_server_msg(&data)
+            && pty_id == id
+        {
+            return Ok(());
         }
     }
 }
@@ -361,10 +359,10 @@ pub async fn cmd_restart(transport: Transport, id: u16) -> Result<(), String> {
         if data.is_empty() {
             continue;
         }
-        if let Some(ServerMsg::Created { pty_id, .. }) = parse_server_msg(&data) {
-            if pty_id == id {
-                return Ok(());
-            }
+        if let Some(ServerMsg::Created { pty_id, .. }) = parse_server_msg(&data)
+            && pty_id == id
+        {
+            return Ok(());
         }
     }
 }
@@ -401,8 +399,7 @@ pub async fn cmd_wait(
         return Err(format!("pty {id} not found"));
     }
 
-    let deadline =
-        tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
 
     if let Some(ref pat) = pattern {
         let re = regex::Regex::new(pat).map_err(|e| format!("invalid pattern: {e}"))?;
@@ -448,12 +445,11 @@ pub async fn cmd_wait(
                         pty_id,
                         exit_status,
                     }) = parse_server_msg(&data)
+                        && pty_id == id
                     {
-                        if pty_id == id {
-                            let code = exit_code_from_status(exit_status);
-                            println!("{}", format_exit_status(exit_status));
-                            return Ok(code);
-                        }
+                        let code = exit_code_from_status(exit_status);
+                        println!("{}", format_exit_status(exit_status));
+                        return Ok(code);
                     }
                 }
                 _ => {}
@@ -482,12 +478,11 @@ pub async fn cmd_wait(
                 pty_id,
                 exit_status,
             }) = parse_server_msg(&data)
+                && pty_id == id
             {
-                if pty_id == id {
-                    let code = exit_code_from_status(exit_status);
-                    println!("{}", format_exit_status(exit_status));
-                    return Ok(code);
-                }
+                let code = exit_code_from_status(exit_status);
+                println!("{}", format_exit_status(exit_status));
+                return Ok(code);
             }
         }
     }
@@ -557,8 +552,8 @@ fn hex_digit(b: u8) -> Option<u8> {
 mod tests {
     use super::*;
     use blit_remote::{
-        build_update_msg, msg_hello, CellStyle, FrameState, FEATURE_CREATE_NONCE,
-        FEATURE_RESIZE_BATCH, FEATURE_RESTART, S2C_CLOSED, S2C_CREATED_N,
+        CellStyle, FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH, FEATURE_RESTART, FrameState,
+        S2C_CLOSED, S2C_CREATED_N, build_update_msg, msg_hello,
     };
 
     // ── Escape parsing unit tests ────────────────────────────────────────
@@ -1247,13 +1242,7 @@ mod tests {
         });
 
         let transport = Transport::Unix(client);
-        let result = cmd_wait(
-            transport,
-            1,
-            5,
-            Some("BUILD (SUCCESS|FAILURE)".to_string()),
-        )
-        .await;
+        let result = cmd_wait(transport, 1, 5, Some("BUILD (SUCCESS|FAILURE)".to_string())).await;
         assert_eq!(result.unwrap(), 0);
 
         mock.await.unwrap();
@@ -1279,13 +1268,7 @@ mod tests {
         });
 
         let transport = Transport::Unix(client);
-        let result = cmd_wait(
-            transport,
-            1,
-            5,
-            Some("BUILD (SUCCESS|FAILURE)".to_string()),
-        )
-        .await;
+        let result = cmd_wait(transport, 1, 5, Some("BUILD (SUCCESS|FAILURE)".to_string())).await;
         assert_eq!(result.unwrap(), 1);
 
         mock.await.unwrap();
@@ -1329,13 +1312,7 @@ mod tests {
         });
 
         let transport = Transport::Unix(client);
-        let result = cmd_wait(
-            transport,
-            1,
-            5,
-            Some("BUILD (SUCCESS|FAILURE)".to_string()),
-        )
-        .await;
+        let result = cmd_wait(transport, 1, 5, Some("BUILD (SUCCESS|FAILURE)".to_string())).await;
         assert_eq!(result.unwrap(), 0);
 
         mock.await.unwrap();

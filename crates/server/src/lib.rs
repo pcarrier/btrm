@@ -1,13 +1,12 @@
 use blit_alacritty::{SearchResult as AlacrittySearchResult, TerminalDriver as AlacrittyDriver};
 use blit_remote::{
-    build_update_msg, msg_hello, FrameState, C2S_ACK, C2S_CLIENT_METRICS, C2S_CLOSE, C2S_CREATE,
-    C2S_CREATE2, C2S_CREATE_AT, C2S_CREATE_N, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_MOUSE,
-    C2S_COPY_RANGE, C2S_KILL, C2S_READ, C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH,
-    C2S_SUBSCRIBE, C2S_UNSUBSCRIBE,
+    C2S_ACK, C2S_CLIENT_METRICS, C2S_CLOSE, C2S_COPY_RANGE, C2S_CREATE, C2S_CREATE_AT,
+    C2S_CREATE_N, C2S_CREATE2, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_KILL, C2S_MOUSE,
+    C2S_READ, C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH, C2S_SUBSCRIBE, C2S_UNSUBSCRIBE,
     CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY, FEATURE_COPY_RANGE, FEATURE_CREATE_NONCE,
-    FEATURE_RESIZE_BATCH, FEATURE_RESTART, READ_ANSI, READ_TAIL, S2C_CLOSED, S2C_CREATED,
-    S2C_CREATED_N, S2C_LIST,
-    S2C_READY, S2C_SEARCH_RESULTS, S2C_TEXT, S2C_TITLE,
+    FEATURE_RESIZE_BATCH, FEATURE_RESTART, FrameState, READ_ANSI, READ_TAIL, S2C_CLOSED,
+    S2C_CREATED, S2C_CREATED_N, S2C_LIST, S2C_READY, S2C_SEARCH_RESULTS, S2C_TEXT, S2C_TITLE,
+    build_update_msg, msg_hello,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::CString;
@@ -18,7 +17,7 @@ use std::time::{Duration, Instant};
 use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UnixListener;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{Mutex, Notify, mpsc};
 
 type PtyFds = Arc<std::sync::RwLock<HashMap<u16, RawFd>>>;
 pub struct Config {
@@ -869,13 +868,14 @@ fn update_client_scroll_state(client: &mut ClientState, pty_id: u16, next_offset
             pty_id,
             client.last_sent.get(&pty_id).cloned().unwrap_or_default(),
         );
-    } else if prev_offset > 0 && next_offset == 0 {
-        if let Some(cache) = client.scroll_caches.remove(&pty_id) {
-            if cache.rows() > 0 && cache.cols() > 0 {
-                client.last_sent.insert(pty_id, cache);
-            } else {
-                client.last_sent.remove(&pty_id);
-            }
+    } else if prev_offset > 0
+        && next_offset == 0
+        && let Some(cache) = client.scroll_caches.remove(&pty_id)
+    {
+        if cache.rows() > 0 && cache.cols() > 0 {
+            client.last_sent.insert(pty_id, cache);
+        } else {
+            client.last_sent.remove(&pty_id);
         }
     }
 
@@ -1075,7 +1075,7 @@ fn set_qos_user_interactive() {
     #[cfg(target_os = "macos")]
     {
         const QOS_CLASS_USER_INTERACTIVE: libc::c_uint = 0x21;
-        extern "C" {
+        unsafe extern "C" {
             fn pthread_set_qos_class_self_np(
                 qos_class: libc::c_uint,
                 relative_priority: libc::c_int,
@@ -1147,22 +1147,25 @@ fn spawn_pty(
         }
         set_qos_user_interactive();
         let effective_dir = dir.map(String::from);
-        if let Some(d) = effective_dir {
-            if let Ok(dir_c) = CString::new(d) {
-                unsafe {
-                    libc::chdir(dir_c.as_ptr());
-                }
+        if let Some(d) = effective_dir
+            && let Ok(dir_c) = CString::new(d)
+        {
+            unsafe {
+                libc::chdir(dir_c.as_ptr());
             }
         }
-        std::env::set_var("TERM", "xterm-256color");
-        std::env::set_var("COLORTERM", "truecolor");
-        // Don't set COLUMNS/LINES — ncurses apps prioritize these over
-        // TIOCGWINSZ and won't resize properly if they're set to stale values.
-        std::env::remove_var("COLUMNS");
-        std::env::remove_var("LINES");
-        for (key, _) in std::env::vars() {
-            if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
-                std::env::remove_var(&key);
+        // SAFETY: we are in the forked child process, which is single-threaded.
+        unsafe {
+            std::env::set_var("TERM", "xterm-256color");
+            std::env::set_var("COLORTERM", "truecolor");
+            // Don't set COLUMNS/LINES — ncurses apps prioritize these over
+            // TIOCGWINSZ and won't resize properly if they're set to stale values.
+            std::env::remove_var("COLUMNS");
+            std::env::remove_var("LINES");
+            for (key, _) in std::env::vars() {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                    std::env::remove_var(&key);
+                }
             }
         }
         let shell_flags = &state.0.shell_flags;
@@ -1183,18 +1186,18 @@ fn spawn_pty(
                 libc::_exit(1);
             }
         }
-        if let Some(args) = argv {
-            if !args.is_empty() {
-                let cargs: Vec<CString> = args.iter().map(|s| CString::new(*s).unwrap()).collect();
-                let ptrs: Vec<*const libc::c_char> = cargs
-                    .iter()
-                    .map(|c| c.as_ptr())
-                    .chain(std::iter::once(std::ptr::null()))
-                    .collect();
-                unsafe {
-                    libc::execvp(ptrs[0], ptrs.as_ptr());
-                    libc::_exit(1);
-                }
+        if let Some(args) = argv
+            && !args.is_empty()
+        {
+            let cargs: Vec<CString> = args.iter().map(|s| CString::new(*s).unwrap()).collect();
+            let ptrs: Vec<*const libc::c_char> = cargs
+                .iter()
+                .map(|c| c.as_ptr())
+                .chain(std::iter::once(std::ptr::null()))
+                .collect();
+            unsafe {
+                libc::execvp(ptrs[0], ptrs.as_ptr());
+                libc::_exit(1);
             }
         }
         let shell_c = CString::new(shell).unwrap();
@@ -1260,7 +1263,12 @@ fn respawn_child(
     pty_id: u16,
     command: Option<&str>,
     state: AppState,
-) -> Option<(libc::c_int, libc::pid_t, std::thread::JoinHandle<()>, mpsc::Receiver<PtyInput>)> {
+) -> Option<(
+    libc::c_int,
+    libc::pid_t,
+    std::thread::JoinHandle<()>,
+    mpsc::Receiver<PtyInput>,
+)> {
     let mut master: libc::c_int = 0;
     let mut slave: libc::c_int = 0;
     unsafe {
@@ -1304,13 +1312,16 @@ fn respawn_child(
             }
         }
         set_qos_user_interactive();
-        std::env::set_var("TERM", "xterm-256color");
-        std::env::set_var("COLORTERM", "truecolor");
-        std::env::remove_var("COLUMNS");
-        std::env::remove_var("LINES");
-        for (key, _) in std::env::vars() {
-            if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
-                std::env::remove_var(&key);
+        // SAFETY: we are in the forked child process, which is single-threaded.
+        unsafe {
+            std::env::set_var("TERM", "xterm-256color");
+            std::env::set_var("COLORTERM", "truecolor");
+            std::env::remove_var("COLUMNS");
+            std::env::remove_var("LINES");
+            for (key, _) in std::env::vars() {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                    std::env::remove_var(&key);
+                }
             }
         }
         let shell_flags = &state.0.shell_flags;
@@ -1417,11 +1428,7 @@ fn respond_to_queries(fd: libc::c_int, data: &[u8], size: (u16, u16), cursor: (u
     }
 }
 
-fn pty_reader(
-    fd: libc::c_int,
-    tx: mpsc::Sender<PtyInput>,
-    notify: Arc<Notify>,
-) {
+fn pty_reader(fd: libc::c_int, tx: mpsc::Sender<PtyInput>, notify: Arc<Notify>) {
     // Use a dedicated OS thread with a plain blocking read() instead of
     // tokio's AsyncFd (kqueue/epoll). On macOS, registering a kqueue watcher
     // on the PTY master fd adds significant per-write overhead in the kernel's
@@ -1451,7 +1458,13 @@ fn pty_reader(
                     let before = remaining[..boundary].to_vec();
                     let after = remaining[boundary..].to_vec();
                     update_sync_scan_tail(&mut sync_scan_tail, &before);
-                    if tx.blocking_send(PtyInput::SyncBoundary { before, after: after.clone() }).is_err() {
+                    if tx
+                        .blocking_send(PtyInput::SyncBoundary {
+                            before,
+                            after: after.clone(),
+                        })
+                        .is_err()
+                    {
                         return;
                     }
                     notify.notify_one();
@@ -1610,8 +1623,6 @@ pub fn default_socket_path() -> String {
     }
     "/tmp/blit.sock".into()
 }
-
-
 
 enum RecvFdResult {
     Fd(RawFd),
@@ -1913,13 +1924,13 @@ async fn tick(state: &AppState) -> TickOutcome {
         let Some(pty) = sess.ptys.get_mut(&id) else {
             continue;
         };
-        if needful_ptys.contains(&id) {
-            if let Some(frame) = pty.ready_frames.pop_front() {
-                snapshots.insert(id, frame);
-                sess.tick_snaps += 1;
-                did_work = true;
-                continue;
-            }
+        if needful_ptys.contains(&id)
+            && let Some(frame) = pty.ready_frames.pop_front()
+        {
+            snapshots.insert(id, frame);
+            sess.tick_snaps += 1;
+            did_work = true;
+            continue;
         }
         if !should_snapshot_pty(
             pty.dirty,
@@ -1971,7 +1982,10 @@ async fn tick(state: &AppState) -> TickOutcome {
             (
                 c.lead,
                 c.subscriptions.iter().copied().collect::<Vec<_>>(),
-                c.scroll_offsets.iter().map(|(&k, &v)| (k, v)).collect::<Vec<_>>(),
+                c.scroll_offsets
+                    .iter()
+                    .map(|(&k, &v)| (k, v))
+                    .collect::<Vec<_>>(),
                 can_send_frame(c, now, reserve_preview_slot),
                 lead_window_open(c, reserve_preview_slot),
                 lead_window_open(c, reserve_preview_slot) || window_open(c),
@@ -1985,7 +1999,9 @@ async fn tick(state: &AppState) -> TickOutcome {
 
         // Send scrollback frames for any scrolled PTY.
         for &(scroll_pid, scroll_offset) in &scrolled_ptys {
-            if scroll_offset == 0 { continue; }
+            if scroll_offset == 0 {
+                continue;
+            }
             let is_lead = lead == Some(scroll_pid);
             let can_send = if is_lead { can_send_lead } else { true };
             if can_send {
@@ -1993,7 +2009,10 @@ async fn tick(state: &AppState) -> TickOutcome {
                     let Some(c) = sess.clients.get(&cid) else {
                         continue;
                     };
-                    c.scroll_caches.get(&scroll_pid).cloned().unwrap_or_default()
+                    c.scroll_caches
+                        .get(&scroll_pid)
+                        .cloned()
+                        .unwrap_or_default()
                 };
                 let outcome = if let Some(pty) = sess.ptys.get_mut(&scroll_pid) {
                     if let Some((msg, new_frame)) =
@@ -2034,7 +2053,14 @@ async fn tick(state: &AppState) -> TickOutcome {
             }
         }
 
-        let lead_scroll_offset = lead.and_then(|pid| scrolled_ptys.iter().find(|&&(k, _)| k == pid).map(|&(_, v)| v)).unwrap_or(0);
+        let lead_scroll_offset = lead
+            .and_then(|pid| {
+                scrolled_ptys
+                    .iter()
+                    .find(|&&(k, _)| k == pid)
+                    .map(|&(_, v)| v)
+            })
+            .unwrap_or(0);
 
         if let Some(pid) = lead {
             if lead_scroll_offset == 0 && can_send_lead {
@@ -2395,10 +2421,9 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                 if let Some(seq) = pty
                     .driver
                     .mouse_event(type_, button, col, row, echo, icanon)
+                    && let Some(&fd) = state.2.read().unwrap().get(&pid)
                 {
-                    if let Some(&fd) = state.2.read().unwrap().get(&pid) {
-                        pty_write_all(fd, &seq);
-                    }
+                    pty_write_all(fd, &seq);
                 }
             }
             continue;
@@ -2409,13 +2434,12 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             let mut need_nudge = false;
             {
                 let mut sess = state.1.lock().await;
-                if let Some(c) = sess.clients.get_mut(&client_id) {
-                    if update_client_scroll_state(c, pid, 0) {
-                        if let Some(pty) = sess.ptys.get_mut(&pid) {
-                            pty.mark_dirty();
-                            need_nudge = true;
-                        }
-                    }
+                if let Some(c) = sess.clients.get_mut(&client_id)
+                    && update_client_scroll_state(c, pid, 0)
+                    && let Some(pty) = sess.ptys.get_mut(&pid)
+                {
+                    pty.mark_dirty();
+                    need_nudge = true;
                 }
             }
             if need_nudge {
@@ -2854,41 +2878,41 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                     .get(&pid)
                     .filter(|p| p.exited)
                     .map(|p| (p.driver.size(), p.command.clone(), p.tag.clone()));
-                if let Some(((rows, cols), command, tag)) = restart_info {
-                    if let Some((master, child, reader, byte_rx)) = respawn_child(
+                if let Some(((rows, cols), command, tag)) = restart_info
+                    && let Some((master, child, reader, byte_rx)) = respawn_child(
                         &state.0.shell,
                         rows,
                         cols,
                         pid,
                         command.as_deref(),
                         state.clone(),
-                    ) {
-                        let Some(pty) = sess.ptys.get_mut(&pid) else {
-                            break;
-                        };
-                        pty.master_fd = master;
-                        pty.child_pid = child;
-                        pty.reader_handle = reader;
-                        pty.byte_rx = byte_rx;
-                        pty.driver.reset_modes();
-                        pty.exited = false;
-                        pty.exit_status = blit_remote::EXIT_STATUS_UNKNOWN;
-                        pty.lflag_cache = pty_lflag(master);
-                        pty.lflag_last = Instant::now();
-                        pty.mark_dirty();
-                        if let Some(c) = sess.clients.get_mut(&client_id) {
-                            c.lead = Some(pid);
-                            subscribe_client_to(c, pid);
-                            update_client_scroll_state(c, pid, 0);
-                            reset_inflight(c);
-                        }
-                        let mut msg = Vec::with_capacity(3 + tag.len());
-                        msg.push(S2C_CREATED);
-                        msg.extend_from_slice(&pid.to_le_bytes());
-                        msg.extend_from_slice(tag.as_bytes());
-                        sess.send_to_all(&msg);
-                        need_nudge = true;
+                    )
+                {
+                    let Some(pty) = sess.ptys.get_mut(&pid) else {
+                        break;
+                    };
+                    pty.master_fd = master;
+                    pty.child_pid = child;
+                    pty.reader_handle = reader;
+                    pty.byte_rx = byte_rx;
+                    pty.driver.reset_modes();
+                    pty.exited = false;
+                    pty.exit_status = blit_remote::EXIT_STATUS_UNKNOWN;
+                    pty.lflag_cache = pty_lflag(master);
+                    pty.lflag_last = Instant::now();
+                    pty.mark_dirty();
+                    if let Some(c) = sess.clients.get_mut(&client_id) {
+                        c.lead = Some(pid);
+                        subscribe_client_to(c, pid);
+                        update_client_scroll_state(c, pid, 0);
+                        reset_inflight(c);
                     }
+                    let mut msg = Vec::with_capacity(3 + tag.len());
+                    msg.push(S2C_CREATED);
+                    msg.extend_from_slice(&pid.to_le_bytes());
+                    msg.extend_from_slice(tag.as_bytes());
+                    sess.send_to_all(&msg);
+                    need_nudge = true;
                 }
             }
             C2S_READ if data.len() >= 13 => {
@@ -2915,7 +2939,8 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
                         }
                     };
 
-                    let mut all_lines: Vec<String> = Vec::with_capacity(scrollback_lines + rows as usize);
+                    let mut all_lines: Vec<String> =
+                        Vec::with_capacity(scrollback_lines + rows as usize);
 
                     let mut scroll_offset = scrollback_lines;
                     while scroll_offset > 0 {
@@ -2974,16 +2999,15 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             C2S_COPY_RANGE if data.len() >= 18 => {
                 let nonce = u16::from_le_bytes([data[1], data[2]]);
                 let pid = u16::from_le_bytes([data[3], data[4]]);
-                let start_tail =
-                    u32::from_le_bytes([data[5], data[6], data[7], data[8]]);
+                let start_tail = u32::from_le_bytes([data[5], data[6], data[7], data[8]]);
                 let start_col = u16::from_le_bytes([data[9], data[10]]);
-                let end_tail =
-                    u32::from_le_bytes([data[11], data[12], data[13], data[14]]);
+                let end_tail = u32::from_le_bytes([data[11], data[12], data[13], data[14]]);
                 let end_col = u16::from_le_bytes([data[15], data[16]]);
 
                 if let Some(pty) = sess.ptys.get(&pid) {
-                    let text =
-                        pty.driver.get_text_range(start_tail, start_col, end_tail, end_col);
+                    let text = pty
+                        .driver
+                        .get_text_range(start_tail, start_col, end_tail, end_col);
                     let total_lines = pty.driver.total_lines();
 
                     let mut msg = Vec::with_capacity(13 + text.len());
@@ -3001,11 +3025,11 @@ async fn handle_client(stream: tokio::net::UnixStream, state: AppState) {
             C2S_KILL if data.len() >= 7 => {
                 let pid = u16::from_le_bytes([data[1], data[2]]);
                 let signal = i32::from_le_bytes([data[3], data[4], data[5], data[6]]);
-                if let Some(pty) = sess.ptys.get(&pid) {
-                    if !pty.exited {
-                        unsafe {
-                            libc::kill(pty.child_pid, signal);
-                        }
+                if let Some(pty) = sess.ptys.get(&pid)
+                    && !pty.exited
+                {
+                    unsafe {
+                        libc::kill(pty.child_pid, signal);
                     }
                 }
             }

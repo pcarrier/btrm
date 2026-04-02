@@ -22,14 +22,19 @@ fn parse_config() -> blit_server::Config {
     let mut fd_channel: Option<RawFd> = std::env::var("BLIT_FD_CHANNEL")
         .ok()
         .map(|s| parse_fd_value(&s, "BLIT_FD_CHANNEL"));
-    let mut verbose = std::env::var("BLIT_VERBOSE").ok().map(|v| v == "1").unwrap_or(false);
+    let mut verbose = std::env::var("BLIT_VERBOSE")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(false);
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--help" || arg == "-h" {
             println!("{}", usage());
             println!("  --socket PATH            Unix socket path (or set BLIT_SOCK)");
-            println!("  --fd-channel FD          Accept clients via fd-passing on FD (or set BLIT_FD_CHANNEL)");
+            println!(
+                "  --fd-channel FD          Accept clients via fd-passing on FD (or set BLIT_FD_CHANNEL)"
+            );
             println!(
                 "  --shell-flags FLAGS      Shell flags (default: li, or set BLIT_SHELL_FLAGS)"
             );

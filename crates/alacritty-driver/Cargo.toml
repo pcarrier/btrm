@@ -1,7 +1,7 @@
 [package]
 name = "blit-alacritty"
 version = "0.17.1"
-edition = "2021"
+edition.workspace = true
 description = "Alacritty terminal emulator driver for blit"
 license.workspace = true
 repository.workspace = true

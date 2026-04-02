@@ -3,8 +3,8 @@ use crate::signaling;
 use crate::turn::{self, TurnRelay};
 use ed25519_dalek::SigningKey;
 use std::net::UdpSocket;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use str0m::change::SdpOffer;
 use str0m::channel::ChannelId;
@@ -64,7 +64,11 @@ pub async fn handle_peer(
                 }
                 Transport::Tcp => {
                     TurnRelay::allocate_tcp(
-                        ts.addr, ts.tls, &ts.hostname, &ts.username, &ts.credential,
+                        ts.addr,
+                        ts.tls,
+                        &ts.hostname,
+                        &ts.username,
+                        &ts.credential,
                     )
                     .await
                 }
@@ -99,7 +103,9 @@ pub async fn handle_peer(
     let answer_json = serde_json::to_value(&answer)?;
     let signal_data = serde_json::json!({ "sdp": answer_json });
     let msg = signaling::build_signed_message(&signing_key, &peer_session_id, &signal_data);
-    signal_tx.send(msg).map_err(|e| format!("send failed: {e}"))?;
+    signal_tx
+        .send(msg)
+        .map_err(|e| format!("send failed: {e}"))?;
 
     let mut blit_conn: Option<UnixStream> = None;
     let mut blit_channel: Option<ChannelId> = None;
@@ -134,30 +140,27 @@ pub async fn handle_peer(
                             }
                         }
                         Event::ChannelData(cd) => {
-                            if Some(cd.id) == blit_channel {
-                                if let Some(conn) = &mut blit_conn {
-                                    let data = &cd.data;
-                                    if data.len() < 4 {
-                                        continue;
-                                    }
-                                    let len = u32::from_le_bytes([
-                                        data[0], data[1], data[2], data[3],
-                                    ]) as usize;
-                                    if data.len() < 4 + len {
-                                        continue;
-                                    }
-                                    let payload = &data[4..4 + len];
-                                    let frame_len = (payload.len() as u32).to_le_bytes();
-                                    if conn.write_all(&frame_len).await.is_err() {
-                                        verbose!("blit-server socket write failed");
-                                        return Ok(());
-                                    }
-                                    if !payload.is_empty()
-                                        && conn.write_all(payload).await.is_err()
-                                    {
-                                        verbose!("blit-server socket write failed");
-                                        return Ok(());
-                                    }
+                            if Some(cd.id) == blit_channel
+                                && let Some(conn) = &mut blit_conn
+                            {
+                                let data = &cd.data;
+                                if data.len() < 4 {
+                                    continue;
+                                }
+                                let len = u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+                                    as usize;
+                                if data.len() < 4 + len {
+                                    continue;
+                                }
+                                let payload = &data[4..4 + len];
+                                let frame_len = (payload.len() as u32).to_le_bytes();
+                                if conn.write_all(&frame_len).await.is_err() {
+                                    verbose!("blit-server socket write failed");
+                                    return Ok(());
+                                }
+                                if !payload.is_empty() && conn.write_all(payload).await.is_err() {
+                                    verbose!("blit-server socket write failed");
+                                    return Ok(());
                                 }
                             }
                         }
@@ -169,10 +172,7 @@ pub async fn handle_peer(
                         }
                         Event::IceConnectionStateChange(state) => {
                             verbose!("ICE state: {state:?}");
-                            if matches!(
-                                state,
-                                str0m::IceConnectionState::Disconnected
-                            ) {
+                            if matches!(state, str0m::IceConnectionState::Disconnected) {
                                 return Ok(());
                             }
                         }
@@ -207,9 +207,9 @@ pub async fn handle_peer(
                     std::future::pending::<Option<(std::net::SocketAddr, Vec<u8>)>>().await
                 }
             } => {
-                if let Some((peer_addr, data)) = turn_data {
-                    if let Some(ra) = relay_addr {
-                        if let Ok(receive) = Receive::new(
+                if let Some((peer_addr, data)) = turn_data
+                    && let Some(ra) = relay_addr
+                        && let Ok(receive) = Receive::new(
                             str0m::net::Protocol::Udp,
                             peer_addr,
                             ra,
@@ -217,8 +217,6 @@ pub async fn handle_peer(
                         ) {
                             rtc.handle_input(Input::Receive(Instant::now(), receive))?;
                         }
-                    }
-                }
             }
             result = async {
                 if let Some(conn) = &mut blit_conn {
@@ -263,11 +261,10 @@ pub async fn handle_peer(
             } => {
                 match sig {
                     Some(data) => {
-                        if let Some(candidate) = data.get("candidate") {
-                            if let Ok(c) = serde_json::from_value::<Candidate>(candidate.clone()) {
+                        if let Some(candidate) = data.get("candidate")
+                            && let Ok(c) = serde_json::from_value::<Candidate>(candidate.clone()) {
                                 rtc.add_remote_candidate(c);
                             }
-                        }
                     }
                     None => {
                         signaling_alive = false;

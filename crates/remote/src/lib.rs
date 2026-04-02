@@ -1298,8 +1298,7 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
                 let tag = std::str::from_utf8(&data[offset..offset + tag_len]).unwrap_or_default();
                 offset += tag_len;
                 let command = if offset + 2 <= data.len() {
-                    let cmd_len =
-                        u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
+                    let cmd_len = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
                     offset += 2;
                     let cmd = if offset + cmd_len <= data.len() {
                         std::str::from_utf8(&data[offset..offset + cmd_len]).unwrap_or_default()
@@ -1311,7 +1310,11 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
                 } else {
                     ""
                 };
-                entries.push(PtyListEntry { pty_id, tag, command });
+                entries.push(PtyListEntry {
+                    pty_id,
+                    tag,
+                    command,
+                });
             }
             Some(ServerMsg::List { entries })
         }
@@ -1678,17 +1681,20 @@ pub fn build_update_msg(
     let scroll_eligible = (mode_is_cooked(current.mode) && mode_is_cooked(previous.mode))
         || current.mode == 0
         || previous.mode == 0;
-    if ENABLE_SCROLL_OPS && same_size && previous.cells != current.cells && scroll_eligible {
-        if let Some(delta_rows) = detect_vertical_scroll(current, previous) {
-            let mut basis = previous.clone();
-            encode_copy_rect_op(&mut ops, current, delta_rows);
-            apply_vertical_scroll_copy(&mut basis, delta_rows);
+    if ENABLE_SCROLL_OPS
+        && same_size
+        && previous.cells != current.cells
+        && scroll_eligible
+        && let Some(delta_rows) = detect_vertical_scroll(current, previous)
+    {
+        let mut basis = previous.clone();
+        encode_copy_rect_op(&mut ops, current, delta_rows);
+        apply_vertical_scroll_copy(&mut basis, delta_rows);
+        op_count += 1;
+        append_full_width_fill_ops(current, &mut basis, &mut ops, &mut op_count);
+        if let Some(patch_op) = build_patch_op(current, &basis) {
+            ops.extend_from_slice(&patch_op);
             op_count += 1;
-            append_full_width_fill_ops(current, &mut basis, &mut ops, &mut op_count);
-            if let Some(patch_op) = build_patch_op(current, &basis) {
-                ops.extend_from_slice(&patch_op);
-                op_count += 1;
-            }
         }
     }
 

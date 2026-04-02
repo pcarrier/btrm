@@ -1,6 +1,6 @@
 # Unsafe code in blit
 
-Unsafe code is confined to three crates (`server`, `cli`, `demo`) that need direct POSIX terminal and process APIs. The remaining seven crates contain zero `unsafe` blocks.
+Unsafe code is confined to three crates (`server`, `cli`, `browser`) that need direct POSIX terminal/process APIs or foreign function declarations. The remaining crates contain zero `unsafe` blocks.
 
 This document focuses on the non-obvious parts — the invariants that are easy to break.
 
@@ -33,21 +33,25 @@ The received fd is immediately wrapped in `from_raw_fd` to transfer ownership to
 
 ## Why `libc::write` instead of `std::io`
 
-The `cli` and `demo` crates use raw `libc::write(STDOUT_FILENO, ...)` in two places instead of `std::io::stdout()`:
+The `cli` crate uses raw `libc::write(STDOUT_FILENO, ...)` in two places instead of `std::io::stdout()`:
 
 1. **`Drop` impls** that emit terminal reset sequences — `stdout().write()` takes a mutex lock, which can deadlock if the process is unwinding from a panic that already holds the lock.
 2. **`write_all_stdout`** in the frame output hot path — avoids the lock overhead on every frame.
+
+## Environment variable mutation in the child
+
+`std::env::set_var` and `std::env::remove_var` are `unsafe` as of Rust edition 2024 because they mutate global process state and are not thread-safe. The server calls them in two `spawn_pty` functions, immediately after `fork()`, to set `TERM`/`COLORTERM`, clear `COLUMNS`/`LINES`, and strip `BLIT_*` variables before `execvp`. This is sound because the child process is single-threaded after `fork`.
 
 ## macOS-specific FFI
 
 Two macOS-only calls that aren't in the `libc` crate:
 
 - **`proc_pidinfo(PROC_PIDVNODEPATHINFO)`** — gets the child process's working directory by reinterpreting a raw byte buffer as `proc_vnodepathinfo`. The pointer cast is sound only if the buffer is large enough and the syscall succeeds (checked via return value).
-- **`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)`** — declared as a local `extern "C"` function. Bumps thread priority so the frame scheduler gets lower latency. Harmless if it fails.
+- **`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)`** — declared as a local `unsafe extern "C"` function. Bumps thread priority so the frame scheduler gets lower latency. Harmless if it fails.
 
-## Signal handlers in `demo`
+## WASM FFI in `browser`
 
-`emojiblast` registers a C signal handler via `libc::signal()` with a function pointer cast. The handler calls only `write` and `_exit` — both async-signal-safe. Adding any allocating or locking call to this handler (including `println!` or `eprintln!`) would be undefined behavior.
+`crates/browser/src/lib.rs` declares an `unsafe extern "C"` block for JavaScript helper functions injected via `#[wasm_bindgen(inline_js)]`. The functions (`blitFillTextCodePoint`, `blitFillTextStretched`, `blitFillText`, `blitMeasureMaxOverhang`) are called from safe Rust through wasm-bindgen's generated bindings. The `unsafe` marker is required by edition 2024 for all `extern` blocks.
 
 ## Audit checklist
 

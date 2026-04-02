@@ -557,9 +557,7 @@ impl TerminalDriver {
         let cols = grid.columns();
 
         let last_line = Line(screen as i32 - 1);
-        let tail_to_line = |tail: u32| -> Line {
-            Line(last_line.0 - tail as i32)
-        };
+        let tail_to_line = |tail: u32| -> Line { Line(last_line.0 - tail as i32) };
 
         let start_line = tail_to_line(start_tail);
         let end_line = tail_to_line(end_tail);
@@ -1159,7 +1157,9 @@ mod integration_tests {
     fn welcome_emoji_width() {
         let mut welcome: Vec<u8> = Vec::new();
         welcome.extend_from_slice("╚═════╝ ╚══════╝╚═╝   ╚═╝ https://blit.sh\r\n".as_bytes());
-        welcome.extend_from_slice("          with \u{2764}\u{FE0F} from https://indent.com".as_bytes());
+        welcome.extend_from_slice(
+            "          with \u{2764}\u{FE0F} from https://indent.com".as_bytes(),
+        );
 
         let mut driver = TerminalDriver::new(24, 80, 1000);
         driver.process(&welcome);

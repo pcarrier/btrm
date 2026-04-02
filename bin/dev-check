@@ -17,9 +17,9 @@ trap cleanup EXIT INT TERM
 
 rm -f "$PC_SOCK" "$BLIT_SOCK"
 
-echo "=== Building blit CLI ==="
-cargo build -p blit-cli --release
-BLIT="./target/release/blit"
+echo "=== Installing blit CLI ==="
+curl -sf https://install.blit.sh | sh
+BLIT="blit"
 
 echo "=== Starting bin/dev ==="
 ./bin/dev -t=false -u "$PC_SOCK" &

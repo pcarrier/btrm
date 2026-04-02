@@ -1,5 +1,6 @@
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { lazy, Suspense, useState, useEffect } from "react";
+import { useTheme } from "./theme";
 import { Landing } from "./Landing";
 
 const Terminal = lazy(() =>
@@ -36,6 +37,8 @@ function usePassphrase(): string | null {
 
 function App() {
   const passphrase = usePassphrase();
+  const { theme, toggleTheme } = useTheme();
+  const dark = theme === "dark";
 
   if (passphrase) {
     return (
@@ -47,8 +50,8 @@ function App() {
               alignItems: "center",
               justifyContent: "center",
               height: "100%",
-              background: "#0d1117",
-              color: "#c9d1d9",
+              background: dark ? "#0d1117" : "#ffffff",
+              color: dark ? "#c9d1d9" : "#1f2328",
               fontFamily: "monospace",
             }}
           >
@@ -56,11 +59,11 @@ function App() {
           </div>
         }
       >
-        <Terminal passphrase={passphrase} />
+        <Terminal passphrase={passphrase} dark={dark} onToggleTheme={toggleTheme} />
       </Suspense>
     );
   }
-  return <Landing />;
+  return <Landing theme={theme} onToggleTheme={toggleTheme} />;
 }
 
 const root = document.getElementById("root")!;

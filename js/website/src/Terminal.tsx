@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
+import { ThemeToggle, type Theme } from "./theme";
 import {
   BlitTerminal,
   BlitWorkspaceProvider,
@@ -201,18 +202,7 @@ function ShortcutsPanel({ onClose, dimFg, border }: { onClose: () => void; dimFg
 const GITHUB_DARK = PALETTES.find((p) => p.id === "github-dark")!;
 const GITHUB_LIGHT = PALETTES.find((p) => p.id === "github-light")!;
 
-function useDarkMode(): boolean {
-  const [dark, setDark] = useState(
-    window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  return dark;
-}
+
 
 function rgb([r, g, b]: [number, number, number]): string {
   return `rgb(${r}, ${g}, ${b})`;
@@ -226,10 +216,9 @@ function tabLabel(s: BlitSession): string {
   return s.title ?? s.tag ?? "Terminal";
 }
 
-export function Terminal({ passphrase }: { passphrase: string }) {
+export function Terminal({ passphrase, dark, onToggleTheme }: { passphrase: string; dark: boolean; onToggleTheme: () => void }) {
   const [wasm, setWasm] = useState<BlitWasmModule | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const dark = useDarkMode();
 
   useEffect(() => {
     initWasm().then(setWasm).catch((e) => setError(String(e)));
@@ -265,6 +254,7 @@ export function Terminal({ passphrase }: { passphrase: string }) {
       wasm={wasm}
       passphrase={passphrase}
       dark={dark}
+      onToggleTheme={onToggleTheme}
     />
   );
 }
@@ -273,10 +263,12 @@ function TerminalInner({
   wasm,
   passphrase,
   dark,
+  onToggleTheme,
 }: {
   wasm: BlitWasmModule;
   passphrase: string;
   dark: boolean;
+  onToggleTheme: () => void;
 }) {
   const [debugLog] = useState(() => new DebugLog());
   const [debugOpen, setDebugOpen] = useDebugPanel();
@@ -298,7 +290,7 @@ function TerminalInner({
       fontFamily={FONT_FAMILY}
       fontSize={FONT_SIZE}
     >
-      <TabShell palette={palette} dark={dark} passphrase={passphrase} />
+      <TabShell palette={palette} dark={dark} passphrase={passphrase} onToggleTheme={onToggleTheme} />
       {debugOpen && <DebugPanel log={debugLog} onClose={() => setDebugOpen(false)} />}
     </BlitWorkspaceProvider>
   );
@@ -359,10 +351,12 @@ function TabShell({
   palette,
   dark,
   passphrase,
+  onToggleTheme,
 }: {
   palette: TerminalPalette;
   dark: boolean;
   passphrase: string;
+  onToggleTheme: () => void;
 }) {
   const workspace = useBlitWorkspace();
   const state = useBlitWorkspaceState();
@@ -650,6 +644,7 @@ function TabShell({
           >
             ?
           </button>
+          <ThemeToggle theme={dark ? "dark" : "light"} onToggle={onToggleTheme} />
         </div>
       )}
 

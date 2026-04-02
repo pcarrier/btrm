@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef, useCallback, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
+import { ThemeToggle, type Theme } from "./theme";
 import "./landing.css";
 
 const INSTALL_CMD = "curl -f https://install.blit.sh | sh";
@@ -56,17 +57,6 @@ function JoinForm() {
 }
 
 
-const THEME_KEY = "blit-theme";
-
-function getInitialTheme(): "light" | "dark" {
-  if (typeof window === "undefined") return "dark";
-  const stored = localStorage.getItem(THEME_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -87,47 +77,8 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function ThemeToggle({
-  theme,
-  onToggle,
-}: {
-  theme: "light" | "dark";
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      className="theme-toggle"
-      onClick={onToggle}
-      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-    >
-      {theme === "dark" ? (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      ) : (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M14 9.2A6 6 0 0 1 6.8 2 6 6 0 1 0 14 9.2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-        </svg>
-      )}
-    </button>
-  );
-}
-
-export function Landing() {
-  const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
-
-  const toggleTheme = useCallback(() => {
-    setTheme((t) => {
-      const next = t === "dark" ? "light" : "dark";
-      localStorage.setItem(THEME_KEY, next);
-      return next;
-    });
-  }, []);
-
+export function Landing({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.style.overflow = "auto";
     document.body.style.overflow = "auto";
     const root = document.getElementById("root");
@@ -143,7 +94,7 @@ export function Landing() {
         root.style.overflow = "";
       }
     };
-  }, [theme]);
+  }, []);
 
   return (
     <div className="landing">
@@ -158,7 +109,7 @@ export function Landing() {
         </div>
         <nav className="landing-nav">
           <a href="https://github.com/indent-com/blit" target="_blank" rel="noopener noreferrer">GitHub</a>
-          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </nav>
       </header>
 

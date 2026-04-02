@@ -151,7 +151,7 @@ PRs must be reviewed and pass the following CI checks before merging:
 | Check | What it covers |
 | --- | --- |
 | `e2e` | Playwright end-to-end tests (`./bin/e2e`) |
-| `dev-check` | Clippy, formatting, and build verification |
+| `dev-check` | Full-stack smoke test: starts dev services via `process-compose`, waits for health, exercises the CLI, then tears down (`./bin/dev-check`) |
 | `test (macos-latest)` | Rust and JS test suite on macOS |
 | `test (ubuntu-latest)` | Rust and JS test suite on Ubuntu |
 

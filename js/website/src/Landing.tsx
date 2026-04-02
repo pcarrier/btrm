@@ -165,22 +165,28 @@ export function Landing() {
             Let AI agents drive them. One binary, zero config, instant.
           </p>
 
-          <div className="install-section">
-            <div className="install-row">
-              <span className="prompt-char">$</span>
-              <span className="install-cmd">{INSTALL_CMD}</span>
-              <CopyButton text={INSTALL_CMD} />
+          <div className="install-group">
+            <div className="install-section">
+              <div className="install-heading">Install</div>
+              <div className="install-row">
+                <span className="prompt-char">$</span>
+                <span className="install-cmd">{INSTALL_CMD}</span>
+                <CopyButton text={INSTALL_CMD} />
+              </div>
             </div>
-            <div className="install-row">
-              <span className="prompt-char">$</span>
-              <span className="install-cmd">{DOCKER_CMD}</span>
-              <span className="install-comment"># try it now</span>
-              <CopyButton text={DOCKER_CMD} />
+
+            <div className="install-section">
+              <div className="install-heading">Try it without installing</div>
+              <div className="install-row">
+                <span className="prompt-char">$</span>
+                <span className="install-cmd">{DOCKER_CMD}</span>
+                <CopyButton text={DOCKER_CMD} />
+              </div>
             </div>
           </div>
 
           <div className="join-section">
-            <div className="join-label">or join a session in your browser</div>
+            <div className="join-label">or join someone's session</div>
             <JoinForm />
           </div>
         </section>

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
-use blit_remote::{TerminalState, CELL_SIZE};
-use wasm_bindgen::{prelude::*, JsCast};
+use blit_remote::{CELL_SIZE, TerminalState};
+use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 /// Expose WASM linear memory for zero-copy typed array views.
@@ -988,8 +988,7 @@ impl Terminal {
                 col += 1;
             }
             result.push_str(line.trim_end());
-            if row < end_row.min(self.inner.rows().saturating_sub(1))
-                && !self.inner.is_wrapped(row)
+            if row < end_row.min(self.inner.rows().saturating_sub(1)) && !self.inner.is_wrapped(row)
             {
                 result.push('\n');
             }
@@ -1133,13 +1132,11 @@ impl Terminal {
                 }
             } else if content_len > 0 {
                 let content_bytes = &cell[8..8 + content_len];
-                if content_bytes != b" " {
-                    if let Some(key) = GlyphKey::new(content_bytes, bold, italic, underline, wide) {
-                        if let Some(slot) = self.glyph_atlas.ensure_glyph(key, &normal_font, cw, ch)
-                        {
-                            self.push_glyph_vert(slot, row, col, cell_cols, fg.pack());
-                        }
-                    }
+                if content_bytes != b" "
+                    && let Some(key) = GlyphKey::new(content_bytes, bold, italic, underline, wide)
+                    && let Some(slot) = self.glyph_atlas.ensure_glyph(key, &normal_font, cw, ch)
+                {
+                    self.push_glyph_vert(slot, row, col, cell_cols, fg.pack());
                 }
             }
         }

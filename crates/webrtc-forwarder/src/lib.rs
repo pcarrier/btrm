@@ -17,8 +17,8 @@ use hmac::Hmac;
 use pbkdf2::pbkdf2;
 use sha2::Sha256;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
 pub static VERBOSE: AtomicBool = AtomicBool::new(false);
@@ -173,7 +173,9 @@ pub async fn run(config: Config) {
             signaling::Event::PeerJoined { session_id } => {
                 if let Some(existing) = peers.get(&session_id) {
                     if existing.established.load(Ordering::Relaxed) {
-                        verbose!("ignoring duplicate peer_joined for established peer: {session_id}");
+                        verbose!(
+                            "ignoring duplicate peer_joined for established peer: {session_id}"
+                        );
                         continue;
                     }
                     if let Some(old) = peers.remove(&session_id) {
@@ -191,7 +193,8 @@ pub async fn run(config: Config) {
                 let ice = ice_config.clone();
                 let handle = tokio::spawn(async move {
                     if let Err(e) =
-                        peer::handle_peer(peer_id.clone(), sock, peer_sig_rx, out_tx, key, est, ice).await
+                        peer::handle_peer(peer_id.clone(), sock, peer_sig_rx, out_tx, key, est, ice)
+                            .await
                     {
                         verbose!("peer {peer_id} error: {e}");
                     }

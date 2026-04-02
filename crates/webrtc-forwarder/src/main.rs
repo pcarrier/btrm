@@ -2,7 +2,11 @@ use blit_webrtc_forwarder::{Config, DEFAULT_HUB_URL};
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "blit-webrtc-forwarder", version, about = "Forward a blit-server session over WebRTC")]
+#[command(
+    name = "blit-webrtc-forwarder",
+    version,
+    about = "Forward a blit-server session over WebRTC"
+)]
 struct Cli {
     /// Path to the blit-server Unix socket
     #[arg(long, env = "BLIT_SOCK")]

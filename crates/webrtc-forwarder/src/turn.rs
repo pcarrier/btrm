@@ -94,7 +94,10 @@ fn xor_addr_decode(data: &[u8], tid: &[u8; 12]) -> Option<SocketAddr> {
                 return None;
             }
             let xaddr = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
-            Some(SocketAddr::new(Ipv4Addr::from(xaddr ^ MAGIC_COOKIE).into(), port))
+            Some(SocketAddr::new(
+                Ipv4Addr::from(xaddr ^ MAGIC_COOKIE).into(),
+                port,
+            ))
         }
         0x02 => {
             if data.len() < 20 {
@@ -121,12 +124,17 @@ struct StunWriter {
 
 impl StunWriter {
     fn new(msg_type: u16) -> Self {
-        Self { msg_type, tid: txn_id(), attrs: Vec::new() }
+        Self {
+            msg_type,
+            tid: txn_id(),
+            attrs: Vec::new(),
+        }
     }
 
     fn attr(&mut self, atype: u16, value: &[u8]) {
         self.attrs.extend_from_slice(&atype.to_be_bytes());
-        self.attrs.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        self.attrs
+            .extend_from_slice(&(value.len() as u16).to_be_bytes());
         self.attrs.extend_from_slice(value);
         let pad = (4 - (value.len() % 4)) % 4;
         self.attrs.extend(std::iter::repeat_n(0, pad));
@@ -202,7 +210,11 @@ fn parse_stun(data: &[u8]) -> Option<(u16, [u8; 12], Vec<(u16, Vec<u8>)>)> {
 
 fn build_send_indication(peer_addr: SocketAddr, payload: &[u8]) -> Vec<u8> {
     let tid = txn_id();
-    let mut w = StunWriter { msg_type: SEND_INDICATION, tid, attrs: Vec::new() };
+    let mut w = StunWriter {
+        msg_type: SEND_INDICATION,
+        tid,
+        attrs: Vec::new(),
+    };
     let xpa = xor_addr_encode(peer_addr, &tid);
     w.attr(ATTR_XOR_PEER_ADDRESS, &xpa);
     w.attr(ATTR_DATA, payload);
@@ -245,17 +257,18 @@ pub async fn stun_binding(
             return Err("STUN binding timeout".into());
         }
         let (n, _) = tokio::time::timeout(remaining, socket.recv_from(&mut buf)).await??;
-        if let Some((mtype, rtid, attrs)) = parse_stun(&buf[..n]) {
-            if mtype == BINDING_RESPONSE && rtid == tid {
-                for (atype, val) in &attrs {
-                    if *atype == ATTR_XOR_MAPPED_ADDRESS {
-                        if let Some(addr) = xor_addr_decode(val, &tid) {
-                            return Ok(addr);
-                        }
-                    }
+        if let Some((mtype, rtid, attrs)) = parse_stun(&buf[..n])
+            && mtype == BINDING_RESPONSE
+            && rtid == tid
+        {
+            for (atype, val) in &attrs {
+                if *atype == ATTR_XOR_MAPPED_ADDRESS
+                    && let Some(addr) = xor_addr_decode(val, &tid)
+                {
+                    return Ok(addr);
                 }
-                return Err("no XOR-MAPPED-ADDRESS".into());
             }
+            return Err("no XOR-MAPPED-ADDRESS".into());
         }
     }
 }
@@ -280,22 +293,23 @@ async fn udp_allocate(
             socket.recv_from(&mut buf),
         )
         .await??;
-        if let Some((mtype, rtid, attrs)) = parse_stun(&buf[..n]) {
-            if rtid == tid && mtype == ALLOCATE_ERROR {
-                let mut nonce = None;
-                let mut realm = None;
-                for (atype, val) in &attrs {
-                    match *atype {
-                        ATTR_NONCE => nonce = Some(val.clone()),
-                        ATTR_REALM => realm = Some(String::from_utf8_lossy(val).into_owned()),
-                        _ => {}
-                    }
+        if let Some((mtype, rtid, attrs)) = parse_stun(&buf[..n])
+            && rtid == tid
+            && mtype == ALLOCATE_ERROR
+        {
+            let mut nonce = None;
+            let mut realm = None;
+            for (atype, val) in &attrs {
+                match *atype {
+                    ATTR_NONCE => nonce = Some(val.clone()),
+                    ATTR_REALM => realm = Some(String::from_utf8_lossy(val).into_owned()),
+                    _ => {}
                 }
-                break (
-                    nonce.ok_or("no NONCE in 401")?,
-                    realm.ok_or("no REALM in 401")?,
-                );
             }
+            break (
+                nonce.ok_or("no NONCE in 401")?,
+                realm.ok_or("no REALM in 401")?,
+            );
         }
     };
 
@@ -306,7 +320,9 @@ async fn udp_allocate(
     w2.attr(ATTR_USERNAME, username.as_bytes());
     w2.attr(ATTR_REALM, realm.as_bytes());
     w2.attr(ATTR_NONCE, &nonce);
-    socket.send_to(&w2.build_with_integrity(&key), server).await?;
+    socket
+        .send_to(&w2.build_with_integrity(&key), server)
+        .await?;
 
     loop {
         let (n, _) = tokio::time::timeout(
@@ -314,31 +330,31 @@ async fn udp_allocate(
             socket.recv_from(&mut buf),
         )
         .await??;
-        if let Some((mtype, rtid, attrs)) = parse_stun(&buf[..n]) {
-            if rtid == tid2 {
-                if mtype == ALLOCATE_RESPONSE {
-                    let relay_addr = attrs
-                        .iter()
-                        .filter(|(t, _)| *t == ATTR_XOR_RELAYED_ADDRESS)
-                        .find_map(|(_, val)| xor_addr_decode(val, &tid2));
-                    match relay_addr {
-                        Some(addr) => return Ok((addr, nonce, realm, key)),
-                        None => return Err("no XOR-RELAYED-ADDRESS".into()),
-                    }
-                } else if mtype == ALLOCATE_ERROR {
-                    let code = attrs
-                        .iter()
-                        .find(|(t, _)| *t == ATTR_ERROR_CODE)
-                        .map(|(_, v)| {
-                            if v.len() >= 4 {
-                                (v[2] as u16) * 100 + v[3] as u16
-                            } else {
-                                0
-                            }
-                        })
-                        .unwrap_or(0);
-                    return Err(format!("TURN allocate error {code}").into());
+        if let Some((mtype, rtid, attrs)) = parse_stun(&buf[..n])
+            && rtid == tid2
+        {
+            if mtype == ALLOCATE_RESPONSE {
+                let relay_addr = attrs
+                    .iter()
+                    .filter(|(t, _)| *t == ATTR_XOR_RELAYED_ADDRESS)
+                    .find_map(|(_, val)| xor_addr_decode(val, &tid2));
+                match relay_addr {
+                    Some(addr) => return Ok((addr, nonce, realm, key)),
+                    None => return Err("no XOR-RELAYED-ADDRESS".into()),
                 }
+            } else if mtype == ALLOCATE_ERROR {
+                let code = attrs
+                    .iter()
+                    .find(|(t, _)| *t == ATTR_ERROR_CODE)
+                    .map(|(_, v)| {
+                        if v.len() >= 4 {
+                            (v[2] as u16) * 100 + v[3] as u16
+                        } else {
+                            0
+                        }
+                    })
+                    .unwrap_or(0);
+                return Err(format!("TURN allocate error {code}").into());
             }
         }
     }
@@ -368,10 +384,11 @@ async fn udp_create_permission(
         socket.recv_from(&mut buf),
     )
     .await??;
-    if let Some((mtype, rtid, _)) = parse_stun(&buf[..n]) {
-        if rtid == tid && mtype == CREATE_PERM_RESPONSE {
-            return Ok(());
-        }
+    if let Some((mtype, rtid, _)) = parse_stun(&buf[..n])
+        && rtid == tid
+        && mtype == CREATE_PERM_RESPONSE
+    {
+        return Ok(());
     }
     Err("CreatePermission failed".into())
 }
@@ -398,10 +415,11 @@ async fn udp_refresh(
         socket.recv_from(&mut buf),
     )
     .await??;
-    if let Some((mtype, rtid, _)) = parse_stun(&buf[..n]) {
-        if rtid == tid && mtype == REFRESH_RESPONSE {
-            return Ok(());
-        }
+    if let Some((mtype, rtid, _)) = parse_stun(&buf[..n])
+        && rtid == tid
+        && mtype == REFRESH_RESPONSE
+    {
+        return Ok(());
     }
     Err("TURN refresh failed".into())
 }
@@ -446,13 +464,11 @@ async fn udp_relay_task(
                 }
             }
             result = socket.recv_from(&mut buf) => {
-                if let Ok((n, src)) = result {
-                    if src == server {
-                        if let Some((peer_addr, data)) = decode_data_indication(&buf[..n]) {
+                if let Ok((n, src)) = result
+                    && src == server
+                        && let Some((peer_addr, data)) = decode_data_indication(&buf[..n]) {
                             let _ = recv_tx.send((peer_addr, data));
                         }
-                    }
-                }
             }
             _ = refresh_timer.tick() => {
                 if let Err(e) = udp_refresh(&socket, server, &nonce, &realm, &key, &username).await {
@@ -533,22 +549,23 @@ async fn tcp_allocate(
             stream.read_stun_message(),
         )
         .await??;
-        if let Some((mtype, rtid, attrs)) = parse_stun(&msg) {
-            if rtid == tid && mtype == ALLOCATE_ERROR {
-                let mut nonce = None;
-                let mut realm = None;
-                for (atype, val) in &attrs {
-                    match *atype {
-                        ATTR_NONCE => nonce = Some(val.clone()),
-                        ATTR_REALM => realm = Some(String::from_utf8_lossy(val).into_owned()),
-                        _ => {}
-                    }
+        if let Some((mtype, rtid, attrs)) = parse_stun(&msg)
+            && rtid == tid
+            && mtype == ALLOCATE_ERROR
+        {
+            let mut nonce = None;
+            let mut realm = None;
+            for (atype, val) in &attrs {
+                match *atype {
+                    ATTR_NONCE => nonce = Some(val.clone()),
+                    ATTR_REALM => realm = Some(String::from_utf8_lossy(val).into_owned()),
+                    _ => {}
                 }
-                break (
-                    nonce.ok_or("no NONCE in 401")?,
-                    realm.ok_or("no REALM in 401")?,
-                );
             }
+            break (
+                nonce.ok_or("no NONCE in 401")?,
+                realm.ok_or("no REALM in 401")?,
+            );
         }
     };
 
@@ -567,31 +584,31 @@ async fn tcp_allocate(
             stream.read_stun_message(),
         )
         .await??;
-        if let Some((mtype, rtid, attrs)) = parse_stun(&msg) {
-            if rtid == tid2 {
-                if mtype == ALLOCATE_RESPONSE {
-                    let relay_addr = attrs
-                        .iter()
-                        .filter(|(t, _)| *t == ATTR_XOR_RELAYED_ADDRESS)
-                        .find_map(|(_, val)| xor_addr_decode(val, &tid2));
-                    match relay_addr {
-                        Some(addr) => return Ok((addr, nonce, realm, key)),
-                        None => return Err("no XOR-RELAYED-ADDRESS".into()),
-                    }
-                } else if mtype == ALLOCATE_ERROR {
-                    let code = attrs
-                        .iter()
-                        .find(|(t, _)| *t == ATTR_ERROR_CODE)
-                        .map(|(_, v)| {
-                            if v.len() >= 4 {
-                                (v[2] as u16) * 100 + v[3] as u16
-                            } else {
-                                0
-                            }
-                        })
-                        .unwrap_or(0);
-                    return Err(format!("TURN allocate error {code}").into());
+        if let Some((mtype, rtid, attrs)) = parse_stun(&msg)
+            && rtid == tid2
+        {
+            if mtype == ALLOCATE_RESPONSE {
+                let relay_addr = attrs
+                    .iter()
+                    .filter(|(t, _)| *t == ATTR_XOR_RELAYED_ADDRESS)
+                    .find_map(|(_, val)| xor_addr_decode(val, &tid2));
+                match relay_addr {
+                    Some(addr) => return Ok((addr, nonce, realm, key)),
+                    None => return Err("no XOR-RELAYED-ADDRESS".into()),
                 }
+            } else if mtype == ALLOCATE_ERROR {
+                let code = attrs
+                    .iter()
+                    .find(|(t, _)| *t == ATTR_ERROR_CODE)
+                    .map(|(_, v)| {
+                        if v.len() >= 4 {
+                            (v[2] as u16) * 100 + v[3] as u16
+                        } else {
+                            0
+                        }
+                    })
+                    .unwrap_or(0);
+                return Err(format!("TURN allocate error {code}").into());
             }
         }
     }
@@ -619,10 +636,11 @@ async fn tcp_create_permission(
         stream.read_stun_message(),
     )
     .await??;
-    if let Some((mtype, rtid, _)) = parse_stun(&msg) {
-        if rtid == tid && mtype == CREATE_PERM_RESPONSE {
-            return Ok(());
-        }
+    if let Some((mtype, rtid, _)) = parse_stun(&msg)
+        && rtid == tid
+        && mtype == CREATE_PERM_RESPONSE
+    {
+        return Ok(());
     }
     Err("CreatePermission failed".into())
 }
@@ -647,10 +665,11 @@ async fn tcp_refresh(
         stream.read_stun_message(),
     )
     .await??;
-    if let Some((mtype, rtid, _)) = parse_stun(&msg) {
-        if rtid == tid && mtype == REFRESH_RESPONSE {
-            return Ok(());
-        }
+    if let Some((mtype, rtid, _)) = parse_stun(&msg)
+        && rtid == tid
+        && mtype == REFRESH_RESPONSE
+    {
+        return Ok(());
     }
     Err("TURN refresh failed".into())
 }
@@ -752,7 +771,13 @@ impl TurnRelay {
             recv_tx,
         ));
 
-        Ok(Self { relay_addr, server_addr, send_tx, recv_rx, _task: task })
+        Ok(Self {
+            relay_addr,
+            server_addr,
+            send_tx,
+            recv_rx,
+            _task: task,
+        })
     }
 
     pub async fn allocate_tcp(
@@ -795,6 +820,12 @@ impl TurnRelay {
             recv_tx,
         ));
 
-        Ok(Self { relay_addr, server_addr, send_tx, recv_rx, _task: task })
+        Ok(Self {
+            relay_addr,
+            server_addr,
+            send_tx,
+            recv_rx,
+            _task: task,
+        })
     }
 }

@@ -49,14 +49,14 @@ pub async fn connect(
             .next()
             .await
             .ok_or("signaling closed before registration")??;
-        if let Message::Text(t) = msg {
-            if let Ok(m) = serde_json::from_str::<ServerMessage>(&t) {
-                if m.msg_type == "registered" {
-                    break m.session_id.unwrap_or_default();
-                }
-                if m.msg_type == "error" {
-                    return Err(format!("signaling: {}", m.message.unwrap_or_default()).into());
-                }
+        if let Message::Text(t) = msg
+            && let Ok(m) = serde_json::from_str::<ServerMessage>(&t)
+        {
+            if m.msg_type == "registered" {
+                break m.session_id.unwrap_or_default();
+            }
+            if m.msg_type == "error" {
+                return Err(format!("signaling: {}", m.message.unwrap_or_default()).into());
             }
         }
     };
@@ -66,14 +66,14 @@ pub async fn connect(
             .next()
             .await
             .ok_or("signaling closed before peer joined")??;
-        if let Message::Text(t) = msg {
-            if let Ok(m) = serde_json::from_str::<ServerMessage>(&t) {
-                if m.msg_type == "peer_joined" {
-                    break m.session_id.unwrap_or_default();
-                }
-                if m.msg_type == "error" {
-                    return Err(format!("signaling: {}", m.message.unwrap_or_default()).into());
-                }
+        if let Message::Text(t) = msg
+            && let Ok(m) = serde_json::from_str::<ServerMessage>(&t)
+        {
+            if m.msg_type == "peer_joined" {
+                break m.session_id.unwrap_or_default();
+            }
+            if m.msg_type == "error" {
+                return Err(format!("signaling: {}", m.message.unwrap_or_default()).into());
             }
         }
     };
@@ -100,8 +100,7 @@ pub async fn connect(
         for stun_addr in stun_servers.iter().take(1) {
             if let Ok(srflx) = turn::stun_binding(*stun_addr, &tokio_udp).await {
                 rtc.add_local_candidate(
-                    Candidate::server_reflexive(srflx, local_addr, "udp")
-                        .expect("valid candidate"),
+                    Candidate::server_reflexive(srflx, local_addr, "udp").expect("valid candidate"),
                 );
                 break;
             }
@@ -114,15 +113,18 @@ pub async fn connect(
                 }
                 ice::Transport::Tcp => {
                     TurnRelay::allocate_tcp(
-                        ts.addr, ts.tls, &ts.hostname, &ts.username, &ts.credential,
+                        ts.addr,
+                        ts.tls,
+                        &ts.hostname,
+                        &ts.username,
+                        &ts.credential,
                     )
                     .await
                 }
             };
             if let Ok(r) = result {
                 rtc.add_local_candidate(
-                    Candidate::relayed(r.relay_addr, local_addr, "udp")
-                        .expect("valid candidate"),
+                    Candidate::relayed(r.relay_addr, local_addr, "udp").expect("valid candidate"),
                 );
                 relay = Some(r);
                 break;
@@ -147,32 +149,30 @@ pub async fn connect(
             .next()
             .await
             .ok_or("signaling closed before answer")??;
-        if let Message::Text(t) = msg {
-            if let Ok(m) = serde_json::from_str::<ServerMessage>(&t) {
-                if m.msg_type == "signal" {
-                    if let Some(data) = m.data {
-                        if let Some(sdp) = data.get("sdp") {
-                            let answer = serde_json::from_value(sdp.clone())?;
-                            if let Some(p) = answer_pending.take() {
-                                rtc.sdp_api().accept_answer(p, answer)?;
-                            }
-                        } else {
-                            signal_rx_buf.push(data);
-                        }
-                        if answer_pending.is_none() {
-                            break;
-                        }
-                    }
+        if let Message::Text(t) = msg
+            && let Ok(m) = serde_json::from_str::<ServerMessage>(&t)
+            && m.msg_type == "signal"
+            && let Some(data) = m.data
+        {
+            if let Some(sdp) = data.get("sdp") {
+                let answer = serde_json::from_value(sdp.clone())?;
+                if let Some(p) = answer_pending.take() {
+                    rtc.sdp_api().accept_answer(p, answer)?;
                 }
+            } else {
+                signal_rx_buf.push(data);
+            }
+            if answer_pending.is_none() {
+                break;
             }
         }
     }
 
     for data in signal_rx_buf.drain(..) {
-        if let Some(candidate) = data.get("candidate") {
-            if let Ok(c) = serde_json::from_value::<Candidate>(candidate.clone()) {
-                rtc.add_remote_candidate(c);
-            }
+        if let Some(candidate) = data.get("candidate")
+            && let Ok(c) = serde_json::from_value::<Candidate>(candidate.clone())
+        {
+            rtc.add_remote_candidate(c);
         }
     }
 
@@ -301,9 +301,9 @@ async fn drive(
                     std::future::pending::<Option<(std::net::SocketAddr, Vec<u8>)>>().await
                 }
             } => {
-                if let Some((peer_addr, data)) = turn_data {
-                    if let Some(ra) = relay_addr {
-                        if let Ok(receive) = Receive::new(
+                if let Some((peer_addr, data)) = turn_data
+                    && let Some(ra) = relay_addr
+                        && let Ok(receive) = Receive::new(
                             str0m::net::Protocol::Udp,
                             peer_addr,
                             ra,
@@ -311,8 +311,6 @@ async fn drive(
                         ) {
                             rtc.handle_input(Input::Receive(Instant::now(), receive))?;
                         }
-                    }
-                }
             }
             result = async {
                 if blit_channel.is_some() {
@@ -352,17 +350,13 @@ async fn drive(
             } => {
                 match sig {
                     Some(Ok(Message::Text(t))) => {
-                        if let Ok(m) = serde_json::from_str::<ServerMessage>(&t) {
-                            if m.msg_type == "signal" {
-                                if let Some(data) = m.data {
-                                    if let Some(candidate) = data.get("candidate") {
-                                        if let Ok(c) = serde_json::from_value::<Candidate>(candidate.clone()) {
+                        if let Ok(m) = serde_json::from_str::<ServerMessage>(&t)
+                            && m.msg_type == "signal"
+                                && let Some(data) = m.data
+                                    && let Some(candidate) = data.get("candidate")
+                                        && let Ok(c) = serde_json::from_value::<Candidate>(candidate.clone()) {
                                             rtc.add_remote_candidate(c);
                                         }
-                                    }
-                                }
-                            }
-                        }
                     }
                     None | Some(Err(_)) => {
                         signaling_alive = false;

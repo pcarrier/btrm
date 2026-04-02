@@ -1,7 +1,7 @@
 use blit_remote::{
-    msg_ack, msg_close, msg_create, msg_focus, msg_input, msg_resize, TerminalState,
     C2S_DISPLAY_RATE, CELL_SIZE, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_HELLO, S2C_LIST,
-    S2C_TITLE, S2C_UPDATE,
+    S2C_TITLE, S2C_UPDATE, TerminalState, msg_ack, msg_close, msg_create, msg_focus, msg_input,
+    msg_resize,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -13,7 +13,7 @@ use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 
-use crate::transport::{self, make_frame, read_frame, Transport};
+use crate::transport::{self, Transport, make_frame, read_frame};
 
 const WEB_INDEX_HTML: &str = include_str!("../../../js/web-app/dist/index.html");
 
@@ -627,7 +627,13 @@ fn parse_expose_key(data: &[u8]) -> (ExposeAction, usize) {
     }
 }
 
-pub async fn run_console(socket: &Option<String>, tcp: &Option<String>, ssh: &Option<String>, share: &Option<String>, hub: &str) {
+pub async fn run_console(
+    socket: &Option<String>,
+    tcp: &Option<String>,
+    ssh: &Option<String>,
+    share: &Option<String>,
+    hub: &str,
+) {
     let transport = match transport::connect(socket, tcp, ssh, share, hub).await {
         Ok(t) => t,
         Err(e) => {
@@ -667,11 +673,11 @@ pub async fn run_browser(
         BrowserConnector::Unix(path.clone())
     } else {
         let path = transport::default_local_socket();
-        if !std::path::Path::new(&path).exists() {
-            if let Err(e) = transport::ensure_local_server(&path).await {
-                eprintln!("blit: {e}");
-                std::process::exit(1);
-            }
+        if !std::path::Path::new(&path).exists()
+            && let Err(e) = transport::ensure_local_server(&path).await
+        {
+            eprintln!("blit: {e}");
+            std::process::exit(1);
         }
         BrowserConnector::Unix(path)
     };
@@ -724,14 +730,22 @@ pub async fn run_browser(
         Box::leak(blit_webserver::html_etag(injected_html).into_boxed_str());
 
     let app = axum::Router::new()
-        .route("/config", get(move |
-            axum::extract::State(state): axum::extract::State<Arc<BrowserState>>,
-            ws: WebSocketUpgrade,
-        | async move {
-            ws.on_upgrade(move |socket| async move {
-                blit_webserver::config::handle_config_ws(socket, &state.token, &state.config).await;
-            })
-        }))
+        .route(
+            "/config",
+            get(
+                move |axum::extract::State(state): axum::extract::State<Arc<BrowserState>>,
+                      ws: WebSocketUpgrade| async move {
+                    ws.on_upgrade(move |socket| async move {
+                        blit_webserver::config::handle_config_ws(
+                            socket,
+                            &state.token,
+                            &state.config,
+                        )
+                        .await;
+                    })
+                },
+            ),
+        )
         .fallback(get(move |state, request| {
             browser_root_handler(state, request, injected_html, html_etag)
         }))
@@ -859,8 +873,8 @@ pub async fn run_browser_share(passphrase: &str, hub: &str, port: Option<u16>) {
     let url = format!("http://{addr}/s#{passphrase}");
     eprintln!("blit: serving browser UI at {url}");
 
-    let app = axum::Router::new().fallback(get(
-        move |request: axum::extract::Request| async move {
+    let app =
+        axum::Router::new().fallback(get(move |request: axum::extract::Request| async move {
             if let Some(resp) = blit_webserver::try_font_route(request.uri().path(), None) {
                 return resp;
             }
@@ -868,13 +882,8 @@ pub async fn run_browser_share(passphrase: &str, hub: &str, port: Option<u16>) {
                 .headers()
                 .get("if-none-match")
                 .and_then(|v| v.to_str().ok().map(|s| s.as_bytes().to_vec()));
-            blit_webserver::html_response(
-                injected_html,
-                html_etag,
-                inm.as_deref(),
-            )
-        },
-    ));
+            blit_webserver::html_response(injected_html, html_etag, inm.as_deref())
+        }));
 
     open_browser(&url);
 
@@ -1044,7 +1053,7 @@ async fn run(transport: Transport) {
 
     let ev_tx_sig = ev_tx;
     tokio::spawn(async move {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut sig = signal(SignalKind::window_change()).expect("SIGWINCH");
         loop {
             sig.recv().await;
@@ -1131,12 +1140,12 @@ async fn handle_stdin(
 ) -> bool {
     if !expose.open {
         if let Some(pos) = data.iter().position(|&b| b == 0x0B) {
-            if pos > 0 {
-                if let Some(id) = *focused_pty {
-                    let _ = frame_tx
-                        .send(make_frame(&msg_input(id, &data[..pos])))
-                        .await;
-                }
+            if pos > 0
+                && let Some(id) = *focused_pty
+            {
+                let _ = frame_tx
+                    .send(make_frame(&msg_input(id, &data[..pos])))
+                    .await;
             }
             expose.sync(ptys);
             expose.open = true;
@@ -1227,12 +1236,12 @@ async fn handle_expose_input(
                     cols,
                 )
                 .await;
-                if off < data.len() {
-                    if let Some(id) = *focused_pty {
-                        let _ = frame_tx
-                            .send(make_frame(&msg_input(id, &data[off..])))
-                            .await;
-                    }
+                if off < data.len()
+                    && let Some(id) = *focused_pty
+                {
+                    let _ = frame_tx
+                        .send(make_frame(&msg_input(id, &data[off..])))
+                        .await;
                 }
                 return false;
             }
@@ -1449,17 +1458,17 @@ async fn handle_server_msg(
                     }
                 }
             }
-            if *focused_pty == Some(id) {
-                if let Ok(title) = std::str::from_utf8(&frame[3..]) {
-                    current_title.clear();
-                    current_title.push_str(title);
-                    if !expose.open {
-                        out_buf.clear();
-                        out_buf.extend_from_slice(b"\x1b]0;");
-                        out_buf.extend_from_slice(title.as_bytes());
-                        out_buf.push(b'\x07');
-                        write_all_stdout(out_buf);
-                    }
+            if *focused_pty == Some(id)
+                && let Ok(title) = std::str::from_utf8(&frame[3..])
+            {
+                current_title.clear();
+                current_title.push_str(title);
+                if !expose.open {
+                    out_buf.clear();
+                    out_buf.extend_from_slice(b"\x1b]0;");
+                    out_buf.extend_from_slice(title.as_bytes());
+                    out_buf.push(b'\x07');
+                    write_all_stdout(out_buf);
                 }
             }
         }

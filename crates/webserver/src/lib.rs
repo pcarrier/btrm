@@ -66,25 +66,25 @@ pub fn font_metrics_response(name: &str, cors_origin: Option<&str>) -> Response 
 }
 
 fn add_cors(resp: &mut Response, origin: Option<&str>) {
-    if let Some(origin) = origin {
-        if let Ok(val) = origin.parse() {
-            resp.headers_mut()
-                .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
-        }
+    if let Some(origin) = origin
+        && let Ok(val) = origin.parse()
+    {
+        resp.headers_mut()
+            .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
     }
 }
 
 /// Serve HTML with ETag support. Returns 304 if the client's `If-None-Match`
 /// matches `etag`.
 pub fn html_response(html: &'static str, etag: &str, if_none_match: Option<&[u8]>) -> Response {
-    if let Some(inm) = if_none_match {
-        if inm == etag.as_bytes() {
-            return (
-                axum::http::StatusCode::NOT_MODIFIED,
-                [(axum::http::header::ETAG, etag)],
-            )
-                .into_response();
-        }
+    if let Some(inm) = if_none_match
+        && inm == etag.as_bytes()
+    {
+        return (
+            axum::http::StatusCode::NOT_MODIFIED,
+            [(axum::http::header::ETAG, etag)],
+        )
+            .into_response();
     }
     ([(axum::http::header::ETAG, etag)], Html(html)).into_response()
 }
@@ -96,17 +96,19 @@ pub fn try_font_route(path: &str, cors_origin: Option<&str>) -> Option<Response>
     if path == "/fonts" || path.ends_with("/fonts") {
         return Some(fonts_list_response(cors_origin));
     }
-    if let Some(raw) = path.rsplit_once("/font-metrics/").map(|(_, n)| n) {
-        if !raw.contains('/') && !raw.is_empty() {
-            let name = percent_encoding::percent_decode_str(raw).decode_utf8_lossy();
-            return Some(font_metrics_response(&name, cors_origin));
-        }
+    if let Some(raw) = path.rsplit_once("/font-metrics/").map(|(_, n)| n)
+        && !raw.contains('/')
+        && !raw.is_empty()
+    {
+        let name = percent_encoding::percent_decode_str(raw).decode_utf8_lossy();
+        return Some(font_metrics_response(&name, cors_origin));
     }
-    if let Some(raw) = path.rsplit_once("/font/").map(|(_, n)| n) {
-        if !raw.contains('/') && !raw.is_empty() {
-            let name = percent_encoding::percent_decode_str(raw).decode_utf8_lossy();
-            return Some(font_response(&name, cors_origin));
-        }
+    if let Some(raw) = path.rsplit_once("/font/").map(|(_, n)| n)
+        && !raw.contains('/')
+        && !raw.is_empty()
+    {
+        let name = percent_encoding::percent_decode_str(raw).decode_utf8_lossy();
+        return Some(font_response(&name, cors_origin));
     }
     None
 }

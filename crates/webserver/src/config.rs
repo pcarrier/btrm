@@ -96,9 +96,9 @@ fn spawn_watcher(tx: broadcast::Sender<String>) {
         loop {
             match nrx.recv() {
                 Ok(Ok(event)) => {
-                    let dominated = file_name.as_ref().is_none_or(|name| {
-                        event.paths.iter().any(|p| p.file_name() == Some(name))
-                    });
+                    let dominated = file_name
+                        .as_ref()
+                        .is_none_or(|name| event.paths.iter().any(|p| p.file_name() == Some(name)));
                     if !dominated {
                         continue;
                     }
@@ -170,8 +170,8 @@ pub async fn handle_config_ws(mut ws: WebSocket, token: &str, config: &ConfigSta
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         let text = text.trim();
-                        if let Some(rest) = text.strip_prefix("set ") {
-                            if let Some((k, v)) = rest.split_once(' ') {
+                        if let Some(rest) = text.strip_prefix("set ")
+                            && let Some((k, v)) = rest.split_once(' ') {
                                 let _guard = config.write_lock.lock().await;
                                 let mut map = read_config();
                                 let k = k.trim().replace(['\n', '\r'], "");
@@ -184,7 +184,6 @@ pub async fn handle_config_ws(mut ws: WebSocket, token: &str, config: &ConfigSta
                                 }
                                 write_config(&map);
                             }
-                        }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,

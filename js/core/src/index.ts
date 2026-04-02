@@ -18,6 +18,7 @@ export { createShareTransport } from "./transports/webrtc-share";
 export { DEFAULT_FONT, DEFAULT_FONT_SIZE } from "./types";
 export type {
   BlitConnectionSnapshot,
+  BlitDebug,
   BlitSearchResult,
   BlitWorkspaceSnapshot,
   BlitTransport,
@@ -26,6 +27,7 @@ export type {
   ConnectionStatus,
   SessionId,
   TerminalPalette,
+  TransportConfig,
 } from "./types";
 
 export { PALETTES } from "./palettes";

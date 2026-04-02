@@ -1,7 +1,7 @@
 { pkgs, version, browserWasm, blit-server, blit-gateway
 , blit-server-static, blit-cli-static, blit-gateway-static
 , blit-webrtc-forwarder-static
-, manPages, webAppDist, rustToolchain
+, manPages, webAppDist, websiteDist, rustToolchain
 }:
 let
   browser-publish = pkgs.writeShellApplication {
@@ -233,8 +233,36 @@ CTRL
       publish blit-gateway
     '';
   };
+
+  deploy-website = pkgs.writeShellApplication {
+    name = "deploy-website";
+    runtimeInputs = [ pkgs.nodejs ];
+    text = ''
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+
+      mkdir -p "$tmp/.vercel/output/static"
+      cp -r ${websiteDist}/* "$tmp/.vercel/output/static/"
+      cat > "$tmp/.vercel/output/config.json" <<'JSON'
+{"version":3,"routes":[{"handle":"filesystem"},{"src":"/(.*)", "dest":"/index.html"}]}
+JSON
+
+      if [ -n "''${VERCEL_ORG_ID:-}" ] && [ -n "''${VERCEL_PROJECT_ID:-}" ]; then
+        cat > "$tmp/.vercel/project.json" <<PROJ
+{"orgId":"$VERCEL_ORG_ID","projectId":"$VERCEL_PROJECT_ID"}
+PROJ
+      fi
+
+      cd "$tmp"
+      token_args=()
+      if [ -n "''${VERCEL_TOKEN:-}" ]; then
+        token_args+=(--token "$VERCEL_TOKEN")
+      fi
+      npx vercel deploy --prebuilt "''${token_args[@]}" "$@"
+    '';
+  };
 in {
-  inherit browser-publish core-publish react-publish publish-npm-packages publish-crates;
+  inherit browser-publish core-publish react-publish publish-npm-packages publish-crates deploy-website;
   inherit blit-server-deb blit-cli-deb blit-gateway-deb blit-webrtc-forwarder-deb;
 
   build-debs = pkgs.writeShellApplication {

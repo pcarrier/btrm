@@ -12,12 +12,19 @@ export interface TerminalPalette {
   ansi: Array<[number, number, number]>;
 }
 
+export interface BlitDebug {
+  log(msg: string, ...args: unknown[]): void;
+  warn(msg: string, ...args: unknown[]): void;
+  error(msg: string, ...args: unknown[]): void;
+}
+
 /** Connection lifecycle states. */
 export type ConnectionStatus =
   | "connecting"
   | "authenticating"
   | "connected"
   | "disconnected"
+  | "closed"
   | "error";
 
 export type ConnectionId = string;
@@ -119,6 +126,22 @@ export interface BlitSearchResult {
   scrollOffset: number | null;
   context: string;
 }
+
+export type TransportConfig =
+  | {
+      type: "websocket";
+      url: string;
+      passphrase: string;
+      options?: BlitTransportOptions;
+    }
+  | {
+      type: "webtransport";
+      url: string;
+      passphrase: string;
+      options?: BlitTransportOptions & { certHash?: string };
+    }
+  | { type: "share"; hubUrl: string; passphrase: string; debug?: BlitDebug }
+  | { type: "custom"; transport: BlitTransport };
 
 export const DEFAULT_FONT = "ui-monospace, monospace";
 export const DEFAULT_FONT_SIZE = 13;

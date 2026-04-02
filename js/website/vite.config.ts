@@ -1,11 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { createRequire } from "node:module";
-
-const localRequire = createRequire(resolve(__dirname, "package.json"));
 
 const wasmPath = resolve(
   __dirname,
@@ -14,12 +11,17 @@ const wasmPath = resolve(
 const snippetsDir = resolve(__dirname, "../../crates/browser/pkg/snippets");
 const isDev =
   process.env.NODE_ENV !== "production" && !process.argv.includes("build");
+const isSsr = process.argv.includes("--ssr");
+
+const localRequire = createRequire(resolve(__dirname, "package.json"));
+const blitSourceDirs = [
+  resolve(__dirname, "../core/src"),
+  resolve(__dirname, "../react/src"),
+];
 
 export default defineConfig({
   plugins: [
     react(),
-    // Only inline everything into a single HTML file for production builds.
-    !isDev && viteSingleFile(),
     {
       name: "inline-wasm",
       resolveId(id) {
@@ -27,8 +29,10 @@ export default defineConfig({
       },
       load(id) {
         if (id !== "\0virtual:blit-wasm") return;
+        if (isSsr) {
+          return `export default null;`;
+        }
         if (isDev) {
-          // In dev, use a URL import so Vite serves the file directly.
           return `export default "/@fs${wasmPath}";`;
         }
         const wasm = readFileSync(wasmPath);
@@ -53,7 +57,26 @@ export default bin.buffer;
         }
       },
     },
-  ].filter(Boolean),
+    {
+      name: "resolve-external-bare-imports",
+      resolveId(id, importer) {
+        if (
+          !importer ||
+          id.startsWith(".") ||
+          id.startsWith("/") ||
+          id.startsWith("\0") ||
+          id.startsWith("virtual:")
+        )
+          return;
+        if (!blitSourceDirs.some((dir) => importer.startsWith(dir))) return;
+        try {
+          return localRequire.resolve(id);
+        } catch {
+          return;
+        }
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@blit-sh/react": resolve(__dirname, "../react/src"),
@@ -63,18 +86,19 @@ export default bin.buffer;
         "../../crates/browser/pkg/blit_browser.js",
       ),
       tweetnacl: localRequire.resolve("tweetnacl"),
+      react: resolve(__dirname, "node_modules/react"),
+      "react-dom": resolve(__dirname, "node_modules/react-dom"),
     },
     dedupe: ["react", "react-dom"],
   },
   server: {
-    port: 3265,
+    port: 5173,
     fs: {
-      // Allow serving the WASM file from outside the web-app directory.
       allow: [resolve(__dirname, "../..")],
     },
   },
   build: {
-    outDir: resolve(__dirname, "dist"),
+    outDir: resolve(__dirname, isSsr ? "dist-ssr" : "dist"),
     target: "es2020",
   },
 });

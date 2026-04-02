@@ -14,5 +14,5 @@ export function useBlitWorkspaceConnection(
   useEffect(() => {
     workspace.addConnection({ id: connectionId, transport });
     return () => workspace.removeConnection(connectionId);
-  }, [workspace, connectionId]);
+  }, [workspace, connectionId, transport]);
 }

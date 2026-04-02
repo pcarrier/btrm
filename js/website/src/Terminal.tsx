@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import {
   BlitTerminal,
   BlitWorkspaceProvider,
@@ -126,17 +126,70 @@ function TerminalInner({
       fontFamily={FONT_FAMILY}
       fontSize={FONT_SIZE}
     >
-      <TabShell palette={palette} dark={dark} />
+      <TabShell palette={palette} dark={dark} passphrase={passphrase} />
     </BlitWorkspaceProvider>
+  );
+}
+
+function ShareButton({
+  passphrase,
+  dimFg,
+  tabHover,
+}: {
+  passphrase: string;
+  dimFg: string;
+  tabHover: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const handleClick = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    const url = `${location.origin}/#${encodeURIComponent(passphrase)}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    clearTimeout(timeout.current);
+    timeout.current = setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "0 10px",
+        background: "transparent",
+        border: "none",
+        color: dimFg,
+        cursor: "pointer",
+        fontSize: 12,
+        fontFamily: "'Fira Code', monospace",
+        whiteSpace: "nowrap",
+        transition: "background 0.1s",
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = tabHover)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      title="Copy share link"
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4ZM12 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4ZM12 16a2 2 0 1 1 0-4 2 2 0 0 1 0 4ZM5.7 9.3l4.6 3.4M10.3 5.3l-4.6 3.4" />
+      </svg>
+      {copied ? "Copied!" : "Share"}
+    </button>
   );
 }
 
 function TabShell({
   palette,
   dark,
+  passphrase,
 }: {
   palette: TerminalPalette;
   dark: boolean;
+  passphrase: string;
 }) {
   const workspace = useBlitWorkspace();
   const state = useBlitWorkspaceState();
@@ -259,11 +312,10 @@ function TabShell({
             borderBottom: `1px solid ${border}`,
             background: bg,
             flexShrink: 0,
-            overflowX: "auto",
-            overflowY: "hidden",
             minHeight: 36,
           }}
         >
+          <div style={{ display: "flex", flex: 1, overflowX: "auto" }}>
           {visibleSessions.map((s) => {
             const active = s.id === focusedId;
             return (
@@ -319,6 +371,8 @@ function TabShell({
               </div>
             );
           })}
+          </div>
+          <ShareButton passphrase={passphrase} dimFg={dimFg} tabHover={tabHover} />
         </div>
       )}
 

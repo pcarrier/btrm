@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { createRequire } from "node:module";
 
 const wasmPath = resolve(
   __dirname,
@@ -10,6 +11,12 @@ const wasmPath = resolve(
 const snippetsDir = resolve(__dirname, "../../crates/browser/pkg/snippets");
 const isDev =
   process.env.NODE_ENV !== "production" && !process.argv.includes("build");
+
+const localRequire = createRequire(resolve(__dirname, "package.json"));
+const blitSourceDirs = [
+  resolve(__dirname, "../core/src"),
+  resolve(__dirname, "../react/src"),
+];
 
 export default defineConfig({
   plugins: [
@@ -43,6 +50,25 @@ export default bin.buffer;
             const candidate = join(snippetsDir, dir, file);
             if (existsSync(candidate)) return candidate;
           }
+        }
+      },
+    },
+    {
+      name: "resolve-external-bare-imports",
+      resolveId(id, importer) {
+        if (
+          !importer ||
+          id.startsWith(".") ||
+          id.startsWith("/") ||
+          id.startsWith("\0") ||
+          id.startsWith("virtual:")
+        )
+          return;
+        if (!blitSourceDirs.some((dir) => importer.startsWith(dir))) return;
+        try {
+          return localRequire.resolve(id);
+        } catch {
+          return;
         }
       },
     },

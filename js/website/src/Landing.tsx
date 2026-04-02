@@ -1,7 +1,45 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback, type FormEvent } from "react";
 import "./landing.css";
 
-const INSTALL_CMD = "curl -fsSL https://install.blit.sh | sh";
+const INSTALL_CMD = "curl -fsS https://install.blit.sh | sh";
+
+function JoinForm() {
+  const [secret, setSecret] = useState("");
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = secret.trim();
+    if (trimmed) {
+      location.hash = encodeURIComponent(trimmed);
+    }
+  };
+
+  return (
+    <form className="join-form" onSubmit={handleSubmit}>
+      <input
+        className="join-input"
+        type="text"
+        placeholder="Enter a session secret"
+        value={secret}
+        onChange={(e) => setSecret(e.target.value)}
+        spellCheck={false}
+        autoComplete="off"
+      />
+      <button className="join-btn" type="submit" disabled={!secret.trim()}>
+        Join
+      </button>
+    </form>
+  );
+}
+const THEME_KEY = "blit-theme";
+
+function getInitialTheme(): "light" | "dark" {
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -23,34 +61,69 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function Landing() {
-  const [dark, setDark] = useState(
-    window.matchMedia("(prefers-color-scheme: dark)").matches,
+function ThemeToggle({
+  theme,
+  onToggle,
+}: {
+  theme: "light" | "dark";
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      className="theme-toggle"
+      onClick={onToggle}
+      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+    >
+      {theme === "dark" ? (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M14 9.2A6 6 0 0 1 6.8 2 6 6 0 1 0 14 9.2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
   );
+}
 
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+export function Landing() {
+  const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      localStorage.setItem(THEME_KEY, next);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
-    document.documentElement.setAttribute(
-      "data-theme",
-      dark ? "dark" : "light",
-    );
+    document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.style.overflow = "auto";
     document.body.style.overflow = "auto";
+    const root = document.getElementById("root");
+    if (root) {
+      root.style.height = "auto";
+      root.style.overflow = "visible";
+    }
     return () => {
+      document.documentElement.style.overflow = "";
       document.body.style.overflow = "";
+      if (root) {
+        root.style.height = "";
+        root.style.overflow = "";
+      }
     };
-  }, [dark]);
+  }, [theme]);
 
   return (
     <div className="landing">
       <header className="landing-header">
         <div className="landing-logo">
-          <svg viewBox="0 0 100 100" width="32" height="32">
+          <svg viewBox="0 0 100 100" width="28" height="28">
             <rect width="100" height="100" rx="16" fill="currentColor" className="logo-bg" />
             <text x="12" y="76" fontFamily="monospace" fontSize="72" fontWeight="bold" className="logo-text">b</text>
             <rect x="60" y="24" width="8" height="52" rx="2" className="logo-cursor" opacity="0.7" />
@@ -58,101 +131,95 @@ export function Landing() {
           <span className="landing-wordmark">blit</span>
         </div>
         <nav className="landing-nav">
-          <a href="https://github.com/nichochar/blit" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/indent-com/blit" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </nav>
       </header>
 
       <main className="landing-main">
         <section className="hero">
-          <h1>Terminal streaming for&nbsp;browsers and&nbsp;AI&nbsp;agents</h1>
+          <h1>Your terminal, everywhere.</h1>
           <p className="hero-sub">
-            A single binary that hosts PTYs, computes binary diffs with LZ4
-            compression, and streams parsed terminal state to browser clients
-            over WebSocket, WebTransport, or WebRTC.
+            Stream real terminal state to any browser. Binary diffs, WebGL
+            rendering, per-client backpressure. One binary, zero config.
           </p>
-
-          <div className="install-block">
-            <code>{INSTALL_CMD}</code>
-            <CopyButton text={INSTALL_CMD} />
+          <div className="hero-install">
+            <div className="install-block">
+              <span className="install-prompt">$</span>
+              <code>{INSTALL_CMD}</code>
+              <CopyButton text={INSTALL_CMD} />
+            </div>
+          </div>
+          <div className="hero-join">
+            <span className="hero-join-label">or join a session in your browser</span>
+            <JoinForm />
           </div>
         </section>
 
-        <section className="features">
-          <div className="feature">
-            <h3>WebGL rendering</h3>
+        <section className="why-section">
+          <div className="why-card">
+            <h3>Live state, not pixels</h3>
             <p>
-              GPU-accelerated terminal rendering with a glyph atlas and
-              background rect shaders. Smooth at any font size, any DPR.
+              blit tracks the full parsed terminal grid and sends only what
+              changed — LZ4-compressed binary diffs. The browser gets real
+              structured data: select text, resize freely, type into it.
             </p>
           </div>
-          <div className="feature">
-            <h3>Binary diffs</h3>
+          <div className="why-card">
+            <h3>Share with one command</h3>
             <p>
-              Only changed cells are sent. LZ4-compressed frames with
-              copy-rect and patch-cells ops minimize bandwidth.
+              <code>blit share</code> prints a URL. Open it anywhere.
+              WebRTC punches through NATs — no SSH keys, no port forwarding,
+              no tunnels. Full input for pair programming or AI agents.
             </p>
           </div>
-          <div className="feature">
-            <h3>Per-client backpressure</h3>
+          <div className="why-card">
+            <h3>Terminals as an API</h3>
             <p>
-              Each client reports its render rate. The server paces updates
-              so fast output never overwhelms slow connections.
-            </p>
-          </div>
-          <div className="feature">
-            <h3>Multiple transports</h3>
-            <p>
-              Unix socket for local, WebSocket for tunnels, WebTransport
-              (QUIC) for low-latency, WebRTC for NAT traversal.
-            </p>
-          </div>
-          <div className="feature">
-            <h3>Agent CLI</h3>
-            <p>
-              Non-interactive subcommands (<code>list</code>, <code>start</code>,{" "}
-              <code>show</code>, <code>send</code>, <code>wait</code>) for
-              scripts and LLM agents.
-            </p>
-          </div>
-          <div className="feature">
-            <h3>React embedding</h3>
-            <p>
-              Drop <code>@blit-sh/react</code> into any React app.
-              Workspace provider, hooks, and a terminal component.
+              Non-interactive CLI for scripts and LLMs. <code>blit start</code>,{" "}
+              <code>show</code>, <code>send</code>, <code>wait --pattern</code>.
+              Plain text out, zero exit on success. No screen-scraping.
             </p>
           </div>
         </section>
 
-        <section className="quickstart">
-          <h2>Quick start</h2>
-          <div className="code-block">
-            <pre><code>{`# Install
-curl -fsSL https://install.blit.sh | sh
-
-# Start a server
-blit server
-
-# Open in browser
-open http://localhost:7681
-
-# Share a session over WebRTC
-blit share
-
-# Use from an AI agent
-blit start bash
-blit send 0 "echo hello"
-blit show 0`}</code></pre>
+        <section className="demo-section">
+          <div className="demo-block">
+            <div className="demo-label">Get started</div>
+            <pre className="demo-pre"><code>{`$ curl -fsS https://install.blit.sh | sh
+$ blit                    # opens a browser
+$ blit share              # share via WebRTC
+$ blit --ssh myhost       # remote host`}</code></pre>
           </div>
+          <div className="demo-block">
+            <div className="demo-label">Agent API</div>
+            <pre className="demo-pre"><code>{`$ blit start -t build make -j8
+1
+$ blit wait 1 --pattern 'BUILD OK'
+$ blit show 1
+[100%] Built target app
+BUILD OK`}</code></pre>
+          </div>
+        </section>
+
+        <section className="embed-section">
+          <h2>Drop into any React app</h2>
+          <pre className="demo-pre demo-pre--wide"><code>{`import { BlitWorkspaceProvider, BlitTerminal } from '@blit-sh/react';
+import { BlitWorkspace, WebSocketTransport } from '@blit-sh/core';
+
+<BlitWorkspaceProvider workspace={workspace}>
+  <BlitTerminal sessionId={id} fontFamily="'Fira Code'" fontSize={14} />
+</BlitWorkspaceProvider>`}</code></pre>
         </section>
       </main>
 
       <footer className="landing-footer">
-        <p>
+        <span>
           Built by{" "}
-          <a href="https://indent.com" target="_blank" rel="noopener noreferrer">
-            Indent
-          </a>
-        </p>
+          <a href="https://indent.com" target="_blank" rel="noopener noreferrer">Indent</a>
+        </span>
+        <span className="footer-sep">&middot;</span>
+        <a href="https://github.com/indent-com/blit" target="_blank" rel="noopener noreferrer">Source</a>
       </footer>
     </div>
   );

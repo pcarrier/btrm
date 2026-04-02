@@ -142,9 +142,10 @@
         pname = "blit-js";
         inherit version;
         src = ../.;
-        pnpmWorkspaces = [ "js" ];
         fetcherVersion = 3;
-        postPatch = setupBrowserPkg;
+        postPatch = setupBrowserPkg + ''
+          cd js
+        '';
         hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # run nix build, use hash from error
       };
 

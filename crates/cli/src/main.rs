@@ -450,7 +450,7 @@ async fn main() {
             }
         }
         Command::Learn => {
-            print!("{}", include_str!("learn.txt"));
+            print!("{}", include_str!("learn.md"));
         }
     }
 }

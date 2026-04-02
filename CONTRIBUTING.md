@@ -24,6 +24,7 @@ When making changes, update the relevant docs in the same PR.
 | `SERVICES.md`           | Hosted services and CI/CD: install.blit.sh, hub.blit.sh, GitHub Actions workflows, release lifecycle, secrets | CI jobs are added/removed/changed, deployment targets change, new secrets are introduced, or the release process is modified |
 | `EMBEDDING.md`          | Embedding blit in other apps: React components (`@blit-sh/react`), embedding `blit-server` as a library       | Public embedding APIs, component props, or integration patterns change                                                       |
 | `SKILL.md`              | LLM agent skill definition: install instructions and pointer to `blit learn`                                  | Install methods change or the `learn` subcommand output changes                                                             |
+| `crates/cli/src/learn.md` | Full CLI reference printed by `blit learn`: usage patterns, subcommand details, transport options, escapes   | CLI subcommands, flags, output conventions, or transport options change                                                      |
 | `UNSAFE.md`             | Unsafe Rust code audit: which crates use `unsafe`, why, and what invariants they rely on                      | Unsafe code is added, removed, or its safety invariants change                                                               |
 | `js/blit-hub/README.md` | blit-hub signaling relay: protocol, deployment, configuration                                                 | Hub protocol, endpoints, deployment config, or environment variables change                                                  |
 
@@ -150,7 +151,7 @@ Most Rust crates are one or two source files. `blit-cli` is split into five and 
 | `crates/gateway/src/main.rs`         | ~750  | WebSocket/WebTransport proxy                                                                                     |
 | `crates/fonts/src/lib.rs`            | ~660  | Font discovery and TTF/OTF parsing                                                                               |
 | `crates/cli/src/main.rs`             | ~490  | Clap structs and dispatch                                                                                        |
-| `crates/cli/src/learn.txt`           | ~155  | CLI reference text printed by `blit learn`                                                                       |
+| `crates/cli/src/learn.md`            | ~155  | CLI reference text printed by `blit learn`                                                                       |
 | `crates/webserver/src/lib.rs`        | ~120  | Shared axum HTTP helpers                                                                                         |
 | `crates/webserver/src/config.rs`     | ~210  | Server configuration types                                                                                       |
 | `crates/cli/src/transport.rs`        | ~190  | Transport abstraction (Unix/TCP/SSH/WebRTC)                                                                      |

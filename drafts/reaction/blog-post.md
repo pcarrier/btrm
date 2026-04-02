@@ -153,6 +153,4 @@ blit share
 blit open --ssh myhost
 ```
 
-Open a shared session in two tabs. Watch them update independently. That's per-client pacing made visible.
-
 The code is at [github.com/indent-com/blit](https://github.com/indent-com/blit). Also available via [Homebrew](https://github.com/indent-com/homebrew-tap), [APT](https://install.blit.sh), and [Nix](https://github.com/indent-com/blit#nix).

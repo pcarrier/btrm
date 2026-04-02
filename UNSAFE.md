@@ -1,6 +1,6 @@
 # Unsafe code in blit
 
-Unsafe code is confined to two crates (`server`, `cli`) that need direct POSIX terminal and process APIs. The remaining crates contain zero `unsafe` blocks.
+Unsafe code is confined to three crates (`server`, `cli`, `browser`) that need direct POSIX terminal/process APIs or foreign function declarations. The remaining crates contain zero `unsafe` blocks.
 
 This document focuses on the non-obvious parts — the invariants that are easy to break.
 
@@ -47,7 +47,11 @@ The `cli` crate uses raw `libc::write(STDOUT_FILENO, ...)` in two places instead
 Two macOS-only calls that aren't in the `libc` crate:
 
 - **`proc_pidinfo(PROC_PIDVNODEPATHINFO)`** — gets the child process's working directory by reinterpreting a raw byte buffer as `proc_vnodepathinfo`. The pointer cast is sound only if the buffer is large enough and the syscall succeeds (checked via return value).
-- **`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)`** — declared as a local `extern "C"` function. Bumps thread priority so the frame scheduler gets lower latency. Harmless if it fails.
+- **`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)`** — declared as a local `unsafe extern "C"` function. Bumps thread priority so the frame scheduler gets lower latency. Harmless if it fails.
+
+## WASM FFI in `browser`
+
+`crates/browser/src/lib.rs` declares an `unsafe extern "C"` block for JavaScript helper functions injected via `#[wasm_bindgen(inline_js)]`. The functions (`blitFillTextCodePoint`, `blitFillTextStretched`, `blitFillText`, `blitMeasureMaxOverhang`) are called from safe Rust through wasm-bindgen's generated bindings. The `unsafe` marker is required by edition 2024 for all `extern` blocks.
 
 ## Audit checklist
 

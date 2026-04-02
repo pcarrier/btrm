@@ -204,6 +204,10 @@ BUILD OK`}</code></pre>
 
         <section className="embed-section">
           <h2>Drop into any React app</h2>
+          <p className="embed-sub">
+            Choose your transport — WebSocket, WebTransport, WebRTC — or
+            implement the interface and bring your own.
+          </p>
           <pre className="demo-pre demo-pre--wide"><code className="code-hl">{
 }<span className="hl-kw">import</span>{" { "}
 <span className="hl-fn">BlitWorkspaceProvider</span>{", "}

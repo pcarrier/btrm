@@ -138,11 +138,12 @@
 
       # Pre-fetch pnpm dependencies in a fixed-output derivation (has network
       # access). The resulting store is used offline by webAppDist/websiteDist.
-      pnpmDeps = pkgs.pnpm.fetchDeps {
+      pnpmDeps = pkgs.fetchPnpmDeps {
         pname = "blit-js";
         inherit version;
         src = ../.;
-        pnpmWorkspace = "js";
+        pnpmWorkspaces = [ "js" ];
+        fetcherVersion = 3;
         postPatch = setupBrowserPkg;
         hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # run nix build, use hash from error
       };
@@ -152,7 +153,7 @@
         inherit version;
         src = ../.;
         inherit pnpmDeps;
-        nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpm.configHook ];
+        nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
         pnpmRoot = "js";
         postPatch = setupBrowserPkg;
         buildPhase = ''
@@ -173,7 +174,7 @@
         inherit version;
         src = ../.;
         inherit pnpmDeps;
-        nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpm.configHook ];
+        nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
         pnpmRoot = "js";
         postPatch = setupBrowserPkg;
         buildPhase = ''

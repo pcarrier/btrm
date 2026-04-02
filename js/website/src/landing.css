@@ -215,6 +215,23 @@
   opacity: 0.6;
 }
 
+.join-visibility {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--dim);
+  padding: 0 0.5rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.join-visibility:hover {
+  color: var(--fg);
+}
+
 .join-btn {
   padding: 0.55rem 1rem;
   background: var(--accent);

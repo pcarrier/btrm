@@ -5,6 +5,7 @@ const INSTALL_CMD = "curl -fsS https://install.blit.sh | sh";
 
 function JoinForm() {
   const [secret, setSecret] = useState("");
+  const [visible, setVisible] = useState(false);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -18,13 +19,31 @@ function JoinForm() {
     <form className="join-form" onSubmit={handleSubmit}>
       <input
         className="join-input"
-        type="password"
+        type={visible ? "text" : "password"}
         placeholder="Enter a session secret"
         value={secret}
         onChange={(e) => setSecret(e.target.value)}
         spellCheck={false}
         autoComplete="off"
       />
+      <button
+        type="button"
+        className="join-visibility"
+        onClick={() => setVisible((v) => !v)}
+        aria-label={visible ? "Hide secret" : "Show secret"}
+        tabIndex={-1}
+      >
+        {visible ? (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 1l14 14M6.5 6.5a2 2 0 0 0 3 3M2.5 5.2C1.6 6.1 1 7 1 8c0 2.2 3.1 5 7 5 .8 0 1.6-.1 2.3-.3M13.5 10.8c.9-.9 1.5-1.8 1.5-2.8 0-2.2-3.1-5-7-5-.8 0-1.6.1-2.3.3" />
+          </svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 8c0 2.2 3.1 5 7 5s7-2.8 7-5-3.1-5-7-5-7 2.8-7 5Z" />
+            <circle cx="8" cy="8" r="2" />
+          </svg>
+        )}
+      </button>
       <button className="join-btn" type="submit" disabled={!secret.trim()}>
         Join
       </button>

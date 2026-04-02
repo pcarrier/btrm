@@ -17,6 +17,10 @@ trap cleanup EXIT INT TERM
 
 rm -f "$PC_SOCK" "$BLIT_SOCK"
 
+echo "=== Building blit CLI ==="
+cargo build -p blit-cli --release
+BLIT="./target/release/blit"
+
 echo "=== Starting bin/dev ==="
 ./bin/dev -t=false -u "$PC_SOCK" &
 DEV_PID=$!
@@ -60,14 +64,14 @@ echo "=== Smoke test: blit CLI ==="
 BLIT_ARGS=(--socket "$BLIT_SOCK")
 
 echo "  blit start echo hello"
-SESSION_ID=$(blit start "${BLIT_ARGS[@]}" echo hello)
+SESSION_ID=$("$BLIT" start "${BLIT_ARGS[@]}" echo hello)
 echo "  session: $SESSION_ID"
 
 echo "  blit wait"
-blit wait "${BLIT_ARGS[@]}" "$SESSION_ID" --timeout 30
+"$BLIT" wait "${BLIT_ARGS[@]}" "$SESSION_ID" --timeout 30
 
 echo "  blit history"
-OUTPUT=$(blit history "${BLIT_ARGS[@]}" "$SESSION_ID" --from-start 0 --limit 50)
+OUTPUT=$("$BLIT" history "${BLIT_ARGS[@]}" "$SESSION_ID" --from-start 0 --limit 50)
 if echo "$OUTPUT" | grep -q "hello"; then
     echo "  output contains 'hello' ✓"
 else
@@ -77,10 +81,10 @@ else
 fi
 
 echo "  blit list"
-blit list "${BLIT_ARGS[@]}"
+"$BLIT" list "${BLIT_ARGS[@]}"
 
 echo "  blit close"
-blit close "${BLIT_ARGS[@]}" "$SESSION_ID"
+"$BLIT" close "${BLIT_ARGS[@]}" "$SESSION_ID"
 
 echo ""
 echo "=== dev-check passed ==="

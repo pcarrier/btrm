@@ -11,6 +11,20 @@ description: >
 
 Drive terminal sessions programmatically through stateless CLI subcommands. Each subcommand opens a fresh connection, performs one operation, and exits.
 
+## Install
+
+```bash
+curl https://install.blit.sh | sh
+```
+
+Platform-specific options:
+
+| Platform | Command |
+| --- | --- |
+| macOS (Homebrew) | `brew install indent-com/tap/blit` |
+| Debian / Ubuntu | See [README.md](README.md#debian--ubuntu-apt) |
+| Nix | `nix profile install github:indent-com/blit#blit` |
+
 ## Running commands
 
 `blit start` creates a PTY and prints its session ID. Pass a command directly or omit it to start the user's default shell:

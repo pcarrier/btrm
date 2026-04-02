@@ -140,8 +140,9 @@ export function Landing() {
         <section className="hero">
           <h1>Your terminal, everywhere.</h1>
           <p className="hero-sub">
-            Stream real terminal state to any browser. Binary diffs, WebGL
-            rendering, per-client backpressure. One binary, zero config.
+            Stream terminals to any browser, fast. LZ4-compressed binary
+            diffs, WebGL rendering, per-client backpressure. One binary,
+            zero config.
           </p>
           <div className="hero-install">
             <div className="install-block">
@@ -204,12 +205,43 @@ BUILD OK`}</code></pre>
 
         <section className="embed-section">
           <h2>Drop into any React app</h2>
-          <pre className="demo-pre demo-pre--wide"><code>{`import { BlitWorkspaceProvider, BlitTerminal } from '@blit-sh/react';
+          <pre className="demo-pre demo-pre--wide"><code>{`import { BlitWorkspaceProvider, BlitTerminal,
+         useBlitSessions, useBlitFocusedSession,
+         useBlitWorkspace } from '@blit-sh/react';
 import { BlitWorkspace, WebSocketTransport } from '@blit-sh/core';
+import { useEffect, useMemo } from 'react';
 
-<BlitWorkspaceProvider workspace={workspace}>
-  <BlitTerminal sessionId={id} fontFamily="'Fira Code'" fontSize={14} />
-</BlitWorkspaceProvider>`}</code></pre>
+function App({ wasm, url, passphrase }) {
+  const transport = useMemo(
+    () => new WebSocketTransport(url, passphrase), [url, passphrase]);
+  const workspace = useMemo(
+    () => new BlitWorkspace({
+      wasm, connections: [{ id: "default", transport }],
+    }), [wasm, transport]);
+  useEffect(() => () => workspace.dispose(), [workspace]);
+
+  return (
+    <BlitWorkspaceProvider workspace={workspace}>
+      <Terminal />
+    </BlitWorkspaceProvider>
+  );
+}
+
+function Terminal() {
+  const workspace = useBlitWorkspace();
+  const sessions = useBlitSessions();
+  const focused = useBlitFocusedSession();
+
+  useEffect(() => {
+    if (!sessions.length)
+      workspace.createSession({
+        connectionId: "default", rows: 24, cols: 80,
+      });
+  }, [sessions.length, workspace]);
+
+  return <BlitTerminal sessionId={focused?.id ?? null}
+    style={{ width: "100%", height: "100vh" }} />;
+}`}</code></pre>
         </section>
       </main>
 

@@ -169,6 +169,11 @@ export function Landing() {
             <br />
             One binary, zero config, instant.
           </p>
+          <p className="hero-mit">
+            MIT-licensed. Every unsafe block{" "}
+            <a href="https://github.com/indent-com/blit/blob/main/UNSAFE.md" target="_blank" rel="noopener noreferrer">audited</a>,
+            every invariant documented, every race condition intentional.
+          </p>
 
           <div className="install-group">
             <div className="install-section">

@@ -60,7 +60,7 @@ echo "=== Smoke test: blit CLI ==="
 BLIT_ARGS="--socket $BLIT_SOCK"
 
 echo "  blit start echo hello"
-SESSION_ID=$(blit start $BLIT_ARGS --cols 200 echo hello)
+SESSION_ID=$(blit start $BLIT_ARGS echo hello)
 echo "  session: $SESSION_ID"
 
 echo "  blit wait"

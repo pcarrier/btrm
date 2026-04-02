@@ -1,0 +1,31 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.13.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run bin/release
+        run: ./bin/release ${{ inputs.version }}
+
+      - name: Tag and push
+        run: |
+          git tag "v${{ inputs.version }}"
+          git push origin main "v${{ inputs.version }}"

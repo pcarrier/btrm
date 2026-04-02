@@ -522,7 +522,7 @@ function TabShell({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 6,
+                  gap: 8,
                   padding: "0 14px",
                   cursor: "pointer",
                   fontSize: 13,

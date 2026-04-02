@@ -117,7 +117,7 @@ export function Landing({ theme, onToggleTheme }: { theme: Theme; onToggleTheme:
         <section className="hero">
           <h1>Your terminal, everywhere.</h1>
           <p className="hero-sub">
-            Stream terminals to any browser. Share with a link. Let AI agents drive them.
+            Low-latency terminal streaming to any browser. Share with a link. Let AI agents drive them.
             <br />
             One binary, zero config, instant.
           </p>

@@ -18,7 +18,6 @@ const isDev =
 export default defineConfig({
   plugins: [
     react(),
-    // Only inline everything into a single HTML file for production builds.
     !isDev && viteSingleFile(),
     {
       name: "inline-wasm",
@@ -28,7 +27,6 @@ export default defineConfig({
       load(id) {
         if (id !== "\0virtual:blit-wasm") return;
         if (isDev) {
-          // In dev, use a URL import so Vite serves the file directly.
           return `export default "/@fs${wasmPath}";`;
         }
         const wasm = readFileSync(wasmPath);
@@ -56,8 +54,6 @@ export default bin.buffer;
   ].filter(Boolean),
   resolve: {
     alias: {
-      "@blit-sh/react": resolve(__dirname, "../react/src"),
-      "@blit-sh/core": resolve(__dirname, "../core/src"),
       "@blit-sh/browser": resolve(
         __dirname,
         "../../crates/browser/pkg/blit_browser.js",
@@ -69,7 +65,6 @@ export default bin.buffer;
   server: {
     port: 3265,
     fs: {
-      // Allow serving the WASM file from outside the web-app directory.
       allow: [resolve(__dirname, "../..")],
     },
   },

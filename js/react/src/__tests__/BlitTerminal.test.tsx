@@ -28,6 +28,19 @@ vi.mock("@blit-sh/core", async () => {
   };
 });
 
+vi.mock("../../../core/src/measure", async () => {
+  return {
+    measureCell: vi.fn(() => ({
+      w: 8,
+      h: 16,
+      pw: 8,
+      ph: 16,
+    })),
+    cssFontFamily: (f: string) => f,
+    CSS_GENERIC: new Set(["monospace"]),
+  };
+});
+
 type FakeTerminal = {
   rows: number;
   cols: number;

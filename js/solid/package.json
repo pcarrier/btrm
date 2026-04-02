@@ -1,0 +1,55 @@
+{
+  "name": "@blit-sh/solid",
+  "version": "0.17.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./src/index.ts" }
+  },
+  "publishConfig": {
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    }
+  },
+  "description": "Low-latency terminal streaming — Solid.js components and hooks",
+  "homepage": "https://blit.sh",
+  "author": "Indent <oss@indent.com> (https://indent.com)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/indent-com/blit.git",
+    "directory": "js/solid"
+  },
+  "bugs": {
+    "url": "https://github.com/indent-com/blit/issues"
+  },
+  "keywords": [
+    "terminal",
+    "tty",
+    "solid",
+    "solidjs",
+    "streaming",
+    "webgl"
+  ],
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "@blit-sh/core": ">=0.17.0",
+    "solid-js": ">=1.8.0"
+  },
+  "devDependencies": {
+    "@blit-sh/core": "workspace:*",
+    "@blit-sh/browser": "file:../../crates/browser/pkg",
+    "solid-js": "^1.9",
+    "typescript": "^6"
+  },
+  "license": "MIT"
+}

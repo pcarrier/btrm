@@ -1,5 +1,8 @@
 export { BlitWorkspace } from "./BlitWorkspace";
 
+export { TerminalView } from "./TerminalView";
+export type { TerminalViewOptions } from "./TerminalView";
+
 export {
   SEARCH_SOURCE_TITLE,
   SEARCH_SOURCE_VISIBLE,

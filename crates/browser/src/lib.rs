@@ -58,7 +58,7 @@ export function blitMeasureMaxOverhang(ctx, cellWidth) {
   return Math.ceil(maxOverhang / 2);
 }
 "#)]
-extern "C" {
+unsafe extern "C" {
     fn blitFillTextCodePoint(ctx: &CanvasRenderingContext2d, code_point: u32, x: f64, y: f64);
     fn blitFillTextStretched(
         ctx: &CanvasRenderingContext2d,

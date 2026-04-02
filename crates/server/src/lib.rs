@@ -1075,7 +1075,7 @@ fn set_qos_user_interactive() {
     #[cfg(target_os = "macos")]
     {
         const QOS_CLASS_USER_INTERACTIVE: libc::c_uint = 0x21;
-        extern "C" {
+        unsafe extern "C" {
             fn pthread_set_qos_class_self_np(
                 qos_class: libc::c_uint,
                 relative_priority: libc::c_int,

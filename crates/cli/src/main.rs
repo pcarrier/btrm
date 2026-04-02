@@ -282,7 +282,7 @@ async fn main() {
                 .connect
                 .socket
                 .clone()
-                .unwrap_or_else(|| blit_server::default_socket_path());
+                .unwrap_or_else(blit_server::default_socket_path);
             if let Err(e) = transport::ensure_local_server(&sock_path).await {
                 eprintln!("blit: {e}");
                 std::process::exit(1);

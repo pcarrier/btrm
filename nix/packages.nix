@@ -146,7 +146,7 @@
         postPatch = setupBrowserPkg + ''
           cd js
         '';
-        hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # run nix build, use hash from error
+        hash = "sha256-ocPLa+jPUzn9SfsVtIslo3Unbku2RA6sQroI9i1YJ3k=";
       };
 
       webAppDist = pkgs.stdenv.mkDerivation {

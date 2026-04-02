@@ -11,6 +11,7 @@ const wasmPath = resolve(
 const snippetsDir = resolve(__dirname, "../../crates/browser/pkg/snippets");
 const isDev =
   process.env.NODE_ENV !== "production" && !process.argv.includes("build");
+const isSsr = process.argv.includes("--ssr");
 
 const localRequire = createRequire(resolve(__dirname, "package.json"));
 const blitSourceDirs = [
@@ -28,6 +29,9 @@ export default defineConfig({
       },
       load(id) {
         if (id !== "\0virtual:blit-wasm") return;
+        if (isSsr) {
+          return `export default null;`;
+        }
         if (isDev) {
           return `export default "/@fs${wasmPath}";`;
         }
@@ -94,7 +98,7 @@ export default bin.buffer;
     },
   },
   build: {
-    outDir: resolve(__dirname, "dist"),
+    outDir: resolve(__dirname, isSsr ? "dist-ssr" : "dist"),
     target: "es2020",
   },
 });

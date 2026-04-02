@@ -202,7 +202,7 @@
 
           cp -r ${websiteNpmDeps} "$TMPDIR/website-cache"
           chmod -R u+w "$TMPDIR/website-cache"
-          (cd js/website && npm ci --cache "$TMPDIR/website-cache" && node node_modules/vite/bin/vite.js build)
+          (cd js/website && npm ci --cache "$TMPDIR/website-cache" && node node_modules/vite/bin/vite.js build && node node_modules/vite/bin/vite.js build --ssr src/entry-server.tsx && node prerender.js)
         '';
         installPhase = ''
           mkdir -p $out

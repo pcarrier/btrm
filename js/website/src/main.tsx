@@ -1,4 +1,4 @@
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { lazy, Suspense, useState, useEffect } from "react";
 import { Landing } from "./Landing";
 
@@ -63,4 +63,12 @@ function App() {
   return <Landing />;
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+const root = document.getElementById("root")!;
+const hasSSRContent = root.innerHTML.trim().length > 0;
+const hash = location.hash.slice(1);
+
+if (hasSSRContent && !hash) {
+  hydrateRoot(root, <App />);
+} else {
+  createRoot(root).render(<App />);
+}

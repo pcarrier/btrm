@@ -59,6 +59,7 @@ function JoinForm() {
 const THEME_KEY = "blit-theme";
 
 function getInitialTheme(): "light" | "dark" {
+  if (typeof window === "undefined") return "dark";
   const stored = localStorage.getItem(THEME_KEY);
   if (stored === "light" || stored === "dark") return stored;
   return window.matchMedia("(prefers-color-scheme: dark)").matches

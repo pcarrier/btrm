@@ -4,10 +4,13 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufMappingMode};
+use smithay::backend::allocator::{Buffer, Fourcc, Modifier, Format as DmabufFormat};
 use smithay::backend::input::{Axis, ButtonState, KeyState};
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::delegate_compositor;
 use smithay::delegate_data_device;
+use smithay::delegate_dmabuf;
 use smithay::delegate_output;
 use smithay::delegate_seat;
 use smithay::delegate_shm;
@@ -40,6 +43,7 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
+use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf};
 use smithay::wayland::shell::xdg::decoration::{XdgDecorationHandler, XdgDecorationState};
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
 use smithay::wayland::socket::ListeningSocketSource;
@@ -150,6 +154,9 @@ pub struct Compositor {
     viewporter_state: ViewporterState,
     #[allow(dead_code)]
     xdg_decoration_state: XdgDecorationState,
+    dmabuf_state: DmabufState,
+    #[allow(dead_code)]
+    dmabuf_global: DmabufGlobal,
     seat: Seat<Self>,
     output: Output,
     space: Space<Window>,
@@ -338,7 +345,7 @@ impl CompositorHandler for Compositor {
             let attrs = guard.current();
             if let Some(ref assignment) = attrs.buffer {
                 if let compositor::BufferAssignment::NewBuffer(buffer) = assignment {
-                    let _ = with_buffer_contents(buffer, |ptr, len, data: BufferData| {
+                    let shm_ok = with_buffer_contents(buffer, |ptr, len, data: BufferData| {
                         let width = data.width as u32;
                         let height = data.height as u32;
                         let stride = data.stride as usize;
@@ -353,7 +360,13 @@ impl CompositorHandler for Compositor {
                             }
                         }
                         committed_buffer = Some((width, height, rgba));
-                    });
+                    }).is_ok();
+
+                    if !shm_ok {
+                        if let Ok(dmabuf) = get_dmabuf(buffer) {
+                            committed_buffer = read_dmabuf_pixels(dmabuf);
+                        }
+                    }
                 }
             }
 
@@ -529,12 +542,68 @@ impl XdgDecorationHandler for Compositor {
     }
 }
 
+impl DmabufHandler for Compositor {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, _dmabuf: Dmabuf, notifier: ImportNotifier) {
+        let _ = notifier.successful::<Compositor>();
+    }
+}
+
+fn read_dmabuf_pixels(dmabuf: &Dmabuf) -> Option<(u32, u32, Vec<u8>)> {
+    let size = dmabuf.size();
+    let width = size.w as u32;
+    let height = size.h as u32;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let format = dmabuf.format();
+    let is_argb = matches!(format.code, Fourcc::Argb8888 | Fourcc::Xrgb8888);
+    let is_abgr = matches!(format.code, Fourcc::Abgr8888 | Fourcc::Xbgr8888);
+    if !is_argb && !is_abgr {
+        return None;
+    }
+
+    let _ = dmabuf.sync_plane(0, smithay::backend::allocator::dmabuf::DmabufSyncFlags::START | smithay::backend::allocator::dmabuf::DmabufSyncFlags::READ);
+    let mapping = dmabuf.map_plane(0, DmabufMappingMode::READ).ok()?;
+    let stride = dmabuf.strides().next().unwrap_or(width * 4) as usize;
+    let ptr = mapping.ptr() as *const u8;
+    let len = mapping.length();
+    let pixel_data = unsafe { std::slice::from_raw_parts(ptr, len) };
+
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height as usize {
+        let row_start = row * stride;
+        let row_end = row_start + (width as usize * 4);
+        if row_end > pixel_data.len() {
+            break;
+        }
+        if is_argb {
+            for col in 0..width as usize {
+                let i = row_start + col * 4;
+                rgba.push(pixel_data[i + 2]); // R (ARGB -> byte order is BGRA in LE)
+                rgba.push(pixel_data[i + 1]); // G
+                rgba.push(pixel_data[i]);     // B
+                rgba.push(pixel_data[i + 3]); // A
+            }
+        } else {
+            rgba.extend_from_slice(&pixel_data[row_start..row_end]);
+        }
+    }
+    let _ = dmabuf.sync_plane(0, smithay::backend::allocator::dmabuf::DmabufSyncFlags::END | smithay::backend::allocator::dmabuf::DmabufSyncFlags::READ);
+
+    Some((width, height, rgba))
+}
+
 delegate_compositor!(Compositor);
 delegate_shm!(Compositor);
 delegate_xdg_shell!(Compositor);
 delegate_seat!(Compositor);
 delegate_data_device!(Compositor);
 delegate_output!(Compositor);
+delegate_dmabuf!(Compositor);
 delegate_viewporter!(Compositor);
 delegate_xdg_decoration!(Compositor);
 
@@ -585,6 +654,19 @@ fn run_compositor(
     let data_device_state = DataDeviceState::new::<Compositor>(&dh);
     let viewporter_state = ViewporterState::new::<Compositor>(&dh);
     let xdg_decoration_state = XdgDecorationState::new::<Compositor>(&dh);
+
+    let mut dmabuf_state = DmabufState::new();
+    let dmabuf_formats = [
+        DmabufFormat { code: Fourcc::Argb8888, modifier: Modifier::Linear },
+        DmabufFormat { code: Fourcc::Xrgb8888, modifier: Modifier::Linear },
+        DmabufFormat { code: Fourcc::Abgr8888, modifier: Modifier::Linear },
+        DmabufFormat { code: Fourcc::Xbgr8888, modifier: Modifier::Linear },
+        DmabufFormat { code: Fourcc::Argb8888, modifier: Modifier::Invalid },
+        DmabufFormat { code: Fourcc::Xrgb8888, modifier: Modifier::Invalid },
+        DmabufFormat { code: Fourcc::Abgr8888, modifier: Modifier::Invalid },
+        DmabufFormat { code: Fourcc::Xbgr8888, modifier: Modifier::Invalid },
+    ];
+    let dmabuf_global = dmabuf_state.create_global::<Compositor>(&dh, dmabuf_formats);
 
     let mut seat_state = SeatState::new();
     let mut seat = seat_state.new_wl_seat(&dh, "headless");
@@ -649,6 +731,8 @@ fn run_compositor(
         data_device_state,
         viewporter_state,
         xdg_decoration_state,
+        dmabuf_state,
+        dmabuf_global,
         seat,
         output,
         space,

@@ -338,7 +338,7 @@ Every PTY session has a companion headless Wayland compositor. The child process
 
 The compositor does not manage window layout, z-order, or decorations. Each surface is streamed independently and clients (browser, React embedders) handle windowing in their own UI. The compositor implements `wp_viewporter` (required by Chrome/Electron) and `xdg_decoration` (forces server-side decorations so clients don't waste space on title bars).
 
-The compositor only supports SHM (shared memory) buffer rendering. GPU-accelerated clients that use dmabuf/EGL buffers will not display. To run Chrome or Electron apps, launch them with `--disable-gpu --ozone-platform=wayland` to force SHM rendering.
+The compositor supports both SHM (shared memory) and dmabuf (GPU) buffers. Dmabuf buffers are accepted via the `linux-dmabuf` protocol and read by mmapping the plane data. Supported pixel formats: ARGB8888, XRGB8888, ABGR8888, XBGR8888 with linear or implicit modifier. Chrome and Electron apps work out of the box with `--ozone-platform=wayland`.
 
 On the browser side, `SurfaceStore` in `@blit-sh/core` decodes H.264 frames via the WebCodecs `VideoDecoder` API (`avc1.42001f`, `optimizeForLatency: true`). The `BlitSurfaceView` React component renders decoded `VideoFrame`s to a canvas and forwards mouse/keyboard events back as surface commands.
 

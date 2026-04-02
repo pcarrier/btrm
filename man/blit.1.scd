@@ -6,7 +6,7 @@ blit - terminal streaming client
 
 # SYNOPSIS
 
-_blit_ _open_ [_--console_] [_--port_ _PORT_]
+_blit_ [OPTIONS] _open_ [_--console_] [_--port_ _PORT_]
 
 _blit_ [OPTIONS] _list_
 

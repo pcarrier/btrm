@@ -18,6 +18,7 @@ export type ConnectionStatus =
   | "authenticating"
   | "connected"
   | "disconnected"
+  | "closed"
   | "error";
 
 export type ConnectionId = string;

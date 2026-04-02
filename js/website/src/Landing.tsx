@@ -220,48 +220,30 @@ export function Landing() {
 
         <section className="transport-section">
           <h2>Every transport you need</h2>
-          <div className="transport-diagram">
-            <pre className="diagram-pre"><code>{
-`                 ┌─────────────────────────┐
-                 │       `}<span className="dg-bright">blit</span>{` CLI          │
-                 │    (terminal host)      │
-                 └────┬───────┬───────┬────┘
-                      │       │       │
-`}<span className="dg-label">{"              Unix/TCP   SSH   WebRTC"}</span>{`
-                      │       │       │
-          ┌───────────┼───────┘       │
-          │           │               │
-          ▼           ▼               ▼
-  ┌───────────┐ ┌───────────┐ ┌─────────────┐
-  │ `}<span className="dg-bright">Scripts</span>{`   │ │ `}<span className="dg-bright">Remote</span>{`    │ │  `}<span className="dg-bright">Browser</span>{`    │
-  │ & LLMs    │ │ terminals │ │  (anywhere) │
-  └───────────┘ └───────────┘ └─────────────┘`}
-            </code></pre>
-            <div className="transport-grid">
-              <div className="transport-card">
-                <div className="transport-name">WebSocket</div>
-                <div className="transport-where">Browser &middot; CLI</div>
-              </div>
-              <div className="transport-card">
-                <div className="transport-name">WebTransport</div>
-                <div className="transport-where">Browser &middot; CLI</div>
-              </div>
-              <div className="transport-card">
-                <div className="transport-name">WebRTC</div>
-                <div className="transport-where">Browser (share)</div>
-              </div>
-              <div className="transport-card">
-                <div className="transport-name">Unix / TCP</div>
-                <div className="transport-where">CLI &middot; Scripts</div>
-              </div>
-              <div className="transport-card">
-                <div className="transport-name">SSH</div>
-                <div className="transport-where">CLI</div>
-              </div>
-              <div className="transport-card">
-                <div className="transport-name">Custom</div>
-                <div className="transport-where">Implement the interface</div>
-              </div>
+          <div className="transport-grid">
+            <div className="transport-card">
+              <div className="transport-name">WebSocket</div>
+              <div className="transport-where">Browser &middot; CLI</div>
+            </div>
+            <div className="transport-card">
+              <div className="transport-name">WebTransport</div>
+              <div className="transport-where">Browser &middot; CLI</div>
+            </div>
+            <div className="transport-card">
+              <div className="transport-name">WebRTC</div>
+              <div className="transport-where">Browser (share)</div>
+            </div>
+            <div className="transport-card">
+              <div className="transport-name">Unix / TCP</div>
+              <div className="transport-where">CLI &middot; Scripts</div>
+            </div>
+            <div className="transport-card">
+              <div className="transport-name">SSH</div>
+              <div className="transport-where">CLI</div>
+            </div>
+            <div className="transport-card">
+              <div className="transport-name">Custom</div>
+              <div className="transport-where">Implement the interface</div>
             </div>
           </div>
         </section>

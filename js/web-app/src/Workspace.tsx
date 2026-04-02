@@ -720,7 +720,12 @@ function WorkspaceScreen({
           fontFamily: resolvedFontWithFallback,
         }}
       >
-        <section style={layout.termContainer}>
+        <section style={{
+          ...layout.termContainer,
+          display: "flex",
+          flexDirection: "row",
+        }}>
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
           {activeLayout ? (
             <BSPContainer
               layout={activeLayout}
@@ -815,23 +820,14 @@ function WorkspaceScreen({
               onHelp={() => toggleOverlay("help")}
             />
           )}
+          </div>
           {surfaces.length > 0 && (
-            <div style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              zIndex: z.exitedBanner + 1,
-            }}>
-              {surfaces.map((s) => (
-                <SurfaceWindow
-                  key={`${s.sessionId}-${s.surfaceId}`}
-                  surface={s}
-                  connectionId={primaryConnectionId}
-                  theme={theme}
-                  scale={chromeScale}
-                />
-              ))}
-            </div>
+            <SurfacePanel
+              surfaces={surfaces}
+              connectionId={primaryConnectionId}
+              theme={theme}
+              scale={chromeScale}
+            />
           )}
         </section>
         {overlay === "expose" && (
@@ -1019,73 +1015,129 @@ function EmptyState({
   );
 }
 
-function SurfaceWindow({
+const SURFACE_PANEL_WIDTH = 280;
+
+function SurfacePanel({
+  surfaces,
+  connectionId,
+  theme,
+  scale,
+}: {
+  surfaces: BlitSurface[];
+  connectionId: string;
+  theme: ReturnType<typeof themeFor>;
+  scale: UIScale;
+}) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  return (
+    <div
+      style={{
+        width: SURFACE_PANEL_WIDTH,
+        flexShrink: 0,
+        borderLeft: `1px solid ${theme.subtleBorder}`,
+        backgroundColor: theme.solidPanelBg,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: `${scale.controlY}px ${scale.tightGap}px`,
+          fontSize: scale.sm,
+          color: theme.dimFg,
+          borderBottom: `1px solid ${theme.subtleBorder}`,
+          userSelect: "none",
+          flexShrink: 0,
+        }}
+      >
+        Surfaces ({surfaces.length})
+      </div>
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {surfaces.map((s) => (
+          <SurfaceThumbnail
+            key={`${s.sessionId}-${s.surfaceId}`}
+            surface={s}
+            connectionId={connectionId}
+            theme={theme}
+            scale={scale}
+            expanded={expandedId === s.surfaceId}
+            onToggle={() =>
+              setExpandedId(expandedId === s.surfaceId ? null : s.surfaceId)
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SurfaceThumbnail({
   surface,
   connectionId,
   theme,
   scale,
+  expanded,
+  onToggle,
 }: {
   surface: BlitSurface;
   connectionId: string;
   theme: ReturnType<typeof themeFor>;
   scale: UIScale;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const [pos, setPos] = useState({ x: 40, y: 40 });
-  const dragging = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    dragging.current = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [pos]);
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    setPos({
-      x: dragging.current.origX + (e.clientX - dragging.current.startX),
-      y: dragging.current.origY + (e.clientY - dragging.current.startY),
-    });
-  }, []);
-
-  const onPointerUp = useCallback(() => {
-    dragging.current = null;
-  }, []);
-
   return (
     <div
       style={{
-        position: "absolute",
-        left: pos.x,
-        top: pos.y,
-        pointerEvents: "auto",
-        border: `1px solid ${theme.border}`,
-        backgroundColor: theme.solidPanelBg,
+        borderBottom: `1px solid ${theme.subtleBorder}`,
         display: "flex",
         flexDirection: "column",
       }}
     >
-      <div
+      <button
+        onClick={onToggle}
         style={{
+          ...ui.btn,
           display: "flex",
           alignItems: "center",
           gap: scale.tightGap,
-          padding: `2px ${scale.tightGap}px`,
+          padding: `${scale.controlY}px ${scale.tightGap}px`,
           fontSize: scale.sm,
-          cursor: "grab",
-          userSelect: "none",
-          backgroundColor: theme.accent,
-          color: "#fff",
+          width: "100%",
+          textAlign: "left",
+          opacity: 1,
+          backgroundColor: expanded ? theme.selectedBg : "transparent",
         }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
       >
-        <span style={{ flex: 1 }}>{surface.title || surface.appId || `Surface ${surface.surfaceId}`}</span>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {surface.title || surface.appId || `Surface ${surface.surfaceId}`}
+        </span>
+        <span style={{ fontSize: scale.xs, color: theme.dimFg }}>
+          {surface.width}x{surface.height}
+        </span>
+      </button>
+      <div
+        style={{
+          overflow: "hidden",
+          maxHeight: expanded ? "none" : 120,
+          position: "relative",
+          cursor: expanded ? undefined : "pointer",
+        }}
+        onClick={expanded ? undefined : onToggle}
+      >
+        <BlitSurfaceView
+          connectionId={connectionId}
+          surfaceId={surface.surfaceId}
+          style={{
+            display: "block",
+            width: "100%",
+            height: expanded ? "auto" : undefined,
+            objectFit: "contain",
+          }}
+        />
       </div>
-      <BlitSurfaceView
-        connectionId={connectionId}
-        surfaceId={surface.surfaceId}
-        style={{ display: "block" }}
-      />
     </div>
   );
 }

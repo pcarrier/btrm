@@ -158,6 +158,7 @@ pub struct Compositor {
     #[allow(dead_code)]
     dmabuf_global: DmabufGlobal,
     seat: Seat<Self>,
+    #[allow(dead_code)]
     output: Output,
     space: Space<Window>,
 
@@ -189,30 +190,30 @@ impl Compositor {
                 keycode,
                 pressed,
             } => {
-                if let Some(&obj_id) = self.surface_lookup.get(&surface_id) {
-                    if let Some(info) = self.surfaces.get(&obj_id) {
-                        let keyboard = self.seat.get_keyboard().unwrap();
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let time = elapsed_ms();
-                        let state = if pressed {
-                            KeyState::Pressed
-                        } else {
-                            KeyState::Released
-                        };
-                        keyboard.set_focus(
-                            self,
-                            Some(info.window.toplevel().unwrap().wl_surface().clone()),
-                            serial,
-                        );
-                        keyboard.input::<(), _>(
-                            self,
-                            keycode.into(),
-                            state,
-                            serial,
-                            time,
-                            |_, _, _| FilterResult::Forward,
-                        );
-                    }
+                if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
+                    && let Some(info) = self.surfaces.get(&obj_id)
+                {
+                    let keyboard = self.seat.get_keyboard().unwrap();
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let time = elapsed_ms();
+                    let state = if pressed {
+                        KeyState::Pressed
+                    } else {
+                        KeyState::Released
+                    };
+                    keyboard.set_focus(
+                        self,
+                        Some(info.window.toplevel().unwrap().wl_surface().clone()),
+                        serial,
+                    );
+                    keyboard.input::<(), _>(
+                        self,
+                        keycode.into(),
+                        state,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::Forward,
+                    );
                 }
             }
             CompositorCommand::PointerMotion {
@@ -220,22 +221,22 @@ impl Compositor {
                 x,
                 y,
             } => {
-                if let Some(&obj_id) = self.surface_lookup.get(&surface_id) {
-                    if let Some(info) = self.surfaces.get(&obj_id) {
-                        let pointer = self.seat.get_pointer().unwrap();
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let surface = info.window.toplevel().unwrap().wl_surface().clone();
-                        pointer.motion(
-                            self,
-                            Some((surface.into(), (0.0, 0.0).into())),
-                            &MotionEvent {
-                                location: (x, y).into(),
-                                serial,
-                                time: elapsed_ms(),
-                            },
-                        );
-                        pointer.frame(self);
-                    }
+                if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
+                    && let Some(info) = self.surfaces.get(&obj_id)
+                {
+                    let pointer = self.seat.get_pointer().unwrap();
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let wl_surface = info.window.toplevel().unwrap().wl_surface().clone();
+                    pointer.motion(
+                        self,
+                        Some((wl_surface, (0.0, 0.0).into())),
+                        &MotionEvent {
+                            location: (x, y).into(),
+                            serial,
+                            time: elapsed_ms(),
+                        },
+                    );
+                    pointer.frame(self);
                 }
             }
             CompositorCommand::PointerButton {
@@ -243,26 +244,26 @@ impl Compositor {
                 button,
                 pressed,
             } => {
-                if let Some(&obj_id) = self.surface_lookup.get(&surface_id) {
-                    if self.surfaces.contains_key(&obj_id) {
-                        let pointer = self.seat.get_pointer().unwrap();
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let state = if pressed {
-                            ButtonState::Pressed
-                        } else {
-                            ButtonState::Released
-                        };
-                        pointer.button(
-                            self,
-                            &ButtonEvent {
-                                button,
-                                state,
-                                serial,
-                                time: elapsed_ms(),
-                            },
-                        );
-                        pointer.frame(self);
-                    }
+                if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
+                    && self.surfaces.contains_key(&obj_id)
+                {
+                    let pointer = self.seat.get_pointer().unwrap();
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let state = if pressed {
+                        ButtonState::Pressed
+                    } else {
+                        ButtonState::Released
+                    };
+                    pointer.button(
+                        self,
+                        &ButtonEvent {
+                            button,
+                            state,
+                            serial,
+                            time: elapsed_ms(),
+                        },
+                    );
+                    pointer.frame(self);
                 }
             }
             CompositorCommand::PointerAxis {
@@ -284,27 +285,27 @@ impl Compositor {
                 width,
                 height,
             } => {
-                if let Some(&obj_id) = self.surface_lookup.get(&surface_id) {
-                    if let Some(info) = self.surfaces.get(&obj_id) {
-                        let toplevel = info.window.toplevel().unwrap();
-                        toplevel.with_pending_state(|state| {
-                            state.size = Some((width as i32, height as i32).into());
-                        });
-                        toplevel.send_pending_configure();
-                    }
+                if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
+                    && let Some(info) = self.surfaces.get(&obj_id)
+                {
+                    let toplevel = info.window.toplevel().unwrap();
+                    toplevel.with_pending_state(|state| {
+                        state.size = Some((width as i32, height as i32).into());
+                    });
+                    toplevel.send_pending_configure();
                 }
             }
             CompositorCommand::SurfaceFocus { surface_id } => {
-                if let Some(&obj_id) = self.surface_lookup.get(&surface_id) {
-                    if let Some(info) = self.surfaces.get(&obj_id) {
-                        let keyboard = self.seat.get_keyboard().unwrap();
-                        let serial = SERIAL_COUNTER.next_serial();
-                        keyboard.set_focus(
-                            self,
-                            Some(info.window.toplevel().unwrap().wl_surface().clone()),
-                            serial,
-                        );
-                    }
+                if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
+                    && let Some(info) = self.surfaces.get(&obj_id)
+                {
+                    let keyboard = self.seat.get_keyboard().unwrap();
+                    let serial = SERIAL_COUNTER.next_serial();
+                    keyboard.set_focus(
+                        self,
+                        Some(info.window.toplevel().unwrap().wl_surface().clone()),
+                        serial,
+                    );
                 }
             }
             CompositorCommand::ClipboardOffer { .. } => {}
@@ -343,30 +344,28 @@ impl CompositorHandler for Compositor {
         with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
             let attrs = guard.current();
-            if let Some(ref assignment) = attrs.buffer {
-                if let compositor::BufferAssignment::NewBuffer(buffer) = assignment {
-                    let shm_ok = with_buffer_contents(buffer, |ptr, len, data: BufferData| {
-                        let width = data.width as u32;
-                        let height = data.height as u32;
-                        let stride = data.stride as usize;
-                        let offset = data.offset as usize;
-                        let pixel_data = unsafe { std::slice::from_raw_parts(ptr, len) };
-                        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-                        for row in 0..height as usize {
-                            let row_start = offset + row * stride;
-                            let row_end = row_start + (width as usize * 4);
-                            if row_end <= pixel_data.len() {
-                                rgba.extend_from_slice(&pixel_data[row_start..row_end]);
-                            }
-                        }
-                        committed_buffer = Some((width, height, rgba));
-                    }).is_ok();
-
-                    if !shm_ok {
-                        if let Ok(dmabuf) = get_dmabuf(buffer) {
-                            committed_buffer = read_dmabuf_pixels(dmabuf);
+            if let Some(compositor::BufferAssignment::NewBuffer(buffer)) = attrs.buffer.as_ref() {
+                let shm_ok = with_buffer_contents(buffer, |ptr, len, data: BufferData| {
+                    let width = data.width as u32;
+                    let height = data.height as u32;
+                    let stride = data.stride as usize;
+                    let offset = data.offset as usize;
+                    let pixel_data = unsafe { std::slice::from_raw_parts(ptr, len) };
+                    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+                    for row in 0..height as usize {
+                        let row_start = offset + row * stride;
+                        let row_end = row_start + (width as usize * 4);
+                        if row_end <= pixel_data.len() {
+                            rgba.extend_from_slice(&pixel_data[row_start..row_end]);
                         }
                     }
+                    committed_buffer = Some((width, height, rgba));
+                }).is_ok();
+
+                if !shm_ok
+                    && let Ok(dmabuf) = get_dmabuf(buffer)
+                {
+                    committed_buffer = read_dmabuf_pixels(dmabuf);
                 }
             }
 
@@ -376,14 +375,14 @@ impl CompositorHandler for Compositor {
             }
         });
 
-        if let Some(info) = self.surfaces.get_mut(&key) {
-            if new_title != info.last_title {
-                info.last_title = new_title.clone();
-                let _ = self.event_tx.send(CompositorEvent::SurfaceTitle {
-                    surface_id,
-                    title: new_title,
-                });
-            }
+        if let Some(info) = self.surfaces.get_mut(&key)
+            && new_title != info.last_title
+        {
+            info.last_title = new_title.clone();
+            let _ = self.event_tx.send(CompositorEvent::SurfaceTitle {
+                surface_id,
+                title: new_title,
+            });
         }
 
         if let Some((width, height, pixels)) = committed_buffer {
@@ -578,7 +577,7 @@ fn read_dmabuf_pixels(dmabuf: &Dmabuf) -> Option<(u32, u32, Vec<u8>)> {
         let row_start = row * stride;
         let row_end = row_start + (width as usize * 4);
         if row_end > pixel_data.len() {
-            break;
+            return None;
         }
         if is_argb {
             for col in 0..width as usize {

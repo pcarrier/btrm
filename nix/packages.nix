@@ -109,6 +109,10 @@
       blit-server-static = mkStaticBin {
         pname = "blit-server";
         cargoPkg = "blit-server";
+        extraArgs = {
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.pkgsStatic.libxkbcommon pkgs.pkgsStatic.pixman ];
+        };
       };
 
       blit-webrtc-forwarder = rustPlatform.buildRustPackage {
@@ -201,7 +205,11 @@
       blit-cli-static = mkStaticBin {
         pname = "blit-cli";
         cargoPkg = "blit-cli";
-        extraArgs = { preBuild = copyWebAppDist; };
+        extraArgs = {
+          preBuild = copyWebAppDist;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.pkgsStatic.libxkbcommon pkgs.pkgsStatic.pixman ];
+        };
       };
 
       blit-gateway-static = mkStaticBin {

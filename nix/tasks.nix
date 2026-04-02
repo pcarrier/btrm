@@ -396,7 +396,7 @@ in {
         touch crates/browser/pkg/blit_browser.js
       fi
       if [ ! -f crates/browser/pkg/blit_browser.d.ts ]; then
-        touch crates/browser/pkg/blit_browser.d.ts
+        echo 'export class Terminal { free(): void }' > crates/browser/pkg/blit_browser.d.ts
       fi
 
       echo "=== JS typecheck ==="

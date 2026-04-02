@@ -142,7 +142,7 @@ The product consequence is easy to explain.
 
 A slow client should not become everybody's clock.
 
-The README puts it plainly: a phone on 3G should not stall a workstation on localhost. The focused session should run hot. Background sessions should stay observable without stealing the budget from the terminal the user is actively looking at.
+A phone on 3G should not stall a workstation on localhost. The focused session should run hot. Background sessions should stay observable without stealing the budget from the terminal the user is actively looking at.
 
 That fits Indent unusually well because Indent already has that distinction in the UI. In the current client, interactive terminals and background terminals are separate views over the same underlying `blit` system, and the transport into the browser is a WebRTC data channel. The transport changed. The protocol idea did not.
 

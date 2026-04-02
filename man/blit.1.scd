@@ -6,7 +6,7 @@ blit - terminal streaming client
 
 # SYNOPSIS
 
-_blit_ [OPTIONS] [HOST]
+_blit_ [OPTIONS] _open_ [_--console_ | _--port_ _PORT_]
 
 _blit_ [OPTIONS] _list_
 
@@ -22,35 +22,31 @@ _blit_ [OPTIONS] _restart_ _ID_
 
 _blit_ [OPTIONS] _wait_ _--timeout_ _N_ [_--pattern_ _REGEX_] _ID_
 
+_blit_ [OPTIONS] _kill_ _ID_ [_SIGNAL_]
+
 _blit_ [OPTIONS] _close_ _ID_
 
 _blit_ [OPTIONS] _server_ [_--shell-flags_ _FLAGS_] [_--scrollback_ _N_] [_--fd-channel_ _FD_]
 
 _blit_ [OPTIONS] _share_ [_--passphrase_ _PASSPHRASE_] [_--quiet_] [_--verbose_]
 
+_blit_ _learn_
+
 _blit_ _upgrade_
 
 # DESCRIPTION
 
-_blit_ connects to a _blit-server_(1) instance and provides a terminal
-interface, either in the browser (default) or in the current terminal
-(_--console_ mode).
+_blit_ is a terminal streaming tool for browsers and AI agents.
 
-Without arguments, it connects to the local Unix socket. A bare hostname is
-treated as an SSH target: blit opens an SSH tunnel and starts an embedded HTTP
-gateway on a random loopback port, then opens the browser.
+_blit open_ connects to a _blit-server_(1) instance and opens the terminal
+UI in a browser. With _--console_, it renders directly to the terminal
+instead.
 
-In browser mode, each tab gets its own connection to the server.
+Most subcommands (_list_, _start_, _show_, _send_, etc.) are designed for
+programmatic use by scripts and LLM agents. Run _blit learn_ to print the
+full CLI reference.
 
 # OPTIONS
-
-_--console_
-Render directly to the terminal using the ANSI renderer instead of
-opening a browser.
-
-_--port_ _PORT_
-Bind the embedded browser gateway to a specific port instead of
-choosing one at random.
 
 _--socket_ _PATH_, _-s_ _PATH_
 Connect to a specific Unix socket.
@@ -63,7 +59,7 @@ Connect to a remote _blit-server_ over SSH. The remote socket path is
 resolved using the same cascade as _BLIT_SOCK_ (see below), evaluated on
 the remote host as the SSH user.
 
-_--share_ _PASSPHRASE_
+_--passphrase_ _PASSPHRASE_
 Connect via WebRTC to a shared session using the given passphrase.
 
 _--hub_ _URL_
@@ -83,9 +79,14 @@ Output is plain text with no decoration. Errors go to stderr; non-zero exit
 on failure. The connection options (_--socket_, _--tcp_, _--ssh_) are accepted
 by all subcommands.
 
+_open_ [_--console_ | _--port_ _PORT_]
+Open the terminal UI. By default, opens a browser. With _--console_,
+renders directly to the terminal. _--port_ binds the embedded gateway to
+a specific port. _--console_ and _--port_ are mutually exclusive.
+
 _list_
 List all terminal sessions. Output is TSV with columns: ID, TAG, TITLE,
-STATUS.
+COMMAND, STATUS.
 
 _start_ [_--tag_ _TAG_] [_--rows_ _N_] [_--cols_ _N_] [_--wait_ _--timeout_ _N_] [_COMMAND..._]
 Start a new PTY and print its session ID. If _COMMAND_ is omitted, the
@@ -125,6 +126,11 @@ Restart an exited session. The original command, terminal size, and tag
 are preserved. The session ID is reused but terminal scrollback is _not_
 cleared — old output persists. Fails if the session is still running.
 
+_kill_ _ID_ [_SIGNAL_]
+Send a signal to the leader process of session _ID_. Accepts signal names
+(_TERM_, _KILL_, _INT_, _HUP_, _USR1_, etc.) or numbers (_9_, _15_).
+Defaults to _TERM_. Returns an error if the session has already exited.
+
 _close_ _ID_
 Close and remove session _ID_.
 
@@ -140,6 +146,9 @@ URL is printed to stdout. The passphrase can also be set via the
 _BLIT_PASSPHRASE_ environment variable. If omitted, a random passphrase
 is generated. With _--verbose_, detailed connection diagnostics (ICE
 negotiation, STUN/TURN results, peer events) are printed to stderr.
+
+_learn_
+Print the full CLI reference — a usage guide for scripts and LLM agents.
 
 _upgrade_
 Upgrade _blit_ to the latest version. Downloads and runs the install

@@ -1,12 +1,11 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/remote",
     "crates/alacritty-driver",
     "crates/server",
     "crates/gateway",
     "crates/browser",
-    "crates/demo",
     "crates/cli",
     "crates/fonts",
     "crates/webserver",
@@ -14,6 +13,7 @@ members = [
 ]
 
 [workspace.package]
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/indent-com/blit"
 homepage = "https://blit.sh"

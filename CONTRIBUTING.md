@@ -109,7 +109,7 @@ There is no `rustfmt.toml` or `.clippy.toml` — default rustfmt and `clippy -D 
 
 ## Project structure
 
-Most Rust crates are one or two source files. `blit-cli` is split into four and `blit-webrtc-forwarder` uses a multi-file module tree. `blit-demo` has extra binaries in `src/bin/`.
+Most Rust crates are one or two source files. `blit-cli` is split into four and `blit-webrtc-forwarder` uses a multi-file module tree.
 
 | File                                 | Lines | Role                                                                                                             |
 | ------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------- |
@@ -120,7 +120,6 @@ Most Rust crates are one or two source files. `blit-cli` is split into four and 
 | `crates/cli/src/agent.rs`            | ~1300 | Agent subcommands: `list`, `start`, `show`, `history`, `send`, `close`                                           |
 | `crates/browser/src/lib.rs`          | ~1200 | WASM: applies frame diffs, produces WebGL vertex data, glyph atlas                                               |
 | `crates/alacritty-driver/src/lib.rs` | ~1200 | Terminal parsing wrapper around `alacritty_terminal`                                                              |
-| `crates/demo/src/main.rs`            | ~780  | Demo programs                                                                                                    |
 | `crates/gateway/src/main.rs`         | ~750  | WebSocket/WebTransport proxy                                                                                     |
 | `crates/fonts/src/lib.rs`            | ~660  | Font discovery and TTF/OTF parsing                                                                               |
 | `crates/cli/src/main.rs`             | ~440  | Clap structs and dispatch                                                                                        |

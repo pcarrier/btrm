@@ -1,7 +1,7 @@
 [package]
 name = "blit-remote"
 version = "0.17.1"
-edition = "2021"
+edition.workspace = true
 description = "Remote blit protocol, frame state, and callback DOM renderer"
 license.workspace = true
 repository.workspace = true

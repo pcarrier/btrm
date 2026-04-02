@@ -35,9 +35,8 @@ The server is the stateful half. It owns PTYs, scrollback, parsed terminal state
 | `blit-webrtc-forwarder` | `crates/webrtc-forwarder/` | lib + bin     | WebRTC bridge: signaling, STUN/TURN NAT traversal, peer-to-peer data channels to blit-server                         |
 | `blit-fonts`            | `crates/fonts/`            | lib           | Font discovery and metadata (TTF/OTF `name`/`post`/`hmtx` table parsing)                                             |
 | `blit-webserver`        | `crates/webserver/`        | lib           | Shared axum HTTP helpers for serving assets and fonts                                                                |
-| `blit-demo`             | `crates/demo/`             | bin           | Demo programs: `chaos`, `emojiblast`, `netdash`                                                                      |
 
-Each Rust crate is a single `lib.rs` or `main.rs` with no multi-file module trees (`blit-demo` also has additional binaries in `crates/demo/src/bin/`; `blit-cli` is split into `main.rs`, `transport.rs`, `interactive.rs`, and `agent.rs`; `blit-webrtc-forwarder` is split into `lib.rs`, `main.rs`, `peer.rs`, `signaling.rs`, `ice.rs`, and `turn.rs`).
+Each Rust crate is a single `lib.rs` or `main.rs` with no multi-file module trees (`blit-cli` is split into `main.rs`, `transport.rs`, `interactive.rs`, and `agent.rs`; `blit-webrtc-forwarder` is split into `lib.rs`, `main.rs`, `peer.rs`, `signaling.rs`, `ice.rs`, and `turn.rs`).
 
 ### Dependency graph
 
@@ -46,7 +45,6 @@ graph TD
     remote[blit-remote] --> alacritty[blit-alacritty]
     remote --> browser[blit-browser]
     remote --> cli[blit-cli]
-    remote --> demo[blit-demo]
 
     alacritty --> server[blit-server]
     browser --> core[@blit-sh/core]

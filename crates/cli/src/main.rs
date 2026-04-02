@@ -108,6 +108,10 @@ enum Command {
         /// Maximum seconds to wait (only with --wait)
         #[arg(long)]
         timeout: Option<u64>,
+
+        /// Run inside a headless Wayland compositor (GUI app mode)
+        #[arg(long)]
+        compositor: bool,
     },
 
     /// Wait for a session to exit or match a pattern.
@@ -377,8 +381,9 @@ async fn main() {
                     cols,
                     wait,
                     timeout,
+                    compositor,
                 } => {
-                    let start_result = agent::cmd_start(transport, tag, command, rows, cols).await;
+                    let start_result = agent::cmd_start(transport, tag, command, rows, cols, compositor).await;
                     if wait {
                         let pty_id = match start_result {
                             Ok(id) => id,

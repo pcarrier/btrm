@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use blit_remote::{
-    EXIT_STATUS_UNKNOWN, S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE,
-    S2C_UPDATE, ServerMsg, TerminalState, msg_ack, msg_close, msg_create_n_command, msg_input,
-    msg_kill, msg_read, msg_resize, msg_restart, msg_subscribe, parse_server_msg,
+    CREATE2_HAS_COMPOSITOR, EXIT_STATUS_UNKNOWN, S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY,
+    S2C_TEXT, S2C_TITLE, S2C_UPDATE, ServerMsg, TerminalState, msg_ack, msg_close, msg_create2,
+    msg_create_n_command, msg_input, msg_kill, msg_read, msg_resize, msg_restart, msg_subscribe,
+    parse_server_msg,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -146,13 +147,18 @@ pub async fn cmd_start(
     command: Vec<String>,
     rows: u16,
     cols: u16,
+    compositor: bool,
 ) -> Result<u16, String> {
     let mut conn = AgentConn::connect(transport).await?;
 
     let nonce: u16 = 1;
     let tag_str = tag.as_deref().unwrap_or("");
     let cmd_str = command.join("\0");
-    let msg = msg_create_n_command(nonce, rows, cols, tag_str, &cmd_str);
+    let msg = if compositor {
+        msg_create2(nonce, rows, cols, tag_str, &cmd_str, CREATE2_HAS_COMPOSITOR)
+    } else {
+        msg_create_n_command(nonce, rows, cols, tag_str, &cmd_str)
+    };
     conn.send(&msg).await?;
 
     loop {

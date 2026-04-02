@@ -1648,6 +1648,32 @@ pub fn msg_create_n_command(nonce: u16, rows: u16, cols: u16, tag: &str, command
     msg
 }
 
+pub fn msg_create2(
+    nonce: u16,
+    rows: u16,
+    cols: u16,
+    tag: &str,
+    command: &str,
+    features: u8,
+) -> Vec<u8> {
+    let tag_bytes = tag.as_bytes();
+    let cmd_bytes = command.as_bytes();
+    let has_cmd = !command.is_empty();
+    let feat = features | if has_cmd { CREATE2_HAS_COMMAND } else { 0 };
+    let mut msg = Vec::with_capacity(10 + tag_bytes.len() + cmd_bytes.len());
+    msg.push(C2S_CREATE2);
+    msg.extend_from_slice(&nonce.to_le_bytes());
+    msg.extend_from_slice(&rows.to_le_bytes());
+    msg.extend_from_slice(&cols.to_le_bytes());
+    msg.push(feat);
+    msg.extend_from_slice(&(tag_bytes.len() as u16).to_le_bytes());
+    msg.extend_from_slice(tag_bytes);
+    if has_cmd {
+        msg.extend_from_slice(cmd_bytes);
+    }
+    msg
+}
+
 pub fn msg_create_command(rows: u16, cols: u16, command: &str) -> Vec<u8> {
     msg_create_tagged_command(rows, cols, "", command)
 }

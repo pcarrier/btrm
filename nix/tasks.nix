@@ -387,17 +387,8 @@ in {
       cargo test --workspace
       echo ""
 
-      echo "=== Setting up browser WASM stub ==="
-      mkdir -p crates/browser/pkg
-      if [ ! -f crates/browser/pkg/package.json ]; then
-        echo '{"name":"@blit-sh/browser","version":"0.0.0","main":"blit_browser.js","types":"blit_browser.d.ts"}' > crates/browser/pkg/package.json
-      fi
-      if [ ! -f crates/browser/pkg/blit_browser.js ]; then
-        touch crates/browser/pkg/blit_browser.js
-      fi
-      if [ ! -f crates/browser/pkg/blit_browser.d.ts ]; then
-        echo 'export class Terminal { free(): void }' > crates/browser/pkg/blit_browser.d.ts
-      fi
+      echo "=== Setting up browser WASM package ==="
+      ${setupBrowserPkg}
 
       echo "=== JS typecheck ==="
       (cd js && { pnpm install --frozen-lockfile 2>/dev/null || pnpm install; } && pnpm run typecheck)

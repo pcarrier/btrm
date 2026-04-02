@@ -51,3 +51,11 @@ processes:
         condition: process_healthy
     availability:
       restart: always
+
+  website:
+    command: cd js/website && npx vite
+    depends_on:
+      browser-wasm:
+        condition: process_healthy
+    availability:
+      restart: always

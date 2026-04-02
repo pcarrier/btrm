@@ -1491,16 +1491,14 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
             if off + title_len + 2 > data.len() {
                 return None;
             }
-            let title =
-                std::str::from_utf8(&data[off..off + title_len]).unwrap_or_default();
+            let title = std::str::from_utf8(&data[off..off + title_len]).unwrap_or_default();
             off += title_len;
             let app_id_len = u16::from_le_bytes([data[off], data[off + 1]]) as usize;
             off += 2;
             if off + app_id_len > data.len() {
                 return None;
             }
-            let app_id =
-                std::str::from_utf8(&data[off..off + app_id_len]).unwrap_or_default();
+            let app_id = std::str::from_utf8(&data[off..off + app_id_len]).unwrap_or_default();
             Some(ServerMsg::SurfaceCreated {
                 session_id,
                 surface_id,
@@ -1538,8 +1536,7 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
             if data.len() < 5 {
                 return None;
             }
-            let title =
-                std::str::from_utf8(data.get(5..).unwrap_or_default()).unwrap_or_default();
+            let title = std::str::from_utf8(data.get(5..).unwrap_or_default()).unwrap_or_default();
             Some(ServerMsg::SurfaceTitle {
                 session_id: u16::from_le_bytes([data[1], data[2]]),
                 surface_id: u16::from_le_bytes([data[3], data[4]]),
@@ -1568,8 +1565,7 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
             if off + mime_len + 4 > data.len() {
                 return None;
             }
-            let mime_type =
-                std::str::from_utf8(&data[off..off + mime_len]).unwrap_or_default();
+            let mime_type = std::str::from_utf8(&data[off..off + mime_len]).unwrap_or_default();
             off += mime_len;
             let data_len =
                 u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
@@ -1894,12 +1890,7 @@ pub fn msg_surface_title(session_id: u16, surface_id: u16, title: &str) -> Vec<u
     msg
 }
 
-pub fn msg_surface_resized(
-    session_id: u16,
-    surface_id: u16,
-    width: u16,
-    height: u16,
-) -> Vec<u8> {
+pub fn msg_surface_resized(session_id: u16, surface_id: u16, width: u16, height: u16) -> Vec<u8> {
     let mut msg = Vec::with_capacity(9);
     msg.push(S2C_SURFACE_RESIZED);
     msg.extend_from_slice(&session_id.to_le_bytes());
@@ -1955,7 +1946,12 @@ pub fn msg_surface_pointer(
     msg
 }
 
-pub fn msg_surface_pointer_axis(session_id: u16, surface_id: u16, axis: u8, value_x100: i32) -> Vec<u8> {
+pub fn msg_surface_pointer_axis(
+    session_id: u16,
+    surface_id: u16,
+    axis: u8,
+    value_x100: i32,
+) -> Vec<u8> {
     let mut msg = Vec::with_capacity(10);
     msg.push(C2S_SURFACE_POINTER_AXIS);
     msg.extend_from_slice(&session_id.to_le_bytes());
@@ -1983,7 +1979,12 @@ pub fn msg_surface_focus(session_id: u16, surface_id: u16) -> Vec<u8> {
     msg
 }
 
-pub fn msg_c2s_clipboard(session_id: u16, surface_id: u16, mime_type: &str, data: &[u8]) -> Vec<u8> {
+pub fn msg_c2s_clipboard(
+    session_id: u16,
+    surface_id: u16,
+    mime_type: &str,
+    data: &[u8],
+) -> Vec<u8> {
     let mime_bytes = mime_type.as_bytes();
     let mut msg = Vec::with_capacity(11 + mime_bytes.len() + data.len());
     msg.push(C2S_CLIPBOARD);

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::time::Instant;
 
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufMappingMode};
@@ -216,11 +216,7 @@ impl Compositor {
                     );
                 }
             }
-            CompositorCommand::PointerMotion {
-                surface_id,
-                x,
-                y,
-            } => {
+            CompositorCommand::PointerMotion { surface_id, x, y } => {
                 if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
                     && let Some(info) = self.surfaces.get(&obj_id)
                 {
@@ -360,11 +356,10 @@ impl CompositorHandler for Compositor {
                         }
                     }
                     committed_buffer = Some((width, height, rgba));
-                }).is_ok();
+                })
+                .is_ok();
 
-                if !shm_ok
-                    && let Ok(dmabuf) = get_dmabuf(buffer)
-                {
+                if !shm_ok && let Ok(dmabuf) = get_dmabuf(buffer) {
                     committed_buffer = read_dmabuf_pixels(dmabuf);
                 }
             }
@@ -546,7 +541,12 @@ impl DmabufHandler for Compositor {
         &mut self.dmabuf_state
     }
 
-    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, _dmabuf: Dmabuf, notifier: ImportNotifier) {
+    fn dmabuf_imported(
+        &mut self,
+        _global: &DmabufGlobal,
+        _dmabuf: Dmabuf,
+        notifier: ImportNotifier,
+    ) {
         let _ = notifier.successful::<Compositor>();
     }
 }
@@ -565,7 +565,11 @@ fn read_dmabuf_pixels(dmabuf: &Dmabuf) -> Option<(u32, u32, Vec<u8>)> {
         return None;
     }
 
-    let _ = dmabuf.sync_plane(0, smithay::backend::allocator::dmabuf::DmabufSyncFlags::START | smithay::backend::allocator::dmabuf::DmabufSyncFlags::READ);
+    let _ = dmabuf.sync_plane(
+        0,
+        smithay::backend::allocator::dmabuf::DmabufSyncFlags::START
+            | smithay::backend::allocator::dmabuf::DmabufSyncFlags::READ,
+    );
     let mapping = dmabuf.map_plane(0, DmabufMappingMode::READ).ok()?;
     let stride = dmabuf.strides().next().unwrap_or(width * 4) as usize;
     let ptr = mapping.ptr() as *const u8;
@@ -584,14 +588,18 @@ fn read_dmabuf_pixels(dmabuf: &Dmabuf) -> Option<(u32, u32, Vec<u8>)> {
                 let i = row_start + col * 4;
                 rgba.push(pixel_data[i + 2]); // R (ARGB -> byte order is BGRA in LE)
                 rgba.push(pixel_data[i + 1]); // G
-                rgba.push(pixel_data[i]);     // B
+                rgba.push(pixel_data[i]); // B
                 rgba.push(pixel_data[i + 3]); // A
             }
         } else {
             rgba.extend_from_slice(&pixel_data[row_start..row_end]);
         }
     }
-    let _ = dmabuf.sync_plane(0, smithay::backend::allocator::dmabuf::DmabufSyncFlags::END | smithay::backend::allocator::dmabuf::DmabufSyncFlags::READ);
+    let _ = dmabuf.sync_plane(
+        0,
+        smithay::backend::allocator::dmabuf::DmabufSyncFlags::END
+            | smithay::backend::allocator::dmabuf::DmabufSyncFlags::READ,
+    );
 
     Some((width, height, rgba))
 }
@@ -662,14 +670,38 @@ fn run_compositor(
 
     let mut dmabuf_state = DmabufState::new();
     let dmabuf_formats = [
-        DmabufFormat { code: Fourcc::Argb8888, modifier: Modifier::Linear },
-        DmabufFormat { code: Fourcc::Xrgb8888, modifier: Modifier::Linear },
-        DmabufFormat { code: Fourcc::Abgr8888, modifier: Modifier::Linear },
-        DmabufFormat { code: Fourcc::Xbgr8888, modifier: Modifier::Linear },
-        DmabufFormat { code: Fourcc::Argb8888, modifier: Modifier::Invalid },
-        DmabufFormat { code: Fourcc::Xrgb8888, modifier: Modifier::Invalid },
-        DmabufFormat { code: Fourcc::Abgr8888, modifier: Modifier::Invalid },
-        DmabufFormat { code: Fourcc::Xbgr8888, modifier: Modifier::Invalid },
+        DmabufFormat {
+            code: Fourcc::Argb8888,
+            modifier: Modifier::Linear,
+        },
+        DmabufFormat {
+            code: Fourcc::Xrgb8888,
+            modifier: Modifier::Linear,
+        },
+        DmabufFormat {
+            code: Fourcc::Abgr8888,
+            modifier: Modifier::Linear,
+        },
+        DmabufFormat {
+            code: Fourcc::Xbgr8888,
+            modifier: Modifier::Linear,
+        },
+        DmabufFormat {
+            code: Fourcc::Argb8888,
+            modifier: Modifier::Invalid,
+        },
+        DmabufFormat {
+            code: Fourcc::Xrgb8888,
+            modifier: Modifier::Invalid,
+        },
+        DmabufFormat {
+            code: Fourcc::Abgr8888,
+            modifier: Modifier::Invalid,
+        },
+        DmabufFormat {
+            code: Fourcc::Xbgr8888,
+            modifier: Modifier::Invalid,
+        },
     ];
     let dmabuf_global = dmabuf_state.create_global::<Compositor>(&dh, dmabuf_formats);
 
@@ -693,7 +725,12 @@ fn run_compositor(
         refresh: 60_000,
     };
     output.create_global::<Compositor>(&dh);
-    output.change_current_state(Some(mode), Some(Transform::Normal), None, Some((0, 0).into()));
+    output.change_current_state(
+        Some(mode),
+        Some(Transform::Normal),
+        None,
+        Some((0, 0).into()),
+    );
     output.set_preferred(mode);
 
     let mut space = Space::default();

@@ -1,4 +1,5 @@
 use blit_alacritty::{SearchResult as AlacrittySearchResult, TerminalDriver as AlacrittyDriver};
+use blit_compositor::{CompositorCommand, CompositorEvent, CompositorHandle};
 use blit_remote::{
     C2S_ACK, C2S_CLIENT_METRICS, C2S_CLIPBOARD, C2S_CLOSE, C2S_COPY_RANGE, C2S_CREATE,
     C2S_CREATE_AT, C2S_CREATE_N, C2S_CREATE2, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_KILL,
@@ -11,7 +12,6 @@ use blit_remote::{
     build_update_msg, msg_hello, msg_s2c_clipboard, msg_surface_created, msg_surface_destroyed,
     msg_surface_frame, msg_surface_resized, msg_surface_title,
 };
-use blit_compositor::{CompositorCommand, CompositorEvent, CompositorHandle};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1185,7 +1185,9 @@ async fn cleanup_pty_internal(pty_id: u16, state: &AppState) {
     let all_exited = sess.ptys.values().all(|p| p.exited);
     if all_exited {
         if let Some(cs) = sess.compositor.take() {
-            cs.handle.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+            cs.handle
+                .shutdown
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = cs.handle.command_tx.send(CompositorCommand::Shutdown);
         }
     }
@@ -1747,10 +1749,13 @@ async fn tick(state: &AppState) -> TickOutcome {
                         0, surface_id, parent_id, width, height, &title, &app_id,
                     ));
                     if let Ok(enc) = openh264::encoder::Encoder::new() {
-                        cs.encoders.insert(surface_id, SurfaceEncoder {
-                            encoder: enc,
-                            frame_count: 0,
-                        });
+                        cs.encoders.insert(
+                            surface_id,
+                            SurfaceEncoder {
+                                encoder: enc,
+                                frame_count: 0,
+                            },
+                        );
                     }
                 }
                 CompositorEvent::SurfaceDestroyed { surface_id } => {
@@ -1881,7 +1886,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
         if let Some(c) = sess.clients.get(&client_id) {
             let _ = c.tx.try_send(msg_hello(
                 1,
-                FEATURE_CREATE_NONCE | FEATURE_RESTART | FEATURE_RESIZE_BATCH | FEATURE_COPY_RANGE | FEATURE_COMPOSITOR,
+                FEATURE_CREATE_NONCE
+                    | FEATURE_RESTART
+                    | FEATURE_RESIZE_BATCH
+                    | FEATURE_COPY_RANGE
+                    | FEATURE_COMPOSITOR,
             ));
         }
         let mut initial_msgs = Vec::with_capacity(2 + sess.ptys.len() * 2);
@@ -2219,7 +2228,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-
                     let mut msg = Vec::with_capacity(3 + pty.tag.len());
                     msg.push(S2C_CREATED);
                     msg.extend_from_slice(&id.to_le_bytes());
@@ -2296,7 +2304,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
                     nonce_msg.push(S2C_CREATED_N);
@@ -2368,7 +2375,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-
                     let mut msg = Vec::with_capacity(3 + pty.tag.len());
                     msg.push(S2C_CREATED);
                     msg.extend_from_slice(&id.to_le_bytes());
@@ -2437,7 +2443,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
                     nonce_msg.push(S2C_CREATED_N);
@@ -2488,7 +2493,9 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     match ptype {
                         0 | 1 => {
                             let _ = cs.handle.command_tx.send(CompositorCommand::PointerMotion {
-                                surface_id, x, y,
+                                surface_id,
+                                x,
+                                y,
                             });
                             let _ = cs.handle.command_tx.send(CompositorCommand::PointerButton {
                                 surface_id,
@@ -2498,7 +2505,9 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                         }
                         2 => {
                             let _ = cs.handle.command_tx.send(CompositorCommand::PointerMotion {
-                                surface_id, x, y,
+                                surface_id,
+                                x,
+                                y,
                             });
                         }
                         _ => {}
@@ -2536,9 +2545,10 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 if let Some(cs) = sess.compositor.as_ref() {
-                    let _ = cs.handle.command_tx.send(CompositorCommand::SurfaceFocus {
-                        surface_id,
-                    });
+                    let _ = cs
+                        .handle
+                        .command_tx
+                        .send(CompositorCommand::SurfaceFocus { surface_id });
                 }
             }
             C2S_CLIPBOARD if data.len() >= 9 => {
@@ -2546,7 +2556,9 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 let mime_len = u16::from_le_bytes([data[5], data[6]]) as usize;
                 if data.len() >= 7 + mime_len + 4 {
-                    let mime = std::str::from_utf8(&data[7..7 + mime_len]).unwrap_or("text/plain").to_string();
+                    let mime = std::str::from_utf8(&data[7..7 + mime_len])
+                        .unwrap_or("text/plain")
+                        .to_string();
                     let data_len = u32::from_le_bytes([
                         data[7 + mime_len],
                         data[8 + mime_len],
@@ -2557,11 +2569,14 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     if data.len() >= payload_start + data_len {
                         let payload = data[payload_start..payload_start + data_len].to_vec();
                         if let Some(cs) = sess.compositor.as_ref() {
-                            let _ = cs.handle.command_tx.send(CompositorCommand::ClipboardOffer {
-                                surface_id,
-                                mime_type: mime,
-                                data: payload,
-                            });
+                            let _ = cs
+                                .handle
+                                .command_tx
+                                .send(CompositorCommand::ClipboardOffer {
+                                    surface_id,
+                                    mime_type: mime,
+                                    data: payload,
+                                });
                         }
                     }
                 }

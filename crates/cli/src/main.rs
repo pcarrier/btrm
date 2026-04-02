@@ -108,7 +108,6 @@ enum Command {
         /// Maximum seconds to wait (only with --wait)
         #[arg(long)]
         timeout: Option<u64>,
-
     },
 
     /// Wait for a session to exit or match a pattern.

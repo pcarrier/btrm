@@ -246,12 +246,8 @@ struct SurfaceEncoder {
     frame_count: u64,
 }
 
-struct CompositorSession {
-    #[allow(dead_code)]
-    pty_id: u16,
+struct SharedCompositor {
     handle: CompositorHandle,
-    #[allow(dead_code)]
-    child_pid: libc::pid_t,
     encoders: HashMap<u16, SurfaceEncoder>,
     created_at: Instant,
 }
@@ -943,7 +939,7 @@ fn update_client_scroll_state(client: &mut ClientState, pty_id: u16, next_offset
 
 struct Session {
     ptys: HashMap<u16, Pty>,
-    compositor_sessions: HashMap<u16, CompositorSession>,
+    compositor: Option<SharedCompositor>,
     next_client_id: u64,
     tick_fires: u32,
     tick_snaps: u32,
@@ -968,12 +964,24 @@ impl Session {
     fn new() -> Self {
         Self {
             ptys: HashMap::new(),
-            compositor_sessions: HashMap::new(),
+            compositor: None,
             next_client_id: 1,
             clients: HashMap::new(),
             tick_fires: 0,
             tick_snaps: 0,
         }
+    }
+
+    fn ensure_compositor(&mut self) -> &str {
+        if self.compositor.is_none() {
+            let handle = blit_compositor::spawn_compositor();
+            self.compositor = Some(SharedCompositor {
+                handle,
+                encoders: HashMap::new(),
+                created_at: Instant::now(),
+            });
+        }
+        &self.compositor.as_ref().unwrap().handle.socket_name
     }
 
     fn allocate_pty_id(&mut self) -> Option<u16> {
@@ -1174,9 +1182,12 @@ async fn cleanup_pty_internal(pty_id: u16, state: &AppState) {
         let msg = blit_remote::msg_exited(pty_id, pty.exit_status);
         sess.send_to_all(&msg);
     }
-    if let Some(cs) = sess.compositor_sessions.remove(&pty_id) {
-        cs.handle.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = cs.handle.command_tx.send(CompositorCommand::Shutdown);
+    let all_exited = sess.ptys.values().all(|p| p.exited);
+    if all_exited {
+        if let Some(cs) = sess.compositor.take() {
+            cs.handle.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = cs.handle.command_tx.send(CompositorCommand::Shutdown);
+        }
     }
 }
 
@@ -1715,13 +1726,10 @@ async fn tick(state: &AppState) -> TickOutcome {
         }
     }
 
-    let comp_ids: Vec<u16> = sess.compositor_sessions.keys().copied().collect();
-    for comp_id in comp_ids {
+    if let Some(cs) = sess.compositor.as_mut() {
         let mut events = Vec::new();
-        if let Some(cs) = sess.compositor_sessions.get(&comp_id) {
-            while let Ok(event) = cs.handle.event_rx.try_recv() {
-                events.push(event);
-            }
+        while let Ok(event) = cs.handle.event_rx.try_recv() {
+            events.push(event);
         }
         let mut outgoing: Vec<Vec<u8>> = Vec::new();
         for event in events {
@@ -1736,22 +1744,18 @@ async fn tick(state: &AppState) -> TickOutcome {
                     height,
                 } => {
                     outgoing.push(msg_surface_created(
-                        comp_id, surface_id, parent_id, width, height, &title, &app_id,
+                        0, surface_id, parent_id, width, height, &title, &app_id,
                     ));
                     if let Ok(enc) = openh264::encoder::Encoder::new() {
-                        if let Some(cs) = sess.compositor_sessions.get_mut(&comp_id) {
-                            cs.encoders.insert(surface_id, SurfaceEncoder {
-                                encoder: enc,
-                                frame_count: 0,
-                            });
-                        }
+                        cs.encoders.insert(surface_id, SurfaceEncoder {
+                            encoder: enc,
+                            frame_count: 0,
+                        });
                     }
                 }
                 CompositorEvent::SurfaceDestroyed { surface_id } => {
-                    if let Some(cs) = sess.compositor_sessions.get_mut(&comp_id) {
-                        cs.encoders.remove(&surface_id);
-                    }
-                    outgoing.push(msg_surface_destroyed(comp_id, surface_id));
+                    cs.encoders.remove(&surface_id);
+                    outgoing.push(msg_surface_destroyed(0, surface_id));
                 }
                 CompositorEvent::SurfaceCommit {
                     surface_id,
@@ -1759,46 +1763,44 @@ async fn tick(state: &AppState) -> TickOutcome {
                     height,
                     pixels,
                 } => {
-                    if let Some(cs) = sess.compositor_sessions.get_mut(&comp_id) {
-                        if let Some(enc) = cs.encoders.get_mut(&surface_id) {
-                            if let Some((nal_data, is_keyframe)) =
-                                encode_surface_frame(enc, &pixels, width, height)
-                            {
-                                let flags = if is_keyframe {
-                                    SURFACE_FRAME_FLAG_KEYFRAME
-                                } else {
-                                    0
-                                };
-                                let timestamp = cs.created_at.elapsed().as_millis() as u32;
-                                outgoing.push(msg_surface_frame(
-                                    comp_id,
-                                    surface_id,
-                                    timestamp,
-                                    flags,
-                                    width as u16,
-                                    height as u16,
-                                    &nal_data,
-                                ));
-                            }
+                    if let Some(enc) = cs.encoders.get_mut(&surface_id) {
+                        if let Some((nal_data, is_keyframe)) =
+                            encode_surface_frame(enc, &pixels, width, height)
+                        {
+                            let flags = if is_keyframe {
+                                SURFACE_FRAME_FLAG_KEYFRAME
+                            } else {
+                                0
+                            };
+                            let timestamp = cs.created_at.elapsed().as_millis() as u32;
+                            outgoing.push(msg_surface_frame(
+                                0,
+                                surface_id,
+                                timestamp,
+                                flags,
+                                width as u16,
+                                height as u16,
+                                &nal_data,
+                            ));
                         }
                     }
                 }
                 CompositorEvent::SurfaceTitle { surface_id, title } => {
-                    outgoing.push(msg_surface_title(comp_id, surface_id, &title));
+                    outgoing.push(msg_surface_title(0, surface_id, &title));
                 }
                 CompositorEvent::SurfaceResized {
                     surface_id,
                     width,
                     height,
                 } => {
-                    outgoing.push(msg_surface_resized(comp_id, surface_id, width, height));
+                    outgoing.push(msg_surface_resized(0, surface_id, width, height));
                 }
                 CompositorEvent::ClipboardContent {
                     surface_id,
                     mime_type,
                     data,
                 } => {
-                    outgoing.push(msg_s2c_clipboard(comp_id, surface_id, &mime_type, &data));
+                    outgoing.push(msg_s2c_clipboard(0, surface_id, &mime_type, &data));
                 }
             }
         }
@@ -2202,8 +2204,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
-                let comp_handle = blit_compositor::spawn_compositor();
-                let socket_name = comp_handle.socket_name.clone();
+                let socket_name = sess.ensure_compositor().to_string();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2218,14 +2219,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-                    let comp_session = CompositorSession {
-                        pty_id: id,
-                        handle: comp_handle,
-                        child_pid: pty.handle.child_pid,
-                        encoders: HashMap::new(),
-                        created_at: Instant::now(),
-                    };
-                    sess.compositor_sessions.insert(id, comp_session);
+
                     let mut msg = Vec::with_capacity(3 + pty.tag.len());
                     msg.push(S2C_CREATED);
                     msg.extend_from_slice(&id.to_le_bytes());
@@ -2287,8 +2281,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
-                let comp_handle = blit_compositor::spawn_compositor();
-                let socket_name = comp_handle.socket_name.clone();
+                let socket_name = sess.ensure_compositor().to_string();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2303,14 +2296,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-                    let comp_session = CompositorSession {
-                        pty_id: id,
-                        handle: comp_handle,
-                        child_pid: pty.handle.child_pid,
-                        encoders: HashMap::new(),
-                        created_at: Instant::now(),
-                    };
-                    sess.compositor_sessions.insert(id, comp_session);
+
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
                     nonce_msg.push(S2C_CREATED_N);
@@ -2367,8 +2353,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
-                let comp_handle = blit_compositor::spawn_compositor();
-                let socket_name = comp_handle.socket_name.clone();
+                let socket_name = sess.ensure_compositor().to_string();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2383,14 +2368,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-                    let comp_session = CompositorSession {
-                        pty_id: id,
-                        handle: comp_handle,
-                        child_pid: pty.handle.child_pid,
-                        encoders: HashMap::new(),
-                        created_at: Instant::now(),
-                    };
-                    sess.compositor_sessions.insert(id, comp_session);
+
                     let mut msg = Vec::with_capacity(3 + pty.tag.len());
                     msg.push(S2C_CREATED);
                     msg.extend_from_slice(&id.to_le_bytes());
@@ -2444,8 +2422,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
-                let comp_handle = blit_compositor::spawn_compositor();
-                let socket_name = comp_handle.socket_name.clone();
+                let socket_name = sess.ensure_compositor().to_string();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2460,14 +2437,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     state.clone(),
                     Some(&socket_name),
                 ) {
-                    let comp_session = CompositorSession {
-                        pty_id: id,
-                        handle: comp_handle,
-                        child_pid: pty.handle.child_pid,
-                        encoders: HashMap::new(),
-                        created_at: Instant::now(),
-                    };
-                    sess.compositor_sessions.insert(id, comp_session);
+
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
                     nonce_msg.push(S2C_CREATED_N);
@@ -2495,11 +2465,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 }
             }
             C2S_SURFACE_INPUT if data.len() >= 10 => {
-                let session_id = u16::from_le_bytes([data[1], data[2]]);
+                let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 let keycode = u32::from_le_bytes([data[5], data[6], data[7], data[8]]);
                 let pressed = data[9] != 0;
-                if let Some(cs) = sess.compositor_sessions.get(&session_id) {
+                if let Some(cs) = sess.compositor.as_ref() {
                     let _ = cs.handle.command_tx.send(CompositorCommand::KeyInput {
                         surface_id,
                         keycode,
@@ -2508,13 +2478,13 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 }
             }
             C2S_SURFACE_POINTER if data.len() >= 11 => {
-                let session_id = u16::from_le_bytes([data[1], data[2]]);
+                let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 let ptype = data[5];
                 let button = data[6];
                 let x = u16::from_le_bytes([data[7], data[8]]) as f64;
                 let y = u16::from_le_bytes([data[9], data[10]]) as f64;
-                if let Some(cs) = sess.compositor_sessions.get(&session_id) {
+                if let Some(cs) = sess.compositor.as_ref() {
                     match ptype {
                         0 | 1 => {
                             let _ = cs.handle.command_tx.send(CompositorCommand::PointerMotion {
@@ -2536,12 +2506,12 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 }
             }
             C2S_SURFACE_POINTER_AXIS if data.len() >= 10 => {
-                let session_id = u16::from_le_bytes([data[1], data[2]]);
+                let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 let axis = data[5];
                 let value_x100 = i32::from_le_bytes([data[6], data[7], data[8], data[9]]);
                 let value = value_x100 as f64 / 100.0;
-                if let Some(cs) = sess.compositor_sessions.get(&session_id) {
+                if let Some(cs) = sess.compositor.as_ref() {
                     let _ = cs.handle.command_tx.send(CompositorCommand::PointerAxis {
                         surface_id,
                         axis,
@@ -2550,11 +2520,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 }
             }
             C2S_SURFACE_RESIZE if data.len() >= 9 => {
-                let session_id = u16::from_le_bytes([data[1], data[2]]);
+                let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 let width = u16::from_le_bytes([data[5], data[6]]);
                 let height = u16::from_le_bytes([data[7], data[8]]);
-                if let Some(cs) = sess.compositor_sessions.get(&session_id) {
+                if let Some(cs) = sess.compositor.as_ref() {
                     let _ = cs.handle.command_tx.send(CompositorCommand::SurfaceResize {
                         surface_id,
                         width,
@@ -2563,16 +2533,16 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 }
             }
             C2S_SURFACE_FOCUS if data.len() >= 5 => {
-                let session_id = u16::from_le_bytes([data[1], data[2]]);
+                let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
-                if let Some(cs) = sess.compositor_sessions.get(&session_id) {
+                if let Some(cs) = sess.compositor.as_ref() {
                     let _ = cs.handle.command_tx.send(CompositorCommand::SurfaceFocus {
                         surface_id,
                     });
                 }
             }
             C2S_CLIPBOARD if data.len() >= 9 => {
-                let session_id = u16::from_le_bytes([data[1], data[2]]);
+                let _session_id = u16::from_le_bytes([data[1], data[2]]);
                 let surface_id = u16::from_le_bytes([data[3], data[4]]);
                 let mime_len = u16::from_le_bytes([data[5], data[6]]) as usize;
                 if data.len() >= 7 + mime_len + 4 {
@@ -2586,7 +2556,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     let payload_start = 11 + mime_len;
                     if data.len() >= payload_start + data_len {
                         let payload = data[payload_start..payload_start + data_len].to_vec();
-                        if let Some(cs) = sess.compositor_sessions.get(&session_id) {
+                        if let Some(cs) = sess.compositor.as_ref() {
                             let _ = cs.handle.command_tx.send(CompositorCommand::ClipboardOffer {
                                 surface_id,
                                 mime_type: mime,
@@ -2651,8 +2621,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     .map(|p| (p.driver.size(), p.command.clone(), p.tag.clone()));
                 if let Some(((rows, cols), command, tag)) = restart_info {
                     let wayland_display = sess
-                        .compositor_sessions
-                        .get(&pid)
+                        .compositor
+                        .as_ref()
                         .map(|cs| cs.handle.socket_name.clone());
                     if let Some((new_handle, reader, byte_rx)) = pty::respawn_child(
                         &state.0.shell,

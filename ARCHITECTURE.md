@@ -41,7 +41,7 @@ The server is the stateful half. It owns PTYs, scrollback, parsed terminal state
 
 Each Rust crate is a single `lib.rs` or `main.rs` with no multi-file module trees (`blit-cli` is split into `main.rs`, `transport.rs`, `interactive.rs`, and `agent.rs`; `blit-webrtc-forwarder` is split into `lib.rs`, `main.rs`, `peer.rs`, `signaling.rs`, `ice.rs`, and `turn.rs`).
 
-`blit-compositor` uses smithay 0.7 as a headless Wayland compositor. Each xdg_toplevel surface gets an independent surface ID and H.264 video stream. The compositor runs on a dedicated OS thread with its own calloop event loop and communicates with the server via channels (`CompositorEvent` / `CompositorCommand`).
+`blit-compositor` uses smithay 0.7 as a headless Wayland compositor. A single compositor instance is shared across all PTY sessions in a connection, running on a dedicated OS thread with its own calloop event loop. Each xdg_toplevel surface gets an independent surface ID and H.264 video stream. The compositor communicates with the server via channels (`CompositorEvent` / `CompositorCommand`).
 
 ### Dependency graph
 
@@ -328,10 +328,10 @@ When a PTY's subprocess exits, the server captures the exit status from `waitpid
 
 ### Compositor sessions
 
-Every PTY session has a companion headless Wayland compositor. The child process inherits `WAYLAND_DISPLAY` so any program — shell, TUI, or GUI — can open Wayland surfaces. The flow:
+A single headless Wayland compositor is shared across all PTY sessions in a connection. It is lazily spawned on the first PTY creation and shut down when all PTYs have exited. Every child process inherits the same `WAYLAND_DISPLAY`, so any program — shell, TUI, or GUI — can open Wayland surfaces regardless of which PTY launched it. The flow:
 
-1. `spawn_compositor()` starts a smithay compositor on a dedicated OS thread, listening on a random `wayland-blit-*` socket.
-2. The server fork/execs the requested command with `WAYLAND_DISPLAY` pointing at the compositor socket.
+1. `ensure_compositor()` lazily starts a smithay compositor on a dedicated OS thread, listening on a random `wayland-blit-*` socket. The compositor is reused for all subsequent PTYs.
+2. The server fork/execs the requested command with `WAYLAND_DISPLAY` pointing at the shared compositor socket.
 3. Each xdg_toplevel surface the client creates is assigned a surface ID. The compositor sends `SurfaceCommit` events containing RGBA pixel buffers.
 4. The server converts RGBA to YUV420, encodes via openh264 to H.264, and broadcasts `S2C_SURFACE_FRAME` to all connected clients.
 5. Input flows in reverse: `C2S_SURFACE_INPUT` / `C2S_SURFACE_POINTER` / `C2S_SURFACE_POINTER_AXIS` are translated to Wayland keyboard/pointer events via smithay.

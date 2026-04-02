@@ -172,7 +172,7 @@ export function Landing() {
           <p className="hero-mit">
             MIT-licensed. Every unsafe block{" "}
             <a href="https://github.com/indent-com/blit/blob/main/UNSAFE.md" target="_blank" rel="noopener noreferrer">audited</a>,
-            every invariant documented, every race condition intentional.
+            every invariant documented.
           </p>
 
           <div className="install-group">

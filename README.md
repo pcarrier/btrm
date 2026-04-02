@@ -91,7 +91,7 @@ All subcommands auto-start a local server if needed. For remote hosts, use `--ss
 blit open                                # Open the terminal UI in a browser
 blit open --console                      # Open in the current terminal instead
 
-blit list                                # List all PTYs (TSV: ID, TAG, TITLE, STATUS)
+blit list                                # List all PTYs (TSV: ID, TAG, TITLE, COMMAND, STATUS)
 blit start htop                          # Start a PTY running htop, print its ID
 blit start -t build make -j8             # Start with a tag
 blit start --rows 40 --cols 120 bash     # Start with a custom size

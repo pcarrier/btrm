@@ -22,6 +22,8 @@ _blit_ [OPTIONS] _restart_ _ID_
 
 _blit_ [OPTIONS] _wait_ _--timeout_ _N_ [_--pattern_ _REGEX_] _ID_
 
+_blit_ [OPTIONS] _kill_ _ID_ [_SIGNAL_]
+
 _blit_ [OPTIONS] _close_ _ID_
 
 _blit_ [OPTIONS] _server_ [_--shell-flags_ _FLAGS_] [_--scrollback_ _N_] [_--fd-channel_ _FD_]
@@ -84,7 +86,7 @@ a specific port.
 
 _list_
 List all terminal sessions. Output is TSV with columns: ID, TAG, TITLE,
-STATUS.
+COMMAND, STATUS.
 
 _start_ [_--tag_ _TAG_] [_--rows_ _N_] [_--cols_ _N_] [_--wait_ _--timeout_ _N_] [_COMMAND..._]
 Start a new PTY and print its session ID. If _COMMAND_ is omitted, the
@@ -123,6 +125,11 @@ _restart_ _ID_
 Restart an exited session. The original command, terminal size, and tag
 are preserved. The session ID is reused but terminal scrollback is _not_
 cleared — old output persists. Fails if the session is still running.
+
+_kill_ _ID_ [_SIGNAL_]
+Send a signal to the leader process of session _ID_. Accepts signal names
+(_TERM_, _KILL_, _INT_, _HUP_, _USR1_, etc.) or numbers (_9_, _15_).
+Defaults to _TERM_. Returns an error if the session has already exited.
 
 _close_ _ID_
 Close and remove session _ID_.

@@ -136,7 +136,14 @@ function DebugPanel({ log, onClose }: { log: DebugLog; onClose: () => void }) {
 }
 const FONT_FAMILY = "'Fira Code', monospace";
 const FONT_SIZE = 14;
-const AUTOCLOSE_DELAY = 1000;
+const EXITED_LABEL_STYLE: React.CSSProperties = {
+  cursor: "pointer",
+  padding: "4px 12px",
+  borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(255,255,255,0.05)",
+  transition: "background 0.15s",
+};
 
 const GITHUB_DARK = PALETTES.find((p) => p.id === "github-dark")!;
 const GITHUB_LIGHT = PALETTES.find((p) => p.id === "github-light")!;
@@ -341,25 +348,23 @@ function TabShell({
     workspace.setVisibleSessions(desired);
   }, [focusedId, workspace]);
 
-  const exitTimers = useRef(new Map<SessionId, ReturnType<typeof setTimeout>>());
-  useEffect(() => {
-    for (const s of sessions) {
-      if (s.state === "exited" && !exitTimers.current.has(s.id)) {
-        const timer = setTimeout(() => {
-          workspace.closeSession(s.id);
-          exitTimers.current.delete(s.id);
-        }, AUTOCLOSE_DELAY);
-        exitTimers.current.set(s.id, timer);
-      }
-    }
-    return () => {};
-  }, [sessions, workspace]);
+  const focusedSession = sessions.find((s) => s.id === focusedId);
+  const focusedExited = focusedSession?.state === "exited";
 
   useEffect(() => {
-    return () => {
-      for (const timer of exitTimers.current.values()) clearTimeout(timer);
+    if (!focusedExited || !focusedId) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        workspace.restartSession(focusedId);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        workspace.closeSession(focusedId);
+      }
     };
-  }, []);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [focusedExited, focusedId, workspace]);
 
   useEffect(() => {
     if (focusedId && visibleSessions.every((s) => s.id !== focusedId)) {
@@ -581,6 +586,50 @@ function TabShell({
             palette={palette}
             style={{ width: "100%", height: "100%" }}
           />
+        )}
+        {focusedExited && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              zIndex: 2,
+              background: "rgba(0,0,0,0.6)",
+              fontFamily: "'Fira Code', monospace",
+              fontSize: 13,
+              color: "rgba(255,255,255,0.7)",
+            }}
+          >
+            <span style={{ fontSize: 14, color: "rgba(255,255,255,0.5)" }}>
+              Process exited
+            </span>
+            <div style={{ display: "flex", gap: 10 }}>
+              <span
+                role="button"
+                tabIndex={0}
+                style={EXITED_LABEL_STYLE}
+                onClick={() => workspace.restartSession(focusedId!)}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+              >
+                Enter — reopen
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                style={EXITED_LABEL_STYLE}
+                onClick={() => workspace.closeSession(focusedId!)}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+              >
+                Esc — close
+              </span>
+            </div>
+          </div>
         )}
       </div>
     </div>

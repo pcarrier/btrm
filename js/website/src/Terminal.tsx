@@ -313,15 +313,27 @@ function TabShell({
   const visibleSessions = sessions.filter((s) => s.state !== "closed");
   const focusedId = state.focusedSessionId;
 
+  const creatingRef = useRef(false);
   useEffect(() => {
     if (
       connection?.status === "connected" &&
-      visibleSessions.length > 0 &&
-      !focusedId
+      connection?.ready &&
+      visibleSessions.length === 0 &&
+      !creatingRef.current
     ) {
+      creatingRef.current = true;
+      workspace
+        .createSession({
+          connectionId: CONNECTION_ID,
+          rows: termRef.current?.rows ?? 24,
+          cols: termRef.current?.cols ?? 80,
+        })
+        .then((s) => workspace.focusSession(s.id))
+        .finally(() => { creatingRef.current = false; });
+    } else if (visibleSessions.length > 0 && !focusedId) {
       workspace.focusSession(visibleSessions[0].id);
     }
-  }, [connection?.status, visibleSessions.length, focusedId, workspace]);
+  }, [connection?.status, connection?.ready, visibleSessions.length, focusedId, workspace]);
 
   useEffect(() => {
     const desired = new Set<SessionId>();
@@ -432,7 +444,7 @@ function TabShell({
             minHeight: 36,
           }}
         >
-          <div style={{ display: "flex", flex: 1, overflowX: "auto" }}>
+          <div style={{ display: "flex", flex: 1, overflowX: "auto", alignItems: "stretch" }}>
           {visibleSessions.map((s) => {
             const active = s.id === focusedId;
             return (
@@ -441,15 +453,15 @@ function TabShell({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 6,
-                  padding: "0 12px",
+                  gap: 4,
+                  padding: "0 8px 0 12px",
                   cursor: "pointer",
                   fontSize: 13,
                   fontFamily: "'Fira Code', monospace",
                   color: active ? fg : dimFg,
                   borderBottom: active ? `2px solid ${accent}` : "2px solid transparent",
                   background: "transparent",
-                  transition: "background 0.1s",
+                  transition: "background 0.15s",
                   whiteSpace: "nowrap",
                   userSelect: "none",
                   flexShrink: 0,
@@ -473,21 +485,65 @@ function TabShell({
                     border: "none",
                     color: dimFg,
                     cursor: "pointer",
-                    padding: "2px 4px",
-                    fontSize: 14,
-                    lineHeight: 1,
-                    borderRadius: 3,
-                    opacity: 0.6,
+                    padding: 0,
+                    width: 18,
+                    height: 18,
+                    fontSize: 12,
+                    lineHeight: "18px",
+                    textAlign: "center",
+                    borderRadius: "50%",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "background 0.15s, color 0.15s",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = rgba(palette.fg, dark ? 0.15 : 0.1);
+                    e.currentTarget.style.color = fg;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "none";
+                    e.currentTarget.style.color = dimFg;
+                  }}
                   aria-label={`Close ${tabLabel(s)}`}
                 >
-                  x
+                  {"\u2715"}
                 </button>
               </div>
             );
           })}
+          <button
+            onClick={() => {
+              workspace
+                .createSession({
+                  connectionId: CONNECTION_ID,
+                  rows: termRef.current?.rows ?? 24,
+                  cols: termRef.current?.cols ?? 80,
+                  ...(focusedId ? { cwdFromSessionId: focusedId } : {}),
+                })
+                .then((s) => workspace.focusSession(s.id))
+                .catch(() => {});
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              color: dimFg,
+              cursor: "pointer",
+              padding: "0 10px",
+              fontSize: 18,
+              fontFamily: "'Fira Code', monospace",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              transition: "color 0.15s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = fg)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = dimFg)}
+            aria-label="New tab"
+          >
+            +
+          </button>
           </div>
           <ShareButton passphrase={passphrase} dimFg={dimFg} tabHover={tabHover} />
         </div>

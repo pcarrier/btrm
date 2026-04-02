@@ -298,10 +298,35 @@ PROJ
       cargo clippy --workspace -- -D warnings
     '';
   };
+  coverage = pkgs.writeShellApplication {
+    name = "blit-coverage";
+    runtimeInputs = [ rustToolchain pkgs.cargo-llvm-cov pkgs.python3 ];
+    text = ''
+      echo "=== Setting up web-app dist ==="
+      mkdir -p js/web-app/dist
+      cp ${webAppDist}/index.html js/web-app/dist/
+
+      outdir="''${1:-coverage-report}"
+
+      echo "=== Running tests with coverage ==="
+      cargo llvm-cov --no-report --workspace
+
+      echo ""
+      echo "=== Coverage summary ==="
+      cargo llvm-cov report --json > coverage.json
+      python3 ${../bin/format-coverage.py}
+
+      echo ""
+      echo "=== Generating HTML report ==="
+      cargo llvm-cov report --html --output-dir "$outdir"
+      echo "HTML report written to $outdir/html/index.html"
+    '';
+  };
+
 in {
   inherit browser-publish js-publish publish-npm-packages publish-crates deploy-website;
   inherit blit-server-deb blit-cli-deb blit-gateway-deb blit-webrtc-forwarder-deb;
-  inherit fmt clippy;
+  inherit fmt clippy coverage;
 
   build-debs = pkgs.writeShellApplication {
     name = "blit-build-debs";

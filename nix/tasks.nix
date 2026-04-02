@@ -300,7 +300,7 @@ PROJ
   };
   coverage = pkgs.writeShellApplication {
     name = "blit-coverage";
-    runtimeInputs = [ rustToolchain pkgs.cargo-llvm-cov ];
+    runtimeInputs = [ rustToolchain pkgs.cargo-llvm-cov pkgs.python3 ];
     text = ''
       echo "=== Setting up web-app dist ==="
       mkdir -p js/web-app/dist
@@ -313,7 +313,8 @@ PROJ
 
       echo ""
       echo "=== Coverage summary ==="
-      cargo llvm-cov report --summary-only 2>&1 | tee coverage-summary.txt
+      cargo llvm-cov report --json > coverage.json
+      python3 ${../bin/format-coverage.py}
 
       echo ""
       echo "=== Generating HTML report ==="

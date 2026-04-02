@@ -74,12 +74,23 @@ function DebugPanel({ log, onClose }: { log: DebugLog; onClose: () => void }) {
     () => log.getSnapshot(),
   );
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [entries.length]);
 
   const colors = { log: "#8b949e", warn: "#d29922", error: "#f85149" };
+
+  const copyLog = () => {
+    const text = entries
+      .map((e) => `${new Date(e.t).toISOString().slice(11, 23)} [${e.level}] ${e.msg}`)
+      .join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
 
   return (
     <div style={{
@@ -94,10 +105,17 @@ function DebugPanel({ log, onClose }: { log: DebugLog; onClose: () => void }) {
         color: "#c9d1d9", fontWeight: 700, fontSize: 12,
       }}>
         <span>blit debug</span>
-        <button onClick={onClose} style={{
-          background: "none", border: "none", color: "#8b949e",
-          cursor: "pointer", fontSize: 14, padding: "2px 6px",
-        }}>✕</button>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={copyLog} style={{
+            background: "none", border: "1px solid #30363d", color: "#8b949e",
+            cursor: "pointer", fontSize: 11, padding: "2px 8px", borderRadius: 4,
+            fontFamily: "inherit",
+          }}>{copied ? "Copied!" : "Copy"}</button>
+          <button onClick={onClose} style={{
+            background: "none", border: "none", color: "#8b949e",
+            cursor: "pointer", fontSize: 14, padding: "2px 6px",
+          }}>✕</button>
+        </div>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
         {entries.map((e, i) => (

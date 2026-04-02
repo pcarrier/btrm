@@ -32,6 +32,8 @@
         src = ../.;
         cargoBuildFlags = [ "-p" "blit-server" ];
         cargoLock = cargoLockConfig;
+        nativeBuildInputs = [ pkgs.pkg-config ];
+        buildInputs = [ pkgs.libxkbcommon pkgs.pixman ];
         postInstall = installManPages;
         doCheck = false;
       };
@@ -42,6 +44,8 @@
         src = ../.;
         cargoBuildFlags = [ "-p" "blit-cli" ];
         cargoLock = cargoLockConfig;
+        nativeBuildInputs = [ pkgs.pkg-config ];
+        buildInputs = [ pkgs.libxkbcommon pkgs.pixman ];
         preBuild = copyWebAppDist;
         postInstall = installManPages;
         doCheck = false;
@@ -338,7 +342,10 @@
           pkgs.cargo-watch
           pkgs.curl
           pkgs.flyctl
+          pkgs.libxkbcommon
           pkgs.nodejs
+          pkgs.pixman
+          pkgs.pkg-config
           pkgs.pkgsStatic.stdenv.cc
           pkgs.pnpm
           pkgs.process-compose

@@ -328,7 +328,7 @@ When a PTY's subprocess exits, the server captures the exit status from `waitpid
 
 ### Compositor sessions
 
-When `CREATE2` includes the `HAS_COMPOSITOR` bit, the server spawns a headless Wayland compositor instead of a bare PTY. The flow:
+Every PTY session has a companion headless Wayland compositor. The child process inherits `WAYLAND_DISPLAY` so any program — shell, TUI, or GUI — can open Wayland surfaces. The flow:
 
 1. `spawn_compositor()` starts a smithay compositor on a dedicated OS thread, listening on a random `wayland-blit-*` socket.
 2. The server fork/execs the requested command with `WAYLAND_DISPLAY` pointing at the compositor socket.

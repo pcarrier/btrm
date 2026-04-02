@@ -23,7 +23,6 @@ import {
   C2S_SURFACE_FOCUS,
   CREATE2_HAS_SRC_PTY,
   CREATE2_HAS_COMMAND,
-  CREATE2_HAS_COMPOSITOR,
 } from "./types";
 
 const textEncoder = new TextEncoder();
@@ -178,7 +177,7 @@ export function buildCreate2Message(
   nonce: number,
   rows: number,
   cols: number,
-  options?: { tag?: string; command?: string; srcPtyId?: number; compositor?: boolean },
+  options?: { tag?: string; command?: string; srcPtyId?: number },
 ): Uint8Array {
   const tagBytes = options?.tag
     ? textEncoder.encode(options.tag)
@@ -189,7 +188,6 @@ export function buildCreate2Message(
   const hasCmd = cmdText.length > 0;
   if (hasSrc) features |= CREATE2_HAS_SRC_PTY;
   if (hasCmd) features |= CREATE2_HAS_COMMAND;
-  if (options?.compositor) features |= CREATE2_HAS_COMPOSITOR;
   const cmdBytes = hasCmd ? textEncoder.encode(cmdText) : new Uint8Array(0);
   const msg = new Uint8Array(
     10 + tagBytes.length + (hasSrc ? 2 : 0) + cmdBytes.length,

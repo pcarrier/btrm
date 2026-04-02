@@ -189,8 +189,6 @@ export const C2S_SURFACE_POINTER_AXIS = 0x22;
 export const C2S_SURFACE_RESIZE = 0x23;
 export const C2S_SURFACE_FOCUS = 0x24;
 export const C2S_CLIPBOARD = 0x25;
-export const CREATE2_HAS_COMPOSITOR = 1 << 2;
-
 export const S2C_SURFACE_CREATED = 0x20;
 export const S2C_SURFACE_DESTROYED = 0x21;
 export const S2C_SURFACE_FRAME = 0x22;

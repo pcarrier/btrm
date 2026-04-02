@@ -79,7 +79,6 @@ export interface CreateSessionOptions {
   tag?: string;
   command?: string;
   cwdFromSessionId?: SessionId;
-  compositor?: boolean;
 }
 
 type ResizeSessionOptions = {
@@ -295,7 +294,6 @@ export class BlitConnection {
           tag: options.tag,
           command: options.command,
           srcPtyId,
-          compositor: options.compositor,
         }),
       );
     });
@@ -691,10 +689,6 @@ export class BlitConnection {
 
   sendClipboard(surfaceId: number, mimeType: string, data: Uint8Array): void {
     this.transport.send(buildClipboardMessage(surfaceId, mimeType, data));
-  }
-
-  createCompositorSession(options: CreateSessionOptions & { command: string }): Promise<BlitSession> {
-    return this.createSession({ ...options, compositor: true });
   }
 
   isReady(): boolean {

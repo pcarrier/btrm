@@ -165,7 +165,7 @@ function AppWindow({ connectionId, surfaceId }: { connectionId: string; surfaceI
 }
 ```
 
-To create a compositor session instead of a terminal:
+Every session has a Wayland compositor available. Any command — shell, TUI, or GUI — can open Wayland surfaces:
 
 ```tsx
 workspace.createSession({
@@ -173,11 +173,10 @@ workspace.createSession({
   rows: 24,
   cols: 80,
   command: "my-gui-app",
-  compositor: true,
 });
 ```
 
-Surface metadata (creation, destruction, title changes, resizes) is available via the connection's `surfaceStore`. Each surface has a `surfaceId`, `parentId`, `title`, `appId`, `width`, and `height`.
+Surfaces created by the session appear in the connection's `surfaceStore`, keyed by the session's PTY ID. Each surface has a `surfaceId`, `parentId`, `title`, `appId`, `width`, and `height`.
 
 ### Workspace operations
 

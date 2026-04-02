@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
 use blit_remote::{
-    CREATE2_HAS_COMPOSITOR, EXIT_STATUS_UNKNOWN, S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY,
-    S2C_TEXT, S2C_TITLE, S2C_UPDATE, ServerMsg, TerminalState, msg_ack, msg_close, msg_create2,
-    msg_create_n_command, msg_input, msg_kill, msg_read, msg_resize, msg_restart, msg_subscribe,
-    parse_server_msg,
+    EXIT_STATUS_UNKNOWN, S2C_EXITED, S2C_HELLO, S2C_LIST, S2C_READY, S2C_TEXT, S2C_TITLE,
+    S2C_UPDATE, ServerMsg, TerminalState, msg_ack, msg_close, msg_create2, msg_input, msg_kill,
+    msg_read, msg_resize, msg_restart, msg_subscribe, parse_server_msg,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -147,18 +146,13 @@ pub async fn cmd_start(
     command: Vec<String>,
     rows: u16,
     cols: u16,
-    compositor: bool,
 ) -> Result<u16, String> {
     let mut conn = AgentConn::connect(transport).await?;
 
     let nonce: u16 = 1;
     let tag_str = tag.as_deref().unwrap_or("");
     let cmd_str = command.join("\0");
-    let msg = if compositor {
-        msg_create2(nonce, rows, cols, tag_str, &cmd_str, CREATE2_HAS_COMPOSITOR)
-    } else {
-        msg_create_n_command(nonce, rows, cols, tag_str, &cmd_str)
-    };
+    let msg = msg_create2(nonce, rows, cols, tag_str, &cmd_str, 0);
     conn.send(&msg).await?;
 
     loop {
@@ -816,7 +810,7 @@ mod tests {
             mock.send_initial_burst().await;
 
             let data = mock.recv().await.unwrap();
-            assert_eq!(data[0], blit_remote::C2S_CREATE_N);
+            assert_eq!(data[0], blit_remote::C2S_CREATE2);
             let nonce = u16::from_le_bytes([data[1], data[2]]);
             assert_eq!(nonce, 1);
 
@@ -826,7 +820,7 @@ mod tests {
         let transport = Transport::Unix(client);
         let mut conn = AgentConn::connect(transport).await.unwrap();
 
-        let msg = msg_create_n_command(1, 24, 80, "", "echo\0hello");
+        let msg = msg_create2(1, 24, 80, "", "echo\0hello", 0);
         conn.send(&msg).await.unwrap();
 
         loop {
@@ -857,7 +851,7 @@ mod tests {
             mock.send_initial_burst().await;
 
             let data = mock.recv().await.unwrap();
-            assert_eq!(data[0], blit_remote::C2S_CREATE_N);
+            assert_eq!(data[0], blit_remote::C2S_CREATE2);
             let nonce = u16::from_le_bytes([data[1], data[2]]);
 
             let rows = u16::from_le_bytes([data[3], data[4]]);
@@ -865,8 +859,8 @@ mod tests {
             assert_eq!(rows, 24);
             assert_eq!(cols, 80);
 
-            let tag_len = u16::from_le_bytes([data[7], data[8]]) as usize;
-            let tag = std::str::from_utf8(&data[9..9 + tag_len]).unwrap();
+            let tag_len = u16::from_le_bytes([data[8], data[9]]) as usize;
+            let tag = std::str::from_utf8(&data[10..10 + tag_len]).unwrap();
             assert_eq!(tag, "mytag");
 
             mock.send_created_n(nonce, 7, "mytag").await;
@@ -875,7 +869,7 @@ mod tests {
         let transport = Transport::Unix(client);
         let mut conn = AgentConn::connect(transport).await.unwrap();
 
-        let msg = msg_create_n_command(1, 24, 80, "mytag", "bash");
+        let msg = msg_create2(1, 24, 80, "mytag", "bash", 0);
         conn.send(&msg).await.unwrap();
 
         loop {

@@ -149,8 +149,6 @@ pub const FEATURE_RESIZE_BATCH: u32 = 1 << 2;
 pub const FEATURE_COPY_RANGE: u32 = 1 << 3;
 pub const FEATURE_COMPOSITOR: u32 = 1 << 4;
 
-pub const CREATE2_HAS_COMPOSITOR: u8 = 1 << 2;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Color {
     #[default]

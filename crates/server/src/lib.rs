@@ -4,13 +4,12 @@ use blit_remote::{
     C2S_CREATE_AT, C2S_CREATE_N, C2S_CREATE2, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_KILL,
     C2S_MOUSE, C2S_READ, C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH, C2S_SUBSCRIBE,
     C2S_SURFACE_FOCUS, C2S_SURFACE_INPUT, C2S_SURFACE_POINTER, C2S_SURFACE_POINTER_AXIS,
-    C2S_SURFACE_RESIZE, C2S_UNSUBSCRIBE, CREATE2_HAS_COMMAND, CREATE2_HAS_COMPOSITOR,
-    CREATE2_HAS_SRC_PTY, FEATURE_COMPOSITOR, FEATURE_COPY_RANGE, FEATURE_CREATE_NONCE,
-    FEATURE_RESIZE_BATCH, FEATURE_RESTART, FrameState, READ_ANSI, READ_TAIL, S2C_CLOSED,
-    S2C_CREATED, S2C_CREATED_N, S2C_LIST, S2C_READY, S2C_SEARCH_RESULTS, S2C_TEXT, S2C_TITLE,
-    SURFACE_FRAME_FLAG_KEYFRAME, build_update_msg, msg_hello, msg_s2c_clipboard,
-    msg_surface_created, msg_surface_destroyed, msg_surface_frame, msg_surface_resized,
-    msg_surface_title,
+    C2S_SURFACE_RESIZE, C2S_UNSUBSCRIBE, CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY,
+    FEATURE_COMPOSITOR, FEATURE_COPY_RANGE, FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH,
+    FEATURE_RESTART, FrameState, READ_ANSI, READ_TAIL, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N,
+    S2C_LIST, S2C_READY, S2C_SEARCH_RESULTS, S2C_TEXT, S2C_TITLE, SURFACE_FRAME_FLAG_KEYFRAME,
+    build_update_msg, msg_hello, msg_s2c_clipboard, msg_surface_created, msg_surface_destroyed,
+    msg_surface_frame, msg_surface_resized, msg_surface_title,
 };
 use blit_compositor::{CompositorCommand, CompositorEvent, CompositorHandle};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2204,6 +2203,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
+                let comp_handle = blit_compositor::spawn_compositor();
+                let socket_name = comp_handle.socket_name.clone();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2216,7 +2217,15 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     dir.as_deref(),
                     config.scrollback,
                     state.clone(),
+                    Some(&socket_name),
                 ) {
+                    let comp_session = CompositorSession {
+                        pty_id: id,
+                        handle: comp_handle,
+                        child_pid: pty.handle.child_pid,
+                        encoders: HashMap::new(),
+                    };
+                    sess.compositor_sessions.insert(id, comp_session);
                     let mut msg = Vec::with_capacity(3 + pty.tag.len());
                     msg.push(S2C_CREATED);
                     msg.extend_from_slice(&id.to_le_bytes());
@@ -2226,7 +2235,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                         c.lead = Some(id);
                         c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
-                        // Per-PTY scroll: no blanket reset needed.
                         reset_inflight(c);
                     }
                     sess.send_to_all(&msg);
@@ -2279,6 +2287,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
+                let comp_handle = blit_compositor::spawn_compositor();
+                let socket_name = comp_handle.socket_name.clone();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2291,7 +2301,15 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     dir.as_deref(),
                     config.scrollback,
                     state.clone(),
+                    Some(&socket_name),
                 ) {
+                    let comp_session = CompositorSession {
+                        pty_id: id,
+                        handle: comp_handle,
+                        child_pid: pty.handle.child_pid,
+                        encoders: HashMap::new(),
+                    };
+                    sess.compositor_sessions.insert(id, comp_session);
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
                     nonce_msg.push(S2C_CREATED_N);
@@ -2307,7 +2325,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                         c.lead = Some(id);
                         c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
-                        // Per-PTY scroll: no blanket reset needed.
                         reset_inflight(c);
                         let _ = c.tx.try_send(nonce_msg);
                     }
@@ -2349,6 +2366,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
+                let comp_handle = blit_compositor::spawn_compositor();
+                let socket_name = comp_handle.socket_name.clone();
                 if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
@@ -2361,7 +2380,15 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     dir.as_deref(),
                     config.scrollback,
                     state.clone(),
+                    Some(&socket_name),
                 ) {
+                    let comp_session = CompositorSession {
+                        pty_id: id,
+                        handle: comp_handle,
+                        child_pid: pty.handle.child_pid,
+                        encoders: HashMap::new(),
+                    };
+                    sess.compositor_sessions.insert(id, comp_session);
                     let mut msg = Vec::with_capacity(3 + pty.tag.len());
                     msg.push(S2C_CREATED);
                     msg.extend_from_slice(&id.to_le_bytes());
@@ -2371,7 +2398,6 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                         c.lead = Some(id);
                         c.view_sizes.insert(id, (rows, cols));
                         subscribe_client_to(c, id);
-                        // Per-PTY scroll: no blanket reset needed.
                         reset_inflight(c);
                     }
                     sess.send_to_all(&msg);
@@ -2416,47 +2442,9 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 let Some(id) = sess.allocate_pty_id() else {
                     continue;
                 };
-                if features & CREATE2_HAS_COMPOSITOR != 0 {
-                    let comp_handle = blit_compositor::spawn_compositor();
-                    let socket_name = comp_handle.socket_name.clone();
-                    let cmd_str = command.or_else(|| argv.as_ref().map(|a| a[0]));
-                    let child_pid = spawn_compositor_child(
-                        cmd_str.unwrap_or("xterm"),
-                        argv.as_deref(),
-                        &socket_name,
-                        dir.as_deref(),
-                    );
-                    let comp_session = CompositorSession {
-                        pty_id: id,
-                        handle: comp_handle,
-                        child_pid,
-                        encoders: HashMap::new(),
-                    };
-                    sess.compositor_sessions.insert(id, comp_session);
-                    let tag_str = tag.to_string();
-                    let tag_bytes = tag_str.as_bytes();
-                    let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
-                    nonce_msg.push(S2C_CREATED_N);
-                    nonce_msg.extend_from_slice(&nonce.to_le_bytes());
-                    nonce_msg.extend_from_slice(&id.to_le_bytes());
-                    nonce_msg.extend_from_slice(tag_bytes);
-                    let mut broadcast_msg = Vec::with_capacity(3 + tag_bytes.len());
-                    broadcast_msg.push(S2C_CREATED);
-                    broadcast_msg.extend_from_slice(&id.to_le_bytes());
-                    broadcast_msg.extend_from_slice(tag_bytes);
-                    if let Some(c) = sess.clients.get_mut(&client_id) {
-                        c.lead = Some(id);
-                        subscribe_client_to(c, id);
-                        reset_inflight(c);
-                        let _ = c.tx.try_send(nonce_msg);
-                    }
-                    for (&cid, c) in sess.clients.iter() {
-                        if cid != client_id {
-                            let _ = c.tx.try_send(broadcast_msg.clone());
-                        }
-                    }
-                    need_nudge = true;
-                } else if let Some(pty) = pty::spawn_pty(
+                let comp_handle = blit_compositor::spawn_compositor();
+                let socket_name = comp_handle.socket_name.clone();
+                if let Some(pty) = pty::spawn_pty(
                     &config.shell,
                     &config.shell_flags,
                     rows,
@@ -2468,7 +2456,15 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     dir.as_deref(),
                     config.scrollback,
                     state.clone(),
+                    Some(&socket_name),
                 ) {
+                    let comp_session = CompositorSession {
+                        pty_id: id,
+                        handle: comp_handle,
+                        child_pid: pty.handle.child_pid,
+                        encoders: HashMap::new(),
+                    };
+                    sess.compositor_sessions.insert(id, comp_session);
                     let tag_bytes = pty.tag.as_bytes();
                     let mut nonce_msg = Vec::with_capacity(5 + tag_bytes.len());
                     nonce_msg.push(S2C_CREATED_N);
@@ -2644,8 +2640,12 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                     .get(&pid)
                     .filter(|p| p.exited)
                     .map(|p| (p.driver.size(), p.command.clone(), p.tag.clone()));
-                if let Some(((rows, cols), command, tag)) = restart_info
-                    && let Some((new_handle, reader, byte_rx)) = pty::respawn_child(
+                if let Some(((rows, cols), command, tag)) = restart_info {
+                    let wayland_display = sess
+                        .compositor_sessions
+                        .get(&pid)
+                        .map(|cs| cs.handle.socket_name.clone());
+                    if let Some((new_handle, reader, byte_rx)) = pty::respawn_child(
                         &state.0.shell,
                         &state.0.shell_flags,
                         rows,
@@ -2653,32 +2653,33 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                         pid,
                         command.as_deref(),
                         state.clone(),
-                    )
-                {
-                    let Some(pty) = sess.ptys.get_mut(&pid) else {
-                        break;
-                    };
-                    pty.handle = new_handle;
-                    pty.reader_handle = reader;
-                    pty.byte_rx = byte_rx;
-                    pty.driver.reset_modes();
-                    pty.exited = false;
-                    pty.exit_status = blit_remote::EXIT_STATUS_UNKNOWN;
-                    pty.lflag_cache = pty::pty_lflag(&pty.handle);
-                    pty.lflag_last = Instant::now();
-                    pty.mark_dirty();
-                    if let Some(c) = sess.clients.get_mut(&client_id) {
-                        c.lead = Some(pid);
-                        subscribe_client_to(c, pid);
-                        update_client_scroll_state(c, pid, 0);
-                        reset_inflight(c);
+                        wayland_display.as_deref(),
+                    ) {
+                        let Some(pty) = sess.ptys.get_mut(&pid) else {
+                            break;
+                        };
+                        pty.handle = new_handle;
+                        pty.reader_handle = reader;
+                        pty.byte_rx = byte_rx;
+                        pty.driver.reset_modes();
+                        pty.exited = false;
+                        pty.exit_status = blit_remote::EXIT_STATUS_UNKNOWN;
+                        pty.lflag_cache = pty::pty_lflag(&pty.handle);
+                        pty.lflag_last = Instant::now();
+                        pty.mark_dirty();
+                        if let Some(c) = sess.clients.get_mut(&client_id) {
+                            c.lead = Some(pid);
+                            subscribe_client_to(c, pid);
+                            update_client_scroll_state(c, pid, 0);
+                            reset_inflight(c);
+                        }
+                        let mut msg = Vec::with_capacity(3 + tag.len());
+                        msg.push(S2C_CREATED);
+                        msg.extend_from_slice(&pid.to_le_bytes());
+                        msg.extend_from_slice(tag.as_bytes());
+                        sess.send_to_all(&msg);
+                        need_nudge = true;
                     }
-                    let mut msg = Vec::with_capacity(3 + tag.len());
-                    msg.push(S2C_CREATED);
-                    msg.extend_from_slice(&pid.to_le_bytes());
-                    msg.extend_from_slice(tag.as_bytes());
-                    sess.send_to_all(&msg);
-                    need_nudge = true;
                 }
             }
             C2S_READ if data.len() >= 13 => {

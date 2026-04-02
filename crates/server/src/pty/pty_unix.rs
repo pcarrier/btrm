@@ -212,6 +212,7 @@ pub fn spawn_pty(
     dir: Option<&str>,
     scrollback: usize,
     state: AppState,
+    wayland_display: Option<&str>,
 ) -> Option<crate::Pty> {
     let mut master: libc::c_int = 0;
     let mut slave: libc::c_int = 0;
@@ -276,6 +277,12 @@ pub fn spawn_pty(
                 if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
                     std::env::remove_var(&key);
                 }
+            }
+        }
+        if let Some(wd) = wayland_display {
+            unsafe {
+                std::env::set_var("WAYLAND_DISPLAY", wd);
+                std::env::remove_var("DISPLAY");
             }
         }
         if let Some(command) = command {
@@ -368,6 +375,7 @@ pub fn respawn_child(
     pty_id: u16,
     command: Option<&str>,
     state: AppState,
+    wayland_display: Option<&str>,
 ) -> Option<(
     PtyHandle,
     std::thread::JoinHandle<()>,
@@ -425,6 +433,12 @@ pub fn respawn_child(
                 if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
                     std::env::remove_var(&key);
                 }
+            }
+        }
+        if let Some(wd) = wayland_display {
+            unsafe {
+                std::env::set_var("WAYLAND_DISPLAY", wd);
+                std::env::remove_var("DISPLAY");
             }
         }
         if let Some(cmd) = command {

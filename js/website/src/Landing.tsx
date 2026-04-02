@@ -55,102 +55,6 @@ function JoinForm() {
   );
 }
 
-function Arrow({ x1, y1, x2, y2 }: { x1: number; y1: number; x2: number; y2: number }) {
-  return <line x1={x1} y1={y1} x2={x2} y2={y2}
-    stroke="var(--dim)" strokeWidth="1.5" markerEnd="url(#arr)" />;
-}
-
-function Box({ x, y, w, h, label, sub }: { x: number; y: number; w: number; h: number; label: string; sub?: string }) {
-  return (
-    <g>
-      <rect x={x} y={y} width={w} height={h}
-        rx="6" fill="var(--surface)" stroke="var(--border)" strokeWidth="1.5" />
-      <text x={x + w / 2} y={y + (sub ? h / 2 - 2 : h / 2 + 5)}
-        textAnchor="middle" fill="var(--bright)" fontSize="13" fontWeight="700"
-        fontFamily="'Fira Code', monospace">{label}</text>
-      {sub && <text x={x + w / 2} y={y + h / 2 + 14}
-        textAnchor="middle" fill="var(--dim)" fontSize="10"
-        fontFamily="'Fira Code', monospace">{sub}</text>}
-    </g>
-  );
-}
-
-function EdgeLabel({ x, y, label }: { x: number; y: number; label: string }) {
-  return <text x={x} y={y} textAnchor="middle"
-    fill="var(--accent)" fontSize="11" fontWeight="600"
-    fontFamily="'Fira Code', monospace">{label}</text>;
-}
-
-function DiagramDefs() {
-  return (
-    <defs>
-      <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
-        markerWidth="8" markerHeight="6" orient="auto-start-reverse">
-        <path d="M0 0L10 3.5L0 7z" fill="var(--dim)" />
-      </marker>
-    </defs>
-  );
-}
-
-function TransportDiagram() {
-  return (
-    <div className="transport-diagrams">
-      <div className="transport-diagram-card">
-        <div className="transport-diagram-label">Share — peer-to-peer</div>
-        <svg viewBox="0 0 520 140" className="transport-diagram" role="img"
-          aria-label="blit share bridges browser to server over WebRTC">
-          <DiagramDefs />
-          <Box x={10} y={45} w={100} h={50} label="Browser" />
-          <Box x={210} y={45} w={100} h={50} label="blit share" sub="WebRTC forwarder" />
-          <Box x={410} y={45} w={100} h={50} label="blit" sub="server" />
-
-          <Arrow x1={110} y1={70} x2={208} y2={70} />
-          <EdgeLabel x={160} y={64} label="WebRTC" />
-
-          <Arrow x1={310} y1={70} x2={408} y2={70} />
-          <EdgeLabel x={360} y={64} label="Unix sock" />
-        </svg>
-      </div>
-
-      <div className="transport-diagram-card">
-        <div className="transport-diagram-label">Gateway — hosted</div>
-        <svg viewBox="0 0 520 140" className="transport-diagram" role="img"
-          aria-label="Browser connects to blit via gateway over WebSocket or WebTransport">
-          <DiagramDefs />
-          <Box x={10} y={45} w={100} h={50} label="Browser" />
-          <Box x={210} y={45} w={100} h={50} label="Gateway" sub="blit gateway" />
-          <Box x={410} y={45} w={100} h={50} label="blit" sub="server" />
-
-          <Arrow x1={110} y1={60} x2={208} y2={60} />
-          <EdgeLabel x={160} y={54} label="WebSocket" />
-
-          <Arrow x1={110} y1={82} x2={208} y2={82} />
-          <EdgeLabel x={160} y={100} label="WebTransport" />
-
-          <Arrow x1={310} y1={70} x2={408} y2={70} />
-          <EdgeLabel x={360} y={64} label="Unix sock" />
-        </svg>
-      </div>
-
-      <div className="transport-diagram-card">
-        <div className="transport-diagram-label">Remote — SSH</div>
-        <svg viewBox="0 0 520 140" className="transport-diagram" role="img"
-          aria-label="CLI connects to remote blit server over SSH">
-          <DiagramDefs />
-          <Box x={10} y={45} w={100} h={50} label="CLI" sub="blit --ssh" />
-          <Box x={210} y={45} w={100} h={50} label="SSH" sub="socket forward" />
-          <Box x={410} y={45} w={100} h={50} label="blit" sub="server" />
-
-          <Arrow x1={110} y1={70} x2={208} y2={70} />
-          <EdgeLabel x={160} y={64} label="SSH" />
-
-          <Arrow x1={310} y1={70} x2={408} y2={70} />
-          <EdgeLabel x={360} y={64} label="Unix sock" />
-        </svg>
-      </div>
-    </div>
-  );
-}
 
 const THEME_KEY = "blit-theme";
 
@@ -319,11 +223,6 @@ export function Landing() {
           </div>
         </section>
 
-        <section className="transport-section">
-          <h2>Multiple paths, same protocol</h2>
-          <TransportDiagram />
-        </section>
-
         <section className="demo-section">
           <div className="demo-block">
             <div className="demo-label">Get started</div>
@@ -357,8 +256,8 @@ BUILD OK`}</code></pre>
 <span className="hl-cm">{"// ● Create a workspace with a WebSocket connection"}</span>{"\n"}
 <span className="hl-kw">const</span>{" workspace = "}
 <span className="hl-kw">new</span> <span className="hl-fn">BlitWorkspace</span>{"({\n  wasm,\n  connections: [{\n    id: "}
-<span className="hl-str">"ws"</span>{", type: "}
-<span className="hl-str">"websocket"</span>{", url, passphrase,\n  }],\n});\n\n"}
+<span className="hl-str">"ws"</span>{",\n    transport: { type: "}
+<span className="hl-str">"websocket"</span>{", url, passphrase },\n  }],\n});\n\n"}
 <span className="hl-cm">{"// ● Render — that's it"}</span>{"\n"}
 {"<"}
 <span className="hl-fn">BlitWorkspaceProvider</span> <span className="hl-attr">workspace</span>{"={workspace}>\n  <"}

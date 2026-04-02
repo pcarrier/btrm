@@ -107,9 +107,7 @@ function TerminalInner({
     wasm,
     connections: [{
       id: CONNECTION_ID,
-      type: "share",
-      hubUrl: HUB_URL,
-      passphrase,
+      transport: { type: "share", hubUrl: HUB_URL, passphrase },
     }],
   }));
 

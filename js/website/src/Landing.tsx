@@ -18,7 +18,7 @@ function JoinForm() {
     <form className="join-form" onSubmit={handleSubmit}>
       <input
         className="join-input"
-        type="text"
+        type="password"
         placeholder="Enter a session secret"
         value={secret}
         onChange={(e) => setSecret(e.target.value)}

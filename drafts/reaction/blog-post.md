@@ -120,16 +120,6 @@ For Indent, that means the human and the agent consume the terminal through the 
 
 That turned out to matter more than we expected. When the terminal is infrastructure that both humans and agents can attach to — rather than a UI widget that agents have to screen-scrape — the product design space opens up. An agent can run a build in the background, a human can attach to watch it, the agent can detach and come back later to check the result, and none of those transitions involve replaying history or rebuilding state.
 
-## What we'd do differently
-
-The scope expanded beyond what we originally planned. We set out to fix reconnects and ended up building a terminal streaming stack with its own wire protocol, flow control system, WebRTC sharing, and embedding libraries.
-
-Some of that expansion was necessary — flow control and reconnects are genuinely the same problem once you look at them clearly. Some of it was probably premature. The WebRTC sharing story, the multiple transport backends, the full embedding API — these are useful, but we could have shipped value to Indent users faster with a narrower first cut.
-
-The VT parser choice was right. Using `alacritty_terminal` rather than writing our own meant we got a battle-tested parser that handles the long tail of terminal edge cases. The tradeoff is that we're coupled to its internal representation, and it wasn't designed to be used as a library in this way. That coupling has cost us time in a few places.
-
-Building the WASM diff-application layer and the WebGL renderer was a bigger investment than expected. It works well, but "apply binary diffs in WASM and render with WebGL" is a lot of machinery compared to "let xterm.js handle it." The payoff is real — no VT parsing in the browser, no parser divergence — but the upfront cost was significant.
-
 ## How it compares
 
 Every tool in this space made a reasonable set of tradeoffs.

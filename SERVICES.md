@@ -103,6 +103,29 @@ For protocol details, deployment instructions, and configuration, see [`js/blit-
 | `/message` | Session URL template for client display |
 | `/health` | Liveness check (pings Redis) |
 
+## blit.sh
+
+`blit.sh` is the public website, deployed to **Vercel**. It serves two purposes:
+
+1. **Landing page** (`/`) — marketing page with install instructions, feature overview, and a join form to connect to a shared session.
+2. **Terminal viewer** (`/#<secret>`) — browser-based terminal that connects to a `blit share` session via WebRTC through `hub.blit.sh`.
+
+The site is a Vite + React SPA built from [`js/website/`](js/website/). It consumes `@blit-sh/core` and `@blit-sh/react` via source aliases and inlines the browser WASM module at build time.
+
+### Build and deploy
+
+The website is built as a Nix derivation (`websiteDist` in [`nix/packages.nix`](nix/packages.nix)) which compiles the WASM crate, installs npm deps via `fetchNpmDeps`, and runs `vite build`. The `deploy-website` task in [`nix/tasks.nix`](nix/tasks.nix) assembles a Vercel prebuilt output directory and deploys via `npx vercel deploy --prebuilt`.
+
+- **Production deploy** — pushes to `main` that touch `js/website/**`, `js/core/**`, `js/react/**`, or `crates/browser/**` trigger `./bin/deploy-website --prod`.
+- **Preview deploy** — PRs with the same path changes get a preview deploy with the URL posted as a PR comment.
+
+### Local usage
+
+```sh
+./bin/deploy-website          # preview deploy
+./bin/deploy-website --prod   # production deploy
+```
+
 ## Static binaries via Nix + musl
 
 All release binaries are built with Nix, which makes the entire toolchain reproducible and keeps the build definitions small.
@@ -117,13 +140,14 @@ This means the tarballs on `install.blit.sh/bin/` and the binaries inside `.deb`
 
 ## GitHub Actions workflows
 
-Four workflow files live in `.github/workflows/`:
+Five workflow files live in `.github/workflows/`:
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
 | [`test.yml`](.github/workflows/test.yml) | Push to `main`, PRs | Lint, test, e2e, verify builds |
 | [`release.yml`](.github/workflows/release.yml) | `v*` tag push | Build artifacts, create GitHub Release, publish packages, deploy install site |
 | [`deploy-blit-hub.yml`](.github/workflows/deploy-blit-hub.yml) | Push to `main` (paths: `js/blit-hub/**`) | Deploy signaling hub to Fly.io |
+| [`deploy-website.yml`](.github/workflows/deploy-website.yml) | Push to `main` (paths: `js/website/**`, `js/core/**`, `js/react/**`, `crates/browser/**`), PRs | Build website via Nix, deploy to Vercel (prod on main, preview on PRs) |
 | [`publish-demo-image.yml`](.github/workflows/publish-demo-image.yml) | Push to `main`, `v*` tag | Build and push `grab/blit-demo` Docker image |
 
 ### CI (test.yml)
@@ -193,6 +217,16 @@ flowchart LR
     PUSH["Push to main<br>(js/blit-hub/**)"] --> DEPLOY["nix run .#deploy-blit-hub<br>via flyctl"]
 ```
 
+### Deploy website (deploy-website.yml)
+
+Builds the website via Nix and deploys to Vercel. Runs on pushes to `main` and on PRs when relevant paths change. PR deploys post a preview URL as a comment.
+
+```mermaid
+flowchart LR
+    PUSH["Push to main or PR<br>(js/website/**, js/core/**,<br>js/react/**, crates/browser/**)"] --> BUILD["Nix build<br>websiteDist"] --> DEPLOY["vercel deploy<br>--prebuilt"]
+    DEPLOY --> COMMENT["Post preview URL<br>(PRs only)"]
+```
+
 ### Publish demo image (publish-demo-image.yml)
 
 Builds and pushes `grab/blit-demo` to Docker Hub. Runs on pushes to `main` and on `v*` tags. Tagged releases get an additional version tag.
@@ -244,5 +278,8 @@ sequenceDiagram
 | `FLY_API_TOKEN` | deploy-blit-hub | Fly.io deploy token for blit-hub |
 | `DOCKERHUB_USERNAME` | publish-demo-image | Docker Hub credentials |
 | `DOCKERHUB_TOKEN` | publish-demo-image | Docker Hub credentials |
+| `VERCEL_TOKEN` | deploy-website | Vercel API token |
+| `VERCEL_ORG_ID` | deploy-website | Vercel organization ID |
+| `VERCEL_PROJECT_ID` | deploy-website | Vercel project ID |
 
 `publish-crates` uses no stored secret. It authenticates to crates.io via OIDC trusted publishing — GitHub mints a short-lived ID token (enabled by the `id-token: write` permission on the release workflow) and exchanges it for a crates.io upload token. `publish-npm` works the same way, using `--provenance` to sign the npm package with the workflow's OIDC identity.

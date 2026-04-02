@@ -373,6 +373,14 @@ function TabShell({
   const [showShortcuts, setShowShortcuts] = useState(false);
   const visibleSessions = sessions.filter((s) => s.state !== "closed");
   const focusedId = state.focusedSessionId;
+  const prevFocusedRef = useRef<{ id: SessionId; index: number } | null>(null);
+
+  useEffect(() => {
+    if (focusedId) {
+      const idx = visibleSessions.findIndex((s) => s.id === focusedId);
+      if (idx >= 0) prevFocusedRef.current = { id: focusedId, index: idx };
+    }
+  }, [focusedId, visibleSessions]);
 
   const creatingRef = useRef(false);
   useEffect(() => {
@@ -392,7 +400,9 @@ function TabShell({
         .then((s) => workspace.focusSession(s.id))
         .finally(() => { creatingRef.current = false; });
     } else if (visibleSessions.length > 0 && !focusedId) {
-      workspace.focusSession(visibleSessions[0].id);
+      const prev = prevFocusedRef.current;
+      const idx = prev ? Math.min(prev.index, visibleSessions.length - 1) : 0;
+      workspace.focusSession(visibleSessions[idx].id);
     }
   }, [connection?.status, connection?.ready, visibleSessions.length, focusedId, workspace]);
 

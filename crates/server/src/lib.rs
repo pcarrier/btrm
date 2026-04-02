@@ -1079,6 +1079,7 @@ fn nudge_delivery(state: &AppState) {
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 fn spawn_compositor_child(
     command: &str,
     argv: Option<&[&str]>,
@@ -1111,7 +1112,7 @@ fn spawn_compositor_child(
             }
         } else {
             let prog = CString::new(command).unwrap();
-            let c_ptrs = [prog.as_ptr(), std::ptr::null()];
+            let _c_ptrs = [prog.as_ptr(), std::ptr::null()];
         }
     }
     pid
@@ -1183,13 +1184,11 @@ async fn cleanup_pty_internal(pty_id: u16, state: &AppState) {
         sess.send_to_all(&msg);
     }
     let all_exited = sess.ptys.values().all(|p| p.exited);
-    if all_exited {
-        if let Some(cs) = sess.compositor.take() {
-            cs.handle
-                .shutdown
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            let _ = cs.handle.command_tx.send(CompositorCommand::Shutdown);
-        }
+    if all_exited && let Some(cs) = sess.compositor.take() {
+        cs.handle
+            .shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = cs.handle.command_tx.send(CompositorCommand::Shutdown);
     }
 }
 
@@ -1768,26 +1767,25 @@ async fn tick(state: &AppState) -> TickOutcome {
                     height,
                     pixels,
                 } => {
-                    if let Some(enc) = cs.encoders.get_mut(&surface_id) {
-                        if let Some((nal_data, is_keyframe)) =
+                    if let Some(enc) = cs.encoders.get_mut(&surface_id)
+                        && let Some((nal_data, is_keyframe)) =
                             encode_surface_frame(enc, &pixels, width, height)
-                        {
-                            let flags = if is_keyframe {
-                                SURFACE_FRAME_FLAG_KEYFRAME
-                            } else {
-                                0
-                            };
-                            let timestamp = cs.created_at.elapsed().as_millis() as u32;
-                            outgoing.push(msg_surface_frame(
-                                0,
-                                surface_id,
-                                timestamp,
-                                flags,
-                                width as u16,
-                                height as u16,
-                                &nal_data,
-                            ));
-                        }
+                    {
+                        let flags = if is_keyframe {
+                            SURFACE_FRAME_FLAG_KEYFRAME
+                        } else {
+                            0
+                        };
+                        let timestamp = cs.created_at.elapsed().as_millis() as u32;
+                        outgoing.push(msg_surface_frame(
+                            0,
+                            surface_id,
+                            timestamp,
+                            flags,
+                            width as u16,
+                            height as u16,
+                            &nal_data,
+                        ));
                     }
                 }
                 CompositorEvent::SurfaceTitle { surface_id, title } => {

@@ -9,7 +9,39 @@ mod stub {
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
 
-    pub enum CompositorEvent {}
+    pub enum CompositorEvent {
+        SurfaceCreated {
+            surface_id: u16,
+            title: String,
+            app_id: String,
+            parent_id: u16,
+            width: u16,
+            height: u16,
+        },
+        SurfaceDestroyed {
+            surface_id: u16,
+        },
+        SurfaceCommit {
+            surface_id: u16,
+            width: u32,
+            height: u32,
+            pixels: Vec<u8>,
+        },
+        SurfaceTitle {
+            surface_id: u16,
+            title: String,
+        },
+        SurfaceResized {
+            surface_id: u16,
+            width: u16,
+            height: u16,
+        },
+        ClipboardContent {
+            surface_id: u16,
+            mime_type: String,
+            data: Vec<u8>,
+        },
+    }
 
     pub enum CompositorCommand {
         KeyInput {

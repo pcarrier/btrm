@@ -367,6 +367,7 @@ pub fn spawn_pty(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn respawn_child(
     shell: &str,
     shell_flags: &str,

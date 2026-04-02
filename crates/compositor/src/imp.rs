@@ -629,17 +629,21 @@ pub fn spawn_compositor() -> CompositorHandle {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
 
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+
+    let runtime_dir_clone = runtime_dir.clone();
     let thread = std::thread::spawn(move || {
-        if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
-            let dir = std::env::temp_dir();
-            // SAFETY: called before any other threads access this env var;
-            // the compositor thread is the only consumer.
-            unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
-        }
+        unsafe { std::env::set_var("XDG_RUNTIME_DIR", &runtime_dir_clone) };
         run_compositor(event_tx, command_rx, socket_tx, shutdown_clone);
     });
 
     let socket_name = socket_rx.recv().expect("compositor failed to start");
+    let socket_name = runtime_dir
+        .join(&socket_name)
+        .to_string_lossy()
+        .into_owned();
 
     CompositorHandle {
         event_rx,

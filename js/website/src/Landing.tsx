@@ -186,7 +186,7 @@ export function Landing() {
           </div>
 
           <div className="join-section">
-            <div className="join-label">or join someone's session</div>
+            <div className="join-label">or join an existing session</div>
             <JoinForm />
           </div>
         </section>

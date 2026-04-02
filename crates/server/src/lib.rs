@@ -1154,15 +1154,18 @@ fn spawn_pty(
                 }
             }
         }
-        std::env::set_var("TERM", "xterm-256color");
-        std::env::set_var("COLORTERM", "truecolor");
-        // Don't set COLUMNS/LINES — ncurses apps prioritize these over
-        // TIOCGWINSZ and won't resize properly if they're set to stale values.
-        std::env::remove_var("COLUMNS");
-        std::env::remove_var("LINES");
-        for (key, _) in std::env::vars() {
-            if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
-                std::env::remove_var(&key);
+        // SAFETY: we are in the forked child process, which is single-threaded.
+        unsafe {
+            std::env::set_var("TERM", "xterm-256color");
+            std::env::set_var("COLORTERM", "truecolor");
+            // Don't set COLUMNS/LINES — ncurses apps prioritize these over
+            // TIOCGWINSZ and won't resize properly if they're set to stale values.
+            std::env::remove_var("COLUMNS");
+            std::env::remove_var("LINES");
+            for (key, _) in std::env::vars() {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                    std::env::remove_var(&key);
+                }
             }
         }
         let shell_flags = &state.0.shell_flags;
@@ -1304,13 +1307,16 @@ fn respawn_child(
             }
         }
         set_qos_user_interactive();
-        std::env::set_var("TERM", "xterm-256color");
-        std::env::set_var("COLORTERM", "truecolor");
-        std::env::remove_var("COLUMNS");
-        std::env::remove_var("LINES");
-        for (key, _) in std::env::vars() {
-            if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
-                std::env::remove_var(&key);
+        // SAFETY: we are in the forked child process, which is single-threaded.
+        unsafe {
+            std::env::set_var("TERM", "xterm-256color");
+            std::env::set_var("COLORTERM", "truecolor");
+            std::env::remove_var("COLUMNS");
+            std::env::remove_var("LINES");
+            for (key, _) in std::env::vars() {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                    std::env::remove_var(&key);
+                }
             }
         }
         let shell_flags = &state.0.shell_flags;

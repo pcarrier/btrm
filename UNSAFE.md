@@ -38,6 +38,10 @@ The `cli` crate uses raw `libc::write(STDOUT_FILENO, ...)` in two places instead
 1. **`Drop` impls** that emit terminal reset sequences — `stdout().write()` takes a mutex lock, which can deadlock if the process is unwinding from a panic that already holds the lock.
 2. **`write_all_stdout`** in the frame output hot path — avoids the lock overhead on every frame.
 
+## Environment variable mutation in the child
+
+`std::env::set_var` and `std::env::remove_var` are `unsafe` as of Rust edition 2024 because they mutate global process state and are not thread-safe. The server calls them in two `spawn_pty` functions, immediately after `fork()`, to set `TERM`/`COLORTERM`, clear `COLUMNS`/`LINES`, and strip `BLIT_*` variables before `execvp`. This is sound because the child process is single-threaded after `fork`.
+
 ## macOS-specific FFI
 
 Two macOS-only calls that aren't in the `libc` crate:

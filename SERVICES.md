@@ -114,7 +114,7 @@ The site is a Vite + React SPA built from [`js/website/`](js/website/). It consu
 
 ### Build and deploy
 
-The website is built as a Nix derivation (`websiteDist` in [`nix/packages.nix`](nix/packages.nix)) which compiles the WASM crate, installs npm deps via `fetchNpmDeps`, and runs `vite build`. The `deploy-website` task in [`nix/tasks.nix`](nix/tasks.nix) assembles a Vercel prebuilt output directory and deploys via `npx vercel deploy --prebuilt`.
+The website is built as a Nix derivation (`websiteDist` in [`nix/packages.nix`](nix/packages.nix)) which compiles the WASM crate, installs pnpm deps via `fetchPnpmDeps`, and runs `vite build`. The `deploy-website` task in [`nix/tasks.nix`](nix/tasks.nix) assembles a Vercel prebuilt output directory and deploys via `pnpm dlx vercel deploy --prebuilt`.
 
 - **Production deploy** — pushes to `main` that touch `js/website/**`, `js/core/**`, `js/react/**`, or `crates/browser/**` trigger `./bin/deploy-website --prod`.
 - **Preview deploy** — PRs with the same path changes get a preview deploy with the URL posted as a PR comment.
@@ -265,7 +265,7 @@ sequenceDiagram
     Rel->>Rel: Validate version consistency across<br>Cargo.toml, package.json, nix/common.nix
     Rel->>Rel: Bump all version files
     Rel->>Rel: cargo test -p blit-server
-    Rel->>Rel: Update npm hashes in nix/packages.nix
+    Rel->>Rel: Update pnpm dep hash in nix/packages.nix
     Rel->>Git: git commit "release 0.12.0"
     CI->>Git: git tag v0.12.0 && git push
     Git->>CI: v* tag triggers release.yml + publish-demo-image.yml

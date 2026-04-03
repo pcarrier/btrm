@@ -677,9 +677,16 @@ function WorkspaceScreen({
         .join(",");
       if (a) parts.push(`a=${a}`);
     }
-    if (parts.length > 0) {
-      history.replaceState(null, "", `#${parts.join("&")}`);
-    }
+    const existing = location.hash.slice(1);
+    const kept = existing
+      .split("&")
+      .filter((s) => s && !/^[lpa]=/.test(s));
+    const merged = [...kept, ...parts];
+    history.replaceState(
+      null,
+      "",
+      merged.length > 0 ? `#${merged.join("&")}` : location.pathname,
+    );
   }, [activeLayout, bspFocusedPaneId, connection?.status, layoutAssignments]);
 
   const debugStats = workspace.getConnectionDebugStats(

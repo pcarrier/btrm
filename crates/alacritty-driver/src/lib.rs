@@ -632,14 +632,18 @@ impl TerminalDriver {
                 .and_then(|re| re.find(&self.title))
                 .map(|m| {
                     let idx = m.start();
-                    let mut start = idx.saturating_sub(SEARCH_CONTEXT_BEFORE);
-                    while start > 0 && !self.title.is_char_boundary(start) {
-                        start -= 1;
-                    }
-                    let mut end = (m.end() + SEARCH_CONTEXT_AFTER).min(self.title.len());
-                    while end < self.title.len() && !self.title.is_char_boundary(end) {
-                        end += 1;
-                    }
+                    let match_char = self.title[..idx].chars().count();
+                    let start_char = match_char.saturating_sub(SEARCH_CONTEXT_BEFORE);
+                    let end_char =
+                        (match_char + self.title[idx..m.end()].chars().count()
+                            + SEARCH_CONTEXT_AFTER)
+                            .min(self.title.chars().count());
+                    let context: String = self
+                        .title
+                        .chars()
+                        .skip(start_char)
+                        .take(end_char.saturating_sub(start_char))
+                        .collect();
                     let mut score = SEARCH_TITLE_BASE + SEARCH_TITLE_MATCH_BONUS;
                     if idx == 0 {
                         score += SEARCH_TITLE_PREFIX_BONUS;
@@ -647,7 +651,7 @@ impl TerminalDriver {
                     SearchCandidate {
                         score,
                         source: SearchSource::Title,
-                        context: self.title[start..end].to_owned(),
+                        context,
                         scroll_offset: None,
                     }
                 })

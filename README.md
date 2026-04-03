@@ -65,6 +65,14 @@ echo "deb [signed-by=/usr/share/keyrings/blit.gpg arch=$(dpkg --print-architectu
 sudo apt update && sudo apt install blit
 ```
 
+### Windows (PowerShell)
+
+```powershell
+irm https://install.blit.sh/install.ps1 | iex
+```
+
+This downloads `blit.exe` to `%LOCALAPPDATA%\blit\bin` and adds it to your user `PATH`. Set `BLIT_INSTALL_DIR` to override the install location.
+
 ### Nix
 
 ```bash
@@ -89,11 +97,12 @@ Run `blit learn` to print the full CLI reference. For the machine-readable versi
 
 ## Configuration
 
-| Variable          | Default                                                                                                                | Purpose                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `BLIT_SOCK`       | `$TMPDIR/blit.sock`, `/tmp/blit-$USER.sock`, `/run/blit/$USER.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit.sock` | Unix socket path                     |
-| `BLIT_SCROLLBACK` | `10000`                                                                                                                | Scrollback rows per PTY              |
-| `BLIT_HUB`        | `hub.blit.sh`                                                                                                          | Signaling hub URL for WebRTC sharing |
+| Variable           | Default                                                                                                                | Purpose                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `BLIT_SOCK`        | `$TMPDIR/blit.sock`, `/tmp/blit-$USER.sock`, `/run/blit/$USER.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit.sock` | Unix socket path                                         |
+| `BLIT_SCROLLBACK`  | `10000`                                                                                                                | Scrollback rows per PTY                                  |
+| `BLIT_HUB`         | `hub.blit.sh`                                                                                                          | Signaling hub URL for WebRTC sharing                     |
+| `BLIT_INSTALL_DIR` | `%LOCALAPPDATA%\blit\bin` (Windows)                                                                                    | Override install location (Windows PowerShell installer) |
 
 For `blit-gateway` configuration, running as a systemd/launchd service, and Nix module setup, see [SERVICES.md](SERVICES.md) and [`nix/README.md`](nix/README.md).
 

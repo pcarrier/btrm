@@ -267,15 +267,28 @@ export function BSPContainer({
     }
   }, [focusedPaneSessionId, focusedSessionId, onFocusSession]);
 
-  // Allow Workspace to focus a specific session's pane (e.g. from menu).
+  // Allow Workspace to focus a specific session's pane (e.g. from menu/sidebar).
+  // If the session is already in a pane, focus that pane.
+  // If unassigned (e.g. sidebar thumbnail), swap it into the focused pane.
   const focusBySession = useCallback(
     (sessionId: SessionId) => {
-      const paneId = paneIds.find(
+      const existingPane = paneIds.find(
         (id) => layoutState.assignments[id] === sessionId,
       );
-      if (paneId) setFocusedPaneId(paneId);
+      if (existingPane) {
+        setFocusedPaneId(existingPane);
+      } else if (focusedPaneId) {
+        setLayoutState((prev) => {
+          const updated = { ...prev.assignments };
+          for (const [pid, sid] of Object.entries(updated)) {
+            if (sid === sessionId) updated[pid] = null;
+          }
+          updated[focusedPaneId] = sessionId;
+          return { ...prev, assignments: updated };
+        });
+      }
     },
-    [layoutState.assignments, paneIds],
+    [layoutState.assignments, paneIds, focusedPaneId],
   );
 
   useEffect(() => {
@@ -286,13 +299,20 @@ export function BSPContainer({
     (sessionId: SessionId, targetPaneId: string) => {
       setLayoutState((prev) => {
         if (prev.assignments[targetPaneId] === sessionId) return prev;
-        return {
-          ...prev,
-          assignments: {
-            ...prev.assignments,
-            [targetPaneId]: sessionId,
-          },
-        };
+        const updated = { ...prev.assignments };
+        const displacedSession = updated[targetPaneId];
+        let sourcePane: string | null = null;
+        for (const [pid, sid] of Object.entries(updated)) {
+          if (sid === sessionId && pid !== targetPaneId) {
+            sourcePane = pid;
+            break;
+          }
+        }
+        updated[targetPaneId] = sessionId;
+        if (sourcePane != null) {
+          updated[sourcePane] = displacedSession ?? null;
+        }
+        return { ...prev, assignments: updated };
       });
       setFocusedPaneId(targetPaneId);
     },

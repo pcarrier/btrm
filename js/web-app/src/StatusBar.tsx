@@ -7,6 +7,7 @@ import type {
 import { formatBw } from "./useMetrics";
 import type { Metrics, RenderSample, NetSample } from "./useMetrics";
 import { sessionName, themeFor, ui, uiScale, z } from "./theme";
+import type { Theme } from "./theme";
 import { t, tp } from "./i18n";
 
 type TimelineRef = RefObject<RenderSample[]>;
@@ -30,10 +31,61 @@ function rgba([r, g, b]: [number, number, number], alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+export function statusBarBg(status: ConnectionStatus, theme: Theme): string {
+  if (status === "connected") return theme.bg;
+  if (status === "connecting" || status === "authenticating")
+    return theme.warning;
+  return theme.error;
+}
+
+export function statusBarFg(status: ConnectionStatus, theme: Theme): string {
+  if (status === "connected") return theme.fg;
+  return theme.bg;
+}
+
+function retryLabel(retryCount: number): string {
+  return retryCount === 1
+    ? t("disconnected.retryOne")
+    : tp("disconnected.retryMany", { count: retryCount });
+}
+
+function statusText(
+  status: ConnectionStatus,
+  retryCount: number,
+  error: string | null,
+): string | null {
+  if (status === "connected") return null;
+
+  let base: string;
+  switch (status) {
+    case "connecting":
+      base = t("status.connecting");
+      break;
+    case "authenticating":
+      base = t("status.authenticating");
+      break;
+    case "disconnected":
+    case "closed":
+      base = t("status.disconnected");
+      break;
+    case "error":
+      base = t("status.connectionFailed");
+      break;
+  }
+
+  const parts: string[] = [];
+  if (retryCount > 0) parts.push(retryLabel(retryCount));
+  if (error && error !== "auth") parts.push(error);
+  return parts.length > 0 ? `${base} (${parts.join(" \u2014 ")})` : base;
+}
+
 export function StatusBar({
   sessions,
   focusedSession,
   status,
+  retryCount,
+  error,
+  onReconnect,
   metrics,
   palette,
   fontSize,
@@ -51,6 +103,9 @@ export function StatusBar({
   sessions: readonly BlitSession[];
   focusedSession: BlitSession | null;
   status: ConnectionStatus;
+  retryCount: number;
+  error: string | null;
+  onReconnect: () => void;
   metrics: Metrics;
   palette: TerminalPalette;
   fontSize: number;
@@ -67,6 +122,7 @@ export function StatusBar({
 }) {
   const theme = themeFor(palette);
   const scale = uiScale(fontSize);
+  const connectionLabel = statusText(status, retryCount, error);
   const visible = sessions.filter((session) => session.state !== "closed");
   const exited = visible.filter((session) => session.state === "exited").length;
   const buttonStyle = { ...ui.btn, fontSize: scale.sm };
@@ -137,23 +193,28 @@ export function StatusBar({
           "Aa"
         )}
       </button>
-      <span
-        role="status"
-        aria-label={status}
-        title={status}
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          flexShrink: 0,
-          backgroundColor:
-            status === "connected"
-              ? theme.success
-              : status === "connecting" || status === "authenticating"
-                ? theme.warning
-                : theme.error,
-        }}
-      />
+      {connectionLabel && (
+        <span
+          role="status"
+          aria-label={status}
+          style={{
+            fontSize: scale.xs,
+            opacity: 0.85,
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {connectionLabel}
+        </span>
+      )}
+      {connectionLabel && (
+        <button
+          onClick={onReconnect}
+          style={{ ...buttonStyle, fontSize: scale.xs, opacity: 0.85 }}
+        >
+          {t("disconnected.reconnectNow")}
+        </button>
+      )}
       {debug && (
         <DebugPanel
           metrics={metrics}

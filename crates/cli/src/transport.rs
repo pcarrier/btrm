@@ -127,7 +127,7 @@ pub fn shell_escape(s: &str) -> String {
     out
 }
 
-pub const SSH_AUTOSTART: &str = "if ! [ -S \"$S\" ]; then if command -v blit >/dev/null 2>&1; then blit server & i=0; while ! [ -S \"$S\" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; elif command -v blit-server >/dev/null 2>&1; then blit-server & i=0; while ! [ -S \"$S\" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; fi; fi";
+pub const SSH_AUTOSTART: &str = "if [ -S \"$S\" ]; then if command -v socat >/dev/null 2>&1; then socat /dev/null \"UNIX-CONNECT:$S\" 2>/dev/null || rm -f \"$S\"; elif command -v nc >/dev/null 2>&1 && nc -h 2>&1 | grep -q '\\-U'; then nc -z -U \"$S\" 2>/dev/null || rm -f \"$S\"; fi; fi; if ! [ -S \"$S\" ]; then if command -v blit >/dev/null 2>&1; then blit server & i=0; while ! [ -S \"$S\" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; elif command -v blit-server >/dev/null 2>&1; then blit-server & i=0; while ! [ -S \"$S\" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; fi; fi";
 
 pub const SSH_SOCK_SEARCH: &str = r#"if [ -n "$BLIT_SOCK" ]; then S="$BLIT_SOCK"; elif [ -n "$TMPDIR" ] && [ -S "$TMPDIR/blit.sock" ]; then S="$TMPDIR/blit.sock"; elif [ -S "/tmp/blit-$(id -un).sock" ]; then S="/tmp/blit-$(id -un).sock"; elif [ -S "/run/blit/$(id -un).sock" ]; then S="/run/blit/$(id -un).sock"; elif [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/blit.sock" ]; then S="$XDG_RUNTIME_DIR/blit.sock"; else S=/tmp/blit.sock; fi"#;
 
@@ -236,6 +236,12 @@ pub async fn ensure_local_server(socket_path: &str) -> Result<(), String> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(10_000),
         ipc_path: socket_path.to_string(),
+        surface_h264_encoder: std::env::var("BLIT_SURFACE_H264_ENCODER")
+            .ok()
+            .and_then(|value| blit_server::SurfaceH264EncoderPreference::parse(&value))
+            .unwrap_or_default(),
+        vaapi_device: std::env::var("BLIT_VAAPI_DEVICE")
+            .unwrap_or_else(|_| "/dev/dri/renderD128".into()),
         #[cfg(unix)]
         fd_channel: None,
         verbose: false,
@@ -263,6 +269,12 @@ pub async fn ensure_local_server(pipe_path: &str) -> Result<(), String> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(10_000),
         ipc_path: pipe_path.to_string(),
+        surface_h264_encoder: std::env::var("BLIT_SURFACE_H264_ENCODER")
+            .ok()
+            .and_then(|value| blit_server::SurfaceH264EncoderPreference::parse(&value))
+            .unwrap_or_default(),
+        vaapi_device: std::env::var("BLIT_VAAPI_DEVICE")
+            .unwrap_or_else(|_| "/dev/dri/renderD128".into()),
         verbose: false,
     };
     tokio::spawn(blit_server::run(config));

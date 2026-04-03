@@ -60,9 +60,9 @@ impl axum::serve::Listener for NoDelayListener {
     }
 }
 
-const INDEX_HTML: &str = include_str!("../../../js/web-app/dist/index.html");
+const INDEX_HTML_BR: &[u8] = include_bytes!("../../../js/web-app/dist/index.html.br");
 
-static INDEX_ETAG: LazyLock<String> = LazyLock::new(|| blit_webserver::html_etag(INDEX_HTML));
+static INDEX_ETAG: LazyLock<String> = LazyLock::new(|| blit_webserver::html_etag(INDEX_HTML_BR));
 
 struct Config {
     passphrase: String,
@@ -112,7 +112,7 @@ async fn main() {
             );
             println!();
             println!("All configuration is via environment variables:");
-            println!("  BLIT_PASS       Browser passphrase (required)");
+            println!("  BLIT_PASSPHRASE Browser passphrase (required)");
             println!("  BLIT_ADDR       Listen address (default: 0.0.0.0:3264)");
             println!("  BLIT_SOCK       Upstream server socket");
             println!("  BLIT_FONT_DIRS  Colon-separated extra font directories");
@@ -130,8 +130,8 @@ async fn main() {
             std::process::exit(0);
         }
     }
-    let passphrase = std::env::var("BLIT_PASS").unwrap_or_else(|_| {
-        eprintln!("BLIT_PASS environment variable required");
+    let passphrase = std::env::var("BLIT_PASSPHRASE").unwrap_or_else(|_| {
+        eprintln!("BLIT_PASSPHRASE environment variable required");
         std::process::exit(1);
     });
     let sock_path = std::env::var("BLIT_SOCK").unwrap_or_else(|_| {
@@ -249,32 +249,30 @@ async fn root_handler(State(state): State<AppState>, request: axum::extract::Req
             Ok(ws) => ws.on_upgrade(move |socket| handle_ws(socket, state)),
             Err(e) => e.into_response(),
         }
+    } else if path.ends_with("/config") {
+        let mut json = String::from("{\"gateway\":true");
+        if let Some(hash) = &*state.wt_cert_hash.read().unwrap() {
+            json.push_str(",\"certHash\":\"");
+            json.push_str(hash);
+            json.push('"');
+        }
+        json.push('}');
+        (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            json,
+        )
+            .into_response()
     } else {
         let etag = &*INDEX_ETAG;
-        let inm = request.headers().get(axum::http::header::IF_NONE_MATCH);
-        if inm.map(|v| v.as_bytes()) == Some(etag.as_bytes()) {
-            return (
-                axum::http::StatusCode::NOT_MODIFIED,
-                [(axum::http::header::ETAG, etag.as_str())],
-            )
-                .into_response();
-        }
-        // Inject WebTransport cert hash for self-signed certs
-        let wt_hash = state.wt_cert_hash.read().unwrap().clone();
-        if let Some(hash) = &wt_hash {
-            let html = INDEX_HTML.replacen(
-                "<script",
-                &format!("<script>window.__blitCertHash='{hash}'</script>\n<script"),
-                1,
-            );
-            (
-                [(axum::http::header::ETAG, etag.as_str())],
-                axum::response::Html(html),
-            )
-                .into_response()
-        } else {
-            blit_webserver::html_response(INDEX_HTML, etag, None)
-        }
+        let inm = request
+            .headers()
+            .get(axum::http::header::IF_NONE_MATCH)
+            .map(|v| v.as_bytes());
+        let ae = request
+            .headers()
+            .get(axum::http::header::ACCEPT_ENCODING)
+            .and_then(|v| v.to_str().ok());
+        blit_webserver::html_response(INDEX_HTML_BR, etag, inm, ae)
     }
 }
 
@@ -613,9 +611,15 @@ async fn handle_webtransport_session(
     eprintln!("webtransport client authenticated");
 
     // --- Proxy to blit-server ---
-    let stream = connect_ipc(&state.sock_path)
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+    let stream = match connect_ipc(&state.sock_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("cannot connect to blit-server: {e}");
+            session.close(1, e.as_bytes());
+            session.closed().await;
+            return Ok(());
+        }
+    };
     let (mut sock_reader, mut sock_writer) = tokio::io::split(stream);
 
     // Client → server: read length-prefixed frames from WebTransport, forward to Unix socket

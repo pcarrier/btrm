@@ -17,18 +17,18 @@ This document helps LLM agents (and humans) contribute to the blit codebase. It 
 
 When making changes, update the relevant docs in the same PR.
 
-| Document                  | Scope                                                                                                      | Update when...                                                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `README.md`               | User-facing overview: installation, usage, features                                                        | CLI flags, install methods, or supported platforms change                                                                    |
-| `ARCHITECTURE.md`         | System internals: data flow, crate responsibilities, transport layers, rendering pipeline                  | Crates are added/removed/renamed, data flow between components changes, or new transport/rendering mechanisms are introduced |
-| `CONTRIBUTING.md`         | Developer workflow: building, testing, code conventions, project structure                                 | Build steps, test commands, directory layout, or dev tooling changes                                                         |
-| `SERVICES.md`             | Hosted services, CI/CD, and running as a service (Homebrew, systemd)                                       | CI jobs are added/removed/changed, deployment targets change, new secrets are introduced, or the release process is modified |
-| `EMBEDDING.md`            | Embedding blit in other apps: React components (`@blit-sh/react`), embedding `blit-server` as a library    | Public embedding APIs, component props, or integration patterns change                                                       |
-| `SKILL.md`                | LLM agent skill definition: install instructions and pointer to `blit learn`                               | Install methods change or the `learn` subcommand output changes                                                              |
-| `crates/cli/src/learn.md` | Full CLI reference printed by `blit learn`: usage patterns, subcommand details, transport options, escapes | CLI subcommands, flags, output conventions, or transport options change                                                      |
-| `UNSAFE.md`               | Unsafe Rust code audit: which crates use `unsafe`, why, and what invariants they rely on                   | Unsafe code is added, removed, or its safety invariants change                                                               |
-| `nix/README.md`           | nix-darwin and NixOS service module configuration examples                                                 | Nix module options or usage patterns change                                                                                  |
-| `js/blit-hub/README.md`   | blit-hub signaling relay: protocol, deployment, configuration                                              | Hub protocol, endpoints, deployment config, or environment variables change                                                  |
+| Document                  | Scope                                                                                                                                         | Update when...                                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `README.md`               | User-facing overview: installation, usage, features                                                                                           | CLI flags, install methods, or supported platforms change                                                                    |
+| `ARCHITECTURE.md`         | System internals: data flow, crate responsibilities, transport layers, rendering pipeline                                                     | Crates are added/removed/renamed, data flow between components changes, or new transport/rendering mechanisms are introduced |
+| `CONTRIBUTING.md`         | Developer workflow: building, testing, code conventions, project structure                                                                    | Build steps, test commands, directory layout, or dev tooling changes                                                         |
+| `SERVICES.md`             | Hosted services, CI/CD, and running as a service (Homebrew, systemd)                                                                          | CI jobs are added/removed/changed, deployment targets change, new secrets are introduced, or the release process is modified |
+| `EMBEDDING.md`            | Embedding blit in other apps: React components (`@blit-sh/react`), embedding `blit-server` as a library                                       | Public embedding APIs, component props, or integration patterns change                                                       |
+| `SKILL.md`                | LLM agent skill definition: install instructions and pointer to `blit learn`. Deployed to `install.blit.sh/SKILL.md` by the release workflow. | Install methods change or the `learn` subcommand output changes                                                              |
+| `crates/cli/src/learn.md` | Full CLI reference printed by `blit learn`: usage patterns, subcommand details, transport options, escapes                                    | CLI subcommands, flags, output conventions, or transport options change                                                      |
+| `UNSAFE.md`               | Unsafe Rust code audit: which crates use `unsafe`, why, and what invariants they rely on                                                      | Unsafe code is added, removed, or its safety invariants change                                                               |
+| `nix/README.md`           | nix-darwin and NixOS service module configuration examples                                                                                    | Nix module options or usage patterns change                                                                                  |
+| `js/blit-hub/README.md`   | blit-hub signaling relay: protocol, deployment, configuration                                                                                 | Hub protocol, endpoints, deployment config, or environment variables change                                                  |
 
 ## Getting started
 
@@ -183,7 +183,7 @@ Most Rust crates are one or two source files. `blit-cli` is split into five and 
 | `nix/`         | Nix packaging: `common.nix` (toolchain), `packages.nix` (build defs), `tasks.nix` (CI tasks), NixOS/Darwin modules              |
 | `systemd/`     | Socket-activated unit files (user-level and system-level templates) and service units                                           |
 | `man/`         | scdoc man pages for `blit`, `blit-server`, `blit-gateway`, `blit-webrtc-forwarder`                                              |
-| `bin/`         | Shell scripts wrapping `nix run` tasks plus the `release` orchestrator                                                          |
+| `bin/`         | Shell scripts wrapping `nix run` tasks plus release scripts (`release-prepare`, `release-tag`, `prepare-release`)               |
 
 ## Code conventions
 
@@ -203,20 +203,15 @@ Most Rust crates are one or two source files. `blit-cli` is split into five and 
 
 ## Versioning and releases
 
-All workspace crates, `js/core/package.json`, `js/react/package.json`, `js/solid/package.json`, and `nix/common.nix` share a single version number. The JS packages live in a pnpm workspace rooted at `js/` with a shared `js/pnpm-lock.yaml`. The `bin/release` script bumps all of them atomically:
+All workspace crates, `js/core/package.json`, `js/react/package.json`, `js/solid/package.json`, and `nix/common.nix` share a single version number. The JS packages live in a pnpm workspace rooted at `js/` with a shared `js/pnpm-lock.yaml`.
 
-```bash
-./bin/release 0.12.0
-```
+Releases go through a three-step process:
 
-This validates version consistency, bumps all files, runs `cargo test -p blit-server`, and commits.
+1. **Prepare**: `./bin/release-prepare 0.12.0` runs `bin/prepare-release` locally (version bumping, validation, tests), pushes a `release/<version>` branch, and opens a PR against `main`.
+2. **Tag**: After the PR is merged, run `./bin/release-tag 0.12.0` to create a signed tag and push it to origin.
+3. The `release.yml` workflow triggers on the `v*` tag push. It first verifies the tag signature via the GitHub API — unsigned or unverified tags fail the workflow immediately.
 
-Releases go through a two-step process:
-
-1. The **Prepare release** workflow (`workflow_dispatch`) runs `bin/release`, pushes the result to a `release/<version>` branch, and opens a PR against `main`.
-2. When that PR is merged, the **Tag release** workflow detects the `release <version>` commit on `main`, creates and pushes a `v<version>` tag.
-
-CI on the resulting `v*` tag builds debs/tarballs, publishes to crates.io and npm, updates the Homebrew tap, and deploys the APT repo.
+CI on the verified tag builds debs/tarballs, publishes to crates.io and npm, updates the Homebrew tap, and deploys the APT repo.
 
 ## CI checks
 

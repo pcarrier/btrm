@@ -46,6 +46,16 @@ impl IpcListener {
             }
             return None;
         }
+        let pid = std::env::var("LISTEN_PID").ok()?;
+        if pid.trim() != std::process::id().to_string() {
+            if verbose {
+                eprintln!(
+                    "LISTEN_PID={pid} does not match our pid {}; falling back to bind",
+                    std::process::id()
+                );
+            }
+            return None;
+        }
         use std::os::unix::io::FromRawFd;
         let std_listener = unsafe { std::os::unix::net::UnixListener::from_raw_fd(3) };
         std_listener.set_nonblocking(true).unwrap();
@@ -112,7 +122,7 @@ fn recv_fd(channel: RawFd) -> RecvFdResult {
 
 pub async fn run_fd_channel(channel_fd: RawFd, state: crate::AppState) {
     use std::os::unix::io::FromRawFd;
-    if state.0.verbose {
+    if state.config.verbose {
         eprintln!("accepting clients via fd-channel (fd {channel_fd})");
     }
     let channel = unsafe { std::os::unix::net::UnixStream::from_raw_fd(channel_fd) };
@@ -143,7 +153,7 @@ pub async fn run_fd_channel(channel_fd: RawFd, state: crate::AppState) {
             }
         }
     }
-    if state.0.verbose {
+    if state.config.verbose {
         eprintln!("fd-channel closed, shutting down");
     }
 }

@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   BlitTerminal,
+  BlitSurfaceView,
   BlitWorkspaceProvider,
   useBlitConnection,
   useBlitFocusedSession,
@@ -14,6 +15,7 @@ import { BlitWorkspace, PALETTES, DEFAULT_FONT } from "@blit-sh/core";
 import type {
   BlitTransport,
   BlitSession,
+  BlitSurface,
   BlitWasmModule,
   SessionId,
   TerminalPalette,
@@ -34,12 +36,11 @@ import {
 import type { UIScale } from "./theme";
 import { themeFor, layout, ui, uiScale, z } from "./theme";
 import { t } from "./i18n";
-import { StatusBar } from "./StatusBar";
+import { StatusBar, statusBarBg, statusBarFg } from "./StatusBar";
 import { SwitcherOverlay } from "./SwitcherOverlay";
 import { PaletteOverlay } from "./PaletteOverlay";
 import { FontOverlay } from "./FontOverlay";
 import { HelpOverlay } from "./HelpOverlay";
-import { DisconnectedOverlay } from "./DisconnectedOverlay";
 import { BSPContainer } from "./bsp/BSPContainer";
 import type { BSPAssignments, BSPLayout } from "./bsp/layout";
 import {
@@ -118,6 +119,16 @@ function WorkspaceScreen({
   const sessions = useBlitSessions();
   const focusedSession = useBlitFocusedSession();
   const connection = useBlitConnection(primaryConnectionId);
+  const [surfaces, setSurfaces] = useState<BlitSurface[]>([]);
+
+  useEffect(() => {
+    const conn = workspace.getConnection(primaryConnectionId);
+    if (!conn) return;
+    const store = conn.surfaceStore;
+    const sync = () => setSurfaces([...store.getSurfaces().values()]);
+    sync();
+    return store.onChange(sync);
+  }, [workspace, primaryConnectionId]);
 
   const [palette, setPalette] = useState<TerminalPalette>(preferredPalette);
   const [font, setFont] = useState(preferredFont);
@@ -125,8 +136,10 @@ function WorkspaceScreen({
   const [fontSize, setFontSize] = useState(preferredFontSize);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [debugPanel, setDebugPanel] = useState(false);
+  const [previewPanelOpen, setPreviewPanelOpen] = useState(true);
+  const [previewPanelWidth, setPreviewPanelWidth] =
+    useState(SURFACE_PANEL_WIDTH);
   const [serverFonts, setServerFonts] = useState<string[]>([]);
-  const [offlineVisible, setOfflineVisible] = useState(false);
   const [fontLoading, setFontLoading] = useState(false);
   const [advanceRatio, setAdvanceRatio] = useState<number | undefined>(
     undefined,
@@ -138,7 +151,34 @@ function WorkspaceScreen({
   activeLayoutRef.current = activeLayout;
   const [layoutAssignments, setLayoutAssignments] =
     useState<BSPAssignments | null>(null);
+  const offScreenSessions = useMemo(() => {
+    if (activeLayout) {
+      const assigned = new Set<SessionId>(
+        layoutAssignments
+          ? Object.values(layoutAssignments.assignments).filter(
+              (id): id is SessionId => id != null,
+            )
+          : [],
+      );
+      return sessions.filter(
+        (s) => s.state !== "closed" && !assigned.has(s.id),
+      );
+    }
+    return sessions.filter(
+      (s) => s.state !== "closed" && s.id !== workspaceState.focusedSessionId,
+    );
+  }, [
+    activeLayout,
+    layoutAssignments,
+    sessions,
+    workspaceState.focusedSessionId,
+  ]);
+
   const toggleDebug = useCallback(() => setDebugPanel((value) => !value), []);
+  const togglePreviewPanel = useCallback(
+    () => setPreviewPanelOpen((v) => !v),
+    [],
+  );
   const fontRequestVersionRef = useRef(0);
   const paletteOverlayOriginRef = useRef<TerminalPalette | null>(null);
   const fontOverlayOriginRef = useRef<{ family: string; size: number } | null>(
@@ -303,6 +343,9 @@ function WorkspaceScreen({
     if (workspaceState.focusedSessionId) {
       desired.add(workspaceState.focusedSessionId);
     }
+    for (const s of offScreenSessions) {
+      desired.add(s.id);
+    }
     if (overlay === "expose") {
       for (const session of sessions) {
         if (session.state !== "closed") desired.add(session.id);
@@ -311,40 +354,31 @@ function WorkspaceScreen({
     workspace.setVisibleSessions(desired);
   }, [
     activeLayout,
+    offScreenSessions,
     overlay,
     sessions,
     workspace,
     workspaceState.focusedSessionId,
   ]);
 
-  const hasConnectedRef = useRef(connection?.status === "connected");
   useEffect(() => {
-    const status = connection?.status;
-    if (!status) return;
-    if (status === "connected") {
-      hasConnectedRef.current = true;
-    } else if (connection?.error === "auth") {
+    if (connection?.error === "auth") {
       onAuthError();
     }
-  }, [connection?.status, connection?.error, onAuthError]);
+  }, [connection?.error, onAuthError]);
 
+  // Debounce the "connected" status so the status bar doesn't flicker when
+  // the connection rapidly cycles through connected → disconnected.
+  const rawStatus = connection?.status ?? "disconnected";
+  const [stableStatus, setStableStatus] = useState(rawStatus);
   useEffect(() => {
-    const status = connection?.status;
-    if (!status) return;
-
-    if (status === "connected") {
-      setOfflineVisible(false);
+    if (rawStatus !== "connected") {
+      setStableStatus(rawStatus);
       return;
     }
-
-    if (
-      hasConnectedRef.current ||
-      (connection?.retryCount ?? 0) > 0 ||
-      (connection?.error != null && connection.error !== "auth")
-    ) {
-      setOfflineVisible(true);
-    }
-  }, [connection?.status, connection?.retryCount, connection?.error]);
+    const timer = setTimeout(() => setStableStatus("connected"), 500);
+    return () => clearTimeout(timer);
+  }, [rawStatus]);
 
   const termCallbackRef = useCallback((handle: BlitTerminalHandle | null) => {
     termRef.current = handle;
@@ -571,6 +605,11 @@ function WorkspaceScreen({
         toggleDebug();
         return;
       }
+      if (e.ctrlKey && e.shiftKey && e.key === "B") {
+        e.preventDefault();
+        togglePreviewPanel();
+        return;
+      }
       if (mod && e.shiftKey && e.key === "Enter") {
         e.preventDefault();
         if (activeLayoutRef.current && bspFocusedPaneId) {
@@ -648,6 +687,7 @@ function WorkspaceScreen({
     handleRestartOrClose,
     toggleDebug,
     toggleOverlay,
+    togglePreviewPanel,
     workspace,
   ]);
 
@@ -679,11 +719,12 @@ function WorkspaceScreen({
         .join(",");
       if (a) parts.push(`a=${a}`);
     }
-    history.replaceState(
-      null,
-      "",
-      parts.length > 0 ? `#${parts.join("&")}` : location.pathname,
-    );
+    const existing = location.hash.slice(1);
+    const kept = existing.split("&").filter((s) => s && !/^[lpa]=/.test(s));
+    const merged = [...kept, ...parts];
+    if (merged.length > 0) {
+      history.replaceState(null, "", `#${merged.join("&")}`);
+    }
   }, [activeLayout, bspFocusedPaneId, connection?.status, layoutAssignments]);
 
   const debugStats = workspace.getConnectionDebugStats(
@@ -708,101 +749,128 @@ function WorkspaceScreen({
           fontFamily: resolvedFontWithFallback,
         }}
       >
-        <section style={layout.termContainer}>
-          {activeLayout ? (
-            <BSPContainer
-              layout={activeLayout}
-              onLayoutChange={setActiveLayout}
-              connectionId={primaryConnectionId}
-              palette={palette}
-              fontFamily={resolvedFontWithFallback}
-              fontSize={fontSize}
-              focusedSessionId={workspaceState.focusedSessionId}
-              lruSessionIds={lruRef.current}
-              manageVisibility={overlay !== "expose"}
-              onAssignmentsChange={setLayoutAssignments}
-              onFocusSession={(id) => workspace.focusSession(id)}
-              onFocusBySession={(fn) => {
-                focusBySessionRef.current = fn;
-              }}
-              onFocusPane={(fn) => {
-                focusPaneRef.current = fn;
-              }}
-              onMoveSessionToPane={(fn) => {
-                moveSessionToPaneRef.current = fn;
-              }}
-              onFocusedPaneChange={setBspFocusedPaneId}
-              onCreateInPane={createInPane}
-            />
-          ) : workspaceState.focusedSessionId != null ? (
-            <>
-              <BlitTerminal
-                ref={termCallbackRef}
-                sessionId={workspaceState.focusedSessionId}
-                onRender={countFrame}
-                style={{ width: "100%", height: "100%" }}
+        <section
+          style={{
+            ...layout.termContainer,
+            display: "flex",
+            flexDirection: "row",
+          }}
+        >
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+            {activeLayout ? (
+              <BSPContainer
+                layout={activeLayout}
+                onLayoutChange={setActiveLayout}
+                connectionId={primaryConnectionId}
+                palette={palette}
                 fontFamily={resolvedFontWithFallback}
                 fontSize={fontSize}
-                palette={palette}
+                focusedSessionId={workspaceState.focusedSessionId}
+                lruSessionIds={lruRef.current}
+                manageVisibility={overlay !== "expose"}
+                onAssignmentsChange={setLayoutAssignments}
+                onFocusSession={(id) => workspace.focusSession(id)}
+                onFocusBySession={(fn) => {
+                  focusBySessionRef.current = fn;
+                }}
+                onFocusPane={(fn) => {
+                  focusPaneRef.current = fn;
+                }}
+                onMoveSessionToPane={(fn) => {
+                  moveSessionToPaneRef.current = fn;
+                }}
+                onFocusedPaneChange={setBspFocusedPaneId}
+                onCreateInPane={createInPane}
               />
-              {focusedSession?.state === "exited" && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 32,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    backgroundColor: theme.solidPanelBg,
-                    border: `1px solid ${theme.border}`,
-                    padding: `${chromeScale.controlY}px ${chromeScale.controlX}px`,
-                    fontSize: chromeScale.sm,
-                    zIndex: z.exitedBanner,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: chromeScale.gap,
-                  }}
-                >
-                  <mark
+            ) : workspaceState.focusedSessionId != null ? (
+              <>
+                <BlitTerminal
+                  ref={termCallbackRef}
+                  sessionId={workspaceState.focusedSessionId}
+                  onRender={countFrame}
+                  style={{ width: "100%", height: "100%" }}
+                  fontFamily={resolvedFontWithFallback}
+                  fontSize={fontSize}
+                  palette={palette}
+                />
+                {focusedSession?.state === "exited" && (
+                  <div
                     style={{
-                      ...ui.badge,
-                      backgroundColor: "rgba(255,100,100,0.3)",
+                      position: "absolute",
+                      bottom: 32,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      backgroundColor: theme.solidPanelBg,
+                      border: `1px solid ${theme.border}`,
+                      padding: `${chromeScale.controlY}px ${chromeScale.controlX}px`,
+                      fontSize: chromeScale.sm,
+                      zIndex: z.exitedBanner,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: chromeScale.gap,
                     }}
                   >
-                    {t("workspace.exited")}
-                  </mark>
-                  {connection?.supportsRestart ? (
-                    <button
-                      onClick={() => handleRestartOrClose()}
-                      style={{ ...ui.btn, fontSize: chromeScale.md }}
+                    <mark
+                      style={{
+                        ...ui.badge,
+                        backgroundColor: "rgba(255,100,100,0.3)",
+                      }}
                     >
-                      {t("workspace.restart")} <kbd style={ui.kbd}>Enter</kbd>
+                      {t("workspace.exited")}
+                    </mark>
+                    {connection?.supportsRestart ? (
+                      <button
+                        onClick={() => handleRestartOrClose()}
+                        style={{ ...ui.btn, fontSize: chromeScale.md }}
+                      >
+                        {t("workspace.restart")} <kbd style={ui.kbd}>Enter</kbd>
+                      </button>
+                    ) : null}
+                    <button
+                      onClick={() =>
+                        void workspace.closeSession(focusedSession.id)
+                      }
+                      style={{
+                        ...ui.btn,
+                        fontSize: chromeScale.md,
+                        opacity: 0.5,
+                      }}
+                    >
+                      {t("workspace.close")} <kbd style={ui.kbd}>Esc</kbd>
                     </button>
-                  ) : null}
-                  <button
-                    onClick={() =>
-                      void workspace.closeSession(focusedSession.id)
-                    }
-                    style={{
-                      ...ui.btn,
-                      fontSize: chromeScale.md,
-                      opacity: 0.5,
-                    }}
-                  >
-                    {t("workspace.close")} <kbd style={ui.kbd}>Esc</kbd>
-                  </button>
-                </div>
-              )}
-            </>
-          ) : (
-            <EmptyState
-              theme={theme}
-              scale={chromeScale}
-              mod={/Mac|iPhone|iPad/.test(navigator.platform) ? "Cmd" : "Ctrl"}
-              onCreate={() => void createAndFocus()}
-              onSwitcher={() => toggleOverlay("expose")}
-              onHelp={() => toggleOverlay("help")}
-            />
-          )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <EmptyState
+                theme={theme}
+                scale={chromeScale}
+                mod={
+                  /Mac|iPhone|iPad/.test(navigator.platform) ? "Cmd" : "Ctrl"
+                }
+                onCreate={() => void createAndFocus()}
+                onSwitcher={() => toggleOverlay("expose")}
+                onHelp={() => toggleOverlay("help")}
+              />
+            )}
+          </div>
+          {previewPanelOpen &&
+            (offScreenSessions.length > 0 || surfaces.length > 0) && (
+              <PreviewPanel
+                offScreenSessions={offScreenSessions}
+                surfaces={surfaces}
+                connectionId={primaryConnectionId}
+                theme={theme}
+                scale={chromeScale}
+                palette={palette}
+                fontFamily={resolvedFontWithFallback}
+                fontSize={fontSize}
+                onFocusSession={switchSession}
+                width={previewPanelWidth}
+                onResize={setPreviewPanelWidth}
+                onClose={togglePreviewPanel}
+              />
+            )}
         </section>
         {overlay === "expose" && (
           <SwitcherOverlay
@@ -873,23 +941,12 @@ function WorkspaceScreen({
             fontSize={fontSize}
           />
         )}
-        {offlineVisible && (
-          <DisconnectedOverlay
-            palette={palette}
-            fontSize={fontSize}
-            status={connection?.status ?? "disconnected"}
-            retryCount={connection?.retryCount ?? 0}
-            error={connection?.error ?? null}
-            onReconnect={() =>
-              workspace.reconnectConnection(primaryConnectionId)
-            }
-          />
-        )}
         <footer
           style={{
             ...layout.statusBar,
             padding: "0 1em",
-            backgroundColor: theme.bg,
+            backgroundColor: statusBarBg(stableStatus, theme),
+            color: statusBarFg(stableStatus, theme),
             borderTopColor: theme.subtleBorder,
             height: chromeScale.md + chromeScale.controlY * 2,
             fontSize: chromeScale.sm,
@@ -898,7 +955,12 @@ function WorkspaceScreen({
           <StatusBar
             sessions={sessions}
             focusedSession={focusedSession}
-            status={connection?.status ?? "disconnected"}
+            status={stableStatus}
+            retryCount={connection?.retryCount ?? 0}
+            error={connection?.error ?? null}
+            onReconnect={() =>
+              workspace.reconnectConnection(primaryConnectionId)
+            }
             metrics={metrics}
             palette={palette}
             fontSize={fontSize}
@@ -985,6 +1047,366 @@ function EmptyState({
       >
         {t("workspace.newTerminal")}
       </button>
+    </div>
+  );
+}
+
+const SURFACE_PANEL_WIDTH = 280;
+const MIN_PANEL_WIDTH = 160;
+const MAX_PANEL_WIDTH = 600;
+
+function PreviewPanel({
+  offScreenSessions,
+  surfaces,
+  connectionId,
+  theme,
+  scale,
+  palette,
+  fontFamily,
+  fontSize,
+  onFocusSession,
+  width,
+  onResize,
+  onClose,
+}: {
+  offScreenSessions: BlitSession[];
+  surfaces: BlitSurface[];
+  connectionId: string;
+  theme: ReturnType<typeof themeFor>;
+  scale: UIScale;
+  palette: TerminalPalette;
+  fontFamily: string;
+  fontSize: number;
+  onFocusSession: (id: SessionId) => void;
+  width: number;
+  onResize: (width: number) => void;
+  onClose: () => void;
+}) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [resizeHover, setResizeHover] = useState(false);
+  const [resizeActive, setResizeActive] = useState(false);
+
+  const handleResizePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      setResizeActive(true);
+      const startX = e.clientX;
+      const startWidth = width;
+
+      const onMove = (me: PointerEvent) => {
+        const delta = startX - me.clientX;
+        onResize(
+          Math.max(
+            MIN_PANEL_WIDTH,
+            Math.min(MAX_PANEL_WIDTH, startWidth + delta),
+          ),
+        );
+      };
+
+      const onUp = () => {
+        setResizeActive(false);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+      };
+
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    },
+    [width, onResize],
+  );
+
+  const resizeBg = resizeActive
+    ? "rgba(128,128,128,0.5)"
+    : resizeHover
+      ? "rgba(128,128,128,0.3)"
+      : "transparent";
+
+  return (
+    <div
+      style={{
+        width,
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "row",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        onPointerDown={handleResizePointerDown}
+        onPointerEnter={() => setResizeHover(true)}
+        onPointerLeave={() => setResizeHover(false)}
+        style={{
+          width: 3,
+          flexShrink: 0,
+          cursor: "col-resize",
+          background: resizeBg,
+          borderLeft: `1px solid ${theme.subtleBorder}`,
+          transition: "background 0.1s",
+          touchAction: "none",
+        }}
+      />
+      <div
+        style={{
+          flex: 1,
+          backgroundColor: theme.solidPanelBg,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            padding: `${scale.controlY}px ${scale.tightGap}px`,
+            borderBottom: `1px solid ${theme.subtleBorder}`,
+          }}
+        >
+          <button
+            onClick={onClose}
+            title="Close panel (Ctrl+Shift+B)"
+            style={{
+              ...ui.btn,
+              fontSize: scale.xs,
+              padding: `0 ${scale.tightGap}px`,
+              opacity: 0.5,
+            }}
+          >
+            &times;
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {offScreenSessions.length > 0 && (
+            <>
+              <div
+                style={{
+                  padding: `${scale.controlY}px ${scale.tightGap}px`,
+                  fontSize: scale.sm,
+                  color: theme.dimFg,
+                  borderBottom: `1px solid ${theme.subtleBorder}`,
+                  userSelect: "none",
+                }}
+              >
+                Sessions ({offScreenSessions.length})
+              </div>
+              {offScreenSessions.map((s) => (
+                <SessionThumbnail
+                  key={s.id}
+                  session={s}
+                  theme={theme}
+                  scale={scale}
+                  palette={palette}
+                  fontFamily={fontFamily}
+                  fontSize={fontSize}
+                  panelWidth={width}
+                  onFocus={() => onFocusSession(s.id)}
+                />
+              ))}
+            </>
+          )}
+          {surfaces.length > 0 && (
+            <>
+              <div
+                style={{
+                  padding: `${scale.controlY}px ${scale.tightGap}px`,
+                  fontSize: scale.sm,
+                  color: theme.dimFg,
+                  borderBottom: `1px solid ${theme.subtleBorder}`,
+                  userSelect: "none",
+                }}
+              >
+                Surfaces ({surfaces.length})
+              </div>
+              {surfaces.map((s) => (
+                <SurfaceThumbnail
+                  key={`${s.sessionId}-${s.surfaceId}`}
+                  surface={s}
+                  connectionId={connectionId}
+                  theme={theme}
+                  scale={scale}
+                  panelWidth={width}
+                  expanded={expandedId === s.surfaceId}
+                  onToggle={() =>
+                    setExpandedId(
+                      expandedId === s.surfaceId ? null : s.surfaceId,
+                    )
+                  }
+                />
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionThumbnail({
+  session,
+  theme,
+  scale,
+  palette,
+  fontFamily,
+  fontSize,
+  panelWidth,
+  onFocus,
+}: {
+  session: BlitSession;
+  theme: ReturnType<typeof themeFor>;
+  scale: UIScale;
+  palette: TerminalPalette;
+  fontFamily: string;
+  fontSize: number;
+  panelWidth: number;
+  onFocus: () => void;
+}) {
+  const label = session.title || session.tag || session.command || "Session";
+  const thumbHeight = Math.round(panelWidth * 0.5);
+
+  return (
+    <div
+      style={{
+        borderBottom: `1px solid ${theme.subtleBorder}`,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <button
+        onClick={onFocus}
+        style={{
+          ...ui.btn,
+          display: "flex",
+          alignItems: "center",
+          gap: scale.tightGap,
+          padding: `${scale.controlY}px ${scale.tightGap}px`,
+          fontSize: scale.sm,
+          width: "100%",
+          textAlign: "left",
+          opacity: 1,
+        }}
+      >
+        <span
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label}
+        </span>
+        {session.state === "exited" && (
+          <mark
+            style={{
+              ...ui.badge,
+              backgroundColor: "rgba(255,100,100,0.3)",
+              fontSize: scale.xs,
+            }}
+          >
+            exited
+          </mark>
+        )}
+      </button>
+      <div
+        style={{
+          overflow: "hidden",
+          maxHeight: thumbHeight,
+          cursor: "pointer",
+        }}
+        onClick={onFocus}
+      >
+        <BlitTerminal
+          sessionId={session.id}
+          readOnly
+          showCursor={false}
+          style={{ width: "100%", height: thumbHeight }}
+          fontFamily={fontFamily}
+          fontSize={fontSize}
+          palette={palette}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SurfaceThumbnail({
+  surface,
+  connectionId,
+  theme,
+  scale,
+  panelWidth,
+  expanded,
+  onToggle,
+}: {
+  surface: BlitSurface;
+  connectionId: string;
+  theme: ReturnType<typeof themeFor>;
+  scale: UIScale;
+  panelWidth: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const thumbHeight = Math.round(panelWidth * 0.5);
+
+  return (
+    <div
+      style={{
+        borderBottom: `1px solid ${theme.subtleBorder}`,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <button
+        onClick={onToggle}
+        style={{
+          ...ui.btn,
+          display: "flex",
+          alignItems: "center",
+          gap: scale.tightGap,
+          padding: `${scale.controlY}px ${scale.tightGap}px`,
+          fontSize: scale.sm,
+          width: "100%",
+          textAlign: "left",
+          opacity: 1,
+          backgroundColor: expanded ? theme.selectedBg : "transparent",
+        }}
+      >
+        <span
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {surface.title || surface.appId || `Surface ${surface.surfaceId}`}
+        </span>
+        <span style={{ fontSize: scale.xs, color: theme.dimFg }}>
+          {surface.width}x{surface.height}
+        </span>
+      </button>
+      <div
+        style={{
+          overflow: "hidden",
+          maxHeight: expanded ? "none" : thumbHeight,
+          position: "relative",
+          cursor: expanded ? undefined : "pointer",
+        }}
+        onClick={expanded ? undefined : onToggle}
+      >
+        <BlitSurfaceView
+          connectionId={connectionId}
+          surfaceId={surface.surfaceId}
+          style={{
+            display: "block",
+            width: "100%",
+            height: expanded ? "auto" : undefined,
+            objectFit: "contain",
+          }}
+        />
+      </div>
     </div>
   );
 }

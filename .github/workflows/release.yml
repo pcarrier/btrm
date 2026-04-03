@@ -19,7 +19,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           repo="${GITHUB_REPOSITORY}"
-          state=$(gh api "repos/${repo}/git/refs/tags/${tag}" \
+          state=$(gh api "repos/${repo}/git/ref/tags/${tag}" \
             --jq '.object.sha' \
             | xargs -I{} gh api "repos/${repo}/git/tags/{}" \
               --jq '.verification.verified')

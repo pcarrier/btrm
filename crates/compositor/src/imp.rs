@@ -754,15 +754,16 @@ fn run_compositor(
 
     handle
         .insert_source(listening_socket, |client_stream, _, state| {
-            state
-                .display_handle
-                .insert_client(
-                    client_stream,
-                    Arc::new(ClientData {
-                        compositor_state: CompositorClientState::default(),
-                    }),
-                )
-                .ok();
+            eprintln!("[compositor] client connected");
+            match state.display_handle.insert_client(
+                client_stream,
+                Arc::new(ClientData {
+                    compositor_state: CompositorClientState::default(),
+                }),
+            ) {
+                Ok(_) => eprintln!("[compositor] client inserted"),
+                Err(e) => eprintln!("[compositor] insert_client error: {e}"),
+            }
         })
         .expect("failed to insert listening socket");
 
@@ -793,11 +794,15 @@ fn run_compositor(
     let display_source = Generic::new(display, Interest::READ, calloop::Mode::Level);
     handle
         .insert_source(display_source, |_, display, state| {
-            unsafe { display.get_mut().dispatch_clients(state).ok() };
+            eprintln!("[compositor] dispatch_clients");
+            if let Err(e) = unsafe { display.get_mut().dispatch_clients(state) } {
+                eprintln!("[compositor] dispatch_clients error: {e}");
+            }
             Ok(PostAction::Continue)
         })
         .expect("failed to insert display source");
 
+    eprintln!("[compositor] entering event loop");
     while !shutdown.load(Ordering::Relaxed) {
         while let Ok(cmd) = command_rx.try_recv() {
             match cmd {
@@ -809,8 +814,8 @@ fn run_compositor(
             }
         }
 
-        event_loop
-            .dispatch(Some(std::time::Duration::from_millis(16)), &mut compositor)
-            .ok();
+        if let Err(e) = event_loop.dispatch(Some(std::time::Duration::from_millis(16)), &mut compositor) {
+            eprintln!("[compositor] event loop error: {e}");
+        }
     }
 }

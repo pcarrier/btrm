@@ -259,6 +259,7 @@ struct CachedSurfaceInfo {
 struct BufferedSurfaceFrame {
     msg: Vec<u8>,
     is_keyframe: bool,
+    generation: u64,
 }
 struct SharedCompositor {
     handle: CompositorHandle,
@@ -266,6 +267,7 @@ struct SharedCompositor {
     surfaces: HashMap<u16, CachedSurfaceInfo>,
     last_frames: HashMap<u16, BufferedSurfaceFrame>,
     force_keyframe: bool,
+    next_frame_generation: u64,
     created_at: Instant,
 }
 
@@ -319,6 +321,7 @@ struct ClientState {
     scroll_offsets: HashMap<u16, usize>,
     scroll_caches: HashMap<u16, FrameState>,
     last_sent: HashMap<u16, FrameState>,
+    last_surface_generations: HashMap<u16, u64>,
     preview_next_send_at: HashMap<u16, Instant>,
     /// EWMA RTT estimate in milliseconds.
     rtt_ms: f32,
@@ -363,7 +366,7 @@ struct ClientState {
     goodput_window_bytes: usize,
     goodput_window_start: Instant,
     surface_next_send_at: Instant,
-    surface_needs_keyframe: bool,
+    surface_keyframes_needed: HashSet<u16>,
 }
 
 struct InFlightFrame {
@@ -992,6 +995,7 @@ impl Session {
                 surfaces: HashMap::new(),
                 last_frames: HashMap::new(),
                 force_keyframe: false,
+                next_frame_generation: 0,
                 created_at: Instant::now(),
             });
         }
@@ -1778,6 +1782,8 @@ async fn tick(state: &AppState) -> TickOutcome {
         }
     }
 
+    let mut surfaces_requiring_keyframe: HashSet<u16> = HashSet::new();
+    let mut destroyed_surfaces: HashSet<u16> = HashSet::new();
     if let Some(cs) = sess.compositor.as_mut() {
         // --- Drain encode results from worker threads (non-blocking) ---
         // Workers run H.264 encoding on their own OS threads; results arrive
@@ -1800,11 +1806,13 @@ async fn tick(state: &AppState) -> TickOutcome {
                         result.height as u16,
                         &result.nal_data,
                     );
+                    cs.next_frame_generation = cs.next_frame_generation.wrapping_add(1);
                     cs.last_frames.insert(
                         result.surface_id,
                         BufferedSurfaceFrame {
                             msg,
                             is_keyframe: result.is_keyframe,
+                            generation: cs.next_frame_generation,
                         },
                     );
                     did_work = true;
@@ -1845,12 +1853,14 @@ async fn tick(state: &AppState) -> TickOutcome {
                     );
                     cs.workers.remove(&surface_id);
                     cs.last_frames.remove(&surface_id);
+                    surfaces_requiring_keyframe.insert(surface_id);
                 }
                 CompositorEvent::SurfaceDestroyed { surface_id } => {
                     cs.workers.remove(&surface_id);
                     cs.surfaces.remove(&surface_id);
                     cs.last_frames.remove(&surface_id);
                     broadcast.push(msg_surface_destroyed(0, surface_id));
+                    destroyed_surfaces.insert(surface_id);
                 }
                 CompositorEvent::SurfaceCommit {
                     surface_id,
@@ -1915,6 +1925,7 @@ async fn tick(state: &AppState) -> TickOutcome {
                     cs.workers.remove(&surface_id);
                     cs.last_frames.remove(&surface_id);
                     broadcast.push(msg_surface_resized(0, surface_id, width, height));
+                    surfaces_requiring_keyframe.insert(surface_id);
                 }
                 CompositorEvent::ClipboardContent {
                     surface_id,
@@ -1928,6 +1939,18 @@ async fn tick(state: &AppState) -> TickOutcome {
         cs.force_keyframe = false;
         for msg in &broadcast {
             sess.send_to_all(msg);
+        }
+    }
+    if !surfaces_requiring_keyframe.is_empty() || !destroyed_surfaces.is_empty() {
+        for client in sess.clients.values_mut() {
+            for surface_id in &surfaces_requiring_keyframe {
+                client.surface_keyframes_needed.insert(*surface_id);
+                client.last_surface_generations.remove(surface_id);
+            }
+            for surface_id in &destroyed_surfaces {
+                client.surface_keyframes_needed.remove(surface_id);
+                client.last_surface_generations.remove(surface_id);
+            }
         }
     }
 
@@ -1963,29 +1986,39 @@ async fn tick(state: &AppState) -> TickOutcome {
                 }
                 continue;
             }
-            let needs_keyframe = client.surface_needs_keyframe;
             for &sid in &surface_ids {
-                let cs = sess.compositor.as_ref().unwrap();
-                let Some(frame) = cs.last_frames.get(&sid) else {
-                    continue;
+                let (is_keyframe, generation, msg) = {
+                    let cs = sess.compositor.as_ref().unwrap();
+                    let Some(frame) = cs.last_frames.get(&sid) else {
+                        continue;
+                    };
+                    (frame.is_keyframe, frame.generation, frame.msg.clone())
                 };
-                if needs_keyframe && !frame.is_keyframe {
-                    continue;
-                }
-                let msg = frame.msg.clone();
-                let bytes = msg.len();
-                let Some(client) = sess.clients.get(&cid) else {
+                let Some(client) = sess.clients.get_mut(&cid) else {
                     break;
                 };
                 if !window_open(client) {
                     break;
                 }
+                let needs_keyframe = client.surface_keyframes_needed.contains(&sid);
+                if needs_keyframe && !is_keyframe {
+                    continue;
+                }
+                let last_generation = client
+                    .last_surface_generations
+                    .get(&sid)
+                    .copied()
+                    .unwrap_or(0);
+                if !needs_keyframe && generation <= last_generation {
+                    continue;
+                }
+                let bytes = msg.len();
                 if client.tx.try_send(msg).is_ok() {
-                    let client = sess.clients.get_mut(&cid).unwrap();
                     record_send(client, bytes, now, true);
                     client.frames_sent = client.frames_sent.wrapping_add(1);
-                    if needs_keyframe {
-                        client.surface_needs_keyframe = false;
+                    client.last_surface_generations.insert(sid, generation);
+                    if is_keyframe {
+                        client.surface_keyframes_needed.remove(&sid);
                     }
                     did_work = true;
                 }
@@ -2034,6 +2067,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 scroll_offsets: HashMap::new(),
                 scroll_caches: HashMap::new(),
                 last_sent: HashMap::new(),
+                last_surface_generations: HashMap::new(),
                 preview_next_send_at: HashMap::new(),
                 rtt_ms: 50.0,
                 min_rtt_ms: 0.0,
@@ -2065,7 +2099,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 goodput_window_bytes: 0,
                 goodput_window_start: Instant::now(),
                 surface_next_send_at: Instant::now(),
-                surface_needs_keyframe: true,
+                surface_keyframes_needed: HashSet::new(),
             },
         );
         // Collect surfaces that lack a cached keyframe so we can request a
@@ -2073,20 +2107,26 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
         // surfaces (e.g. a browser sitting still) never send new compositor
         // commits, so force_keyframe alone is not enough – we need to pull a
         // snapshot now so the new client gets something to display.
-        let surfaces_needing_capture: Vec<u16> = if let Some(cs) = sess.compositor.as_ref() {
-            cs.surfaces
-                .keys()
-                .filter(|sid| {
-                    cs.last_frames
-                        .get(*sid)
-                        .map(|f| !f.is_keyframe)
-                        .unwrap_or(true)
-                })
-                .copied()
-                .collect()
-        } else {
-            vec![]
-        };
+        let (surface_keyframes_needed, surfaces_needing_capture): (HashSet<u16>, Vec<u16>) =
+            if let Some(cs) = sess.compositor.as_ref() {
+                let surface_ids: Vec<u16> = cs.surfaces.keys().copied().collect();
+                let need_capture = surface_ids
+                    .iter()
+                    .copied()
+                    .filter(|sid| {
+                        cs.last_frames
+                            .get(sid)
+                            .map(|f| !f.is_keyframe)
+                            .unwrap_or(true)
+                    })
+                    .collect();
+                (surface_ids.into_iter().collect(), need_capture)
+            } else {
+                (HashSet::new(), vec![])
+            };
+        if let Some(client) = sess.clients.get_mut(&client_id) {
+            client.surface_keyframes_needed = surface_keyframes_needed;
+        }
         if let Some(cs) = sess.compositor.as_mut() {
             cs.force_keyframe = true;
         }
@@ -3193,6 +3233,7 @@ mod tests {
             scroll_offsets: HashMap::new(),
             scroll_caches: HashMap::new(),
             last_sent: HashMap::new(),
+            last_surface_generations: HashMap::new(),
             preview_next_send_at: HashMap::new(),
             rtt_ms: 50.0,
             min_rtt_ms: 50.0,
@@ -3220,7 +3261,7 @@ mod tests {
             goodput_window_bytes: 0,
             goodput_window_start: Instant::now(),
             surface_next_send_at: Instant::now(),
-            surface_needs_keyframe: true,
+            surface_keyframes_needed: HashSet::new(),
         };
         (client, rx)
     }
@@ -3246,6 +3287,37 @@ mod tests {
         let mut frame = FrameState::new(2, 8);
         frame.write_text(0, 0, text, blit_remote::CellStyle::default());
         frame
+    }
+
+    fn test_compositor_handle() -> CompositorHandle {
+        let (_event_tx, event_rx) = std::sync::mpsc::channel();
+        let (command_tx, _command_rx) = std::sync::mpsc::channel();
+        CompositorHandle {
+            event_rx,
+            command_tx,
+            socket_name: "test-wayland".into(),
+            thread: std::thread::spawn(|| {}),
+            shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    fn test_state() -> AppState {
+        Arc::new(ServerState {
+            config: Config {
+                shell: "/bin/sh".into(),
+                shell_flags: "li".into(),
+                scrollback: 1_000,
+                ipc_path: "/tmp/blit-test.sock".into(),
+                surface_h264_encoder: SurfaceH264EncoderPreference::Auto,
+                vaapi_device: "/dev/null".into(),
+                #[cfg(unix)]
+                fd_channel: None,
+                verbose: false,
+            },
+            session: Mutex::new(Session::new()),
+            pty_fds: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            notify: Arc::new(Notify::new()),
+        })
     }
 
     #[test]
@@ -3351,6 +3423,70 @@ mod tests {
             request_surface_capture_with_timeout(command_tx, 7, Duration::from_millis(50)).await;
 
         assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn surface_frames_are_sent_once_per_generation() {
+        let state = test_state();
+        let (client, mut rx) = test_client_with_capacity(OUTBOX_CAPACITY);
+        {
+            let mut sess = state.session.lock().await;
+            sess.clients.insert(1, client);
+            sess.compositor = Some(SharedCompositor {
+                handle: test_compositor_handle(),
+                workers: HashMap::new(),
+                surfaces: HashMap::new(),
+                last_frames: HashMap::from([(
+                    7,
+                    BufferedSurfaceFrame {
+                        msg: vec![1, 2, 3],
+                        is_keyframe: true,
+                        generation: 1,
+                    },
+                )]),
+                force_keyframe: false,
+                next_frame_generation: 1,
+                created_at: Instant::now(),
+            });
+        }
+
+        let first = tick(&state).await;
+        assert!(first.did_work);
+        assert_eq!(rx.try_recv().unwrap(), vec![1, 2, 3]);
+
+        {
+            let mut sess = state.session.lock().await;
+            let client = sess.clients.get_mut(&1).unwrap();
+            reset_inflight(client);
+            client.surface_next_send_at = Instant::now();
+        }
+
+        let second = tick(&state).await;
+        assert!(!second.did_work);
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+
+        {
+            let mut sess = state.session.lock().await;
+            let client = sess.clients.get_mut(&1).unwrap();
+            reset_inflight(client);
+            client.surface_next_send_at = Instant::now();
+            let compositor = sess.compositor.as_mut().unwrap();
+            compositor.last_frames.insert(
+                7,
+                BufferedSurfaceFrame {
+                    msg: vec![4, 5, 6],
+                    is_keyframe: false,
+                    generation: 2,
+                },
+            );
+        }
+
+        let third = tick(&state).await;
+        assert!(third.did_work);
+        assert_eq!(rx.try_recv().unwrap(), vec![4, 5, 6]);
     }
 
     // ── frame_window ──

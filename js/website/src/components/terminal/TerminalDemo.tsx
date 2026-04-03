@@ -256,6 +256,73 @@ function ToolbarMenu(props: {
 }
 
 // ---------------------------------------------------------------------------
+// DisconnectedOverlay: backdrop-blurred overlay with restart command
+// ---------------------------------------------------------------------------
+
+function DisconnectedOverlay(props: { passphrase: string }) {
+  const [copied, setCopied] = createSignal(false);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const command = () => `blit share --passphrase ${props.passphrase}`;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(command());
+    setCopied(true);
+    clearTimeout(timeout);
+    timeout = setTimeout(() => setCopied(false), 2000);
+  };
+
+  onCleanup(() => clearTimeout(timeout));
+
+  return (
+    <div
+      class="absolute inset-0 z-10 flex items-center justify-center backdrop-blur-sm"
+      style={{
+        "background-color": "color-mix(in srgb, var(--bg) 50%, transparent)",
+      }}
+    >
+      <div class="flex flex-col items-center gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-lg">
+        <div class="flex flex-col items-center gap-1">
+          <span class="font-mono text-sm font-medium text-[var(--fg)]">
+            Session disconnected
+          </span>
+          <span class="font-mono text-xs text-[var(--dim)]">
+            Restart the share session to reconnect
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={handleCopy}
+          class="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2 font-mono text-xs text-[var(--fg)] cursor-pointer transition-colors hover:border-[var(--dim)]"
+        >
+          <svg
+            class="shrink-0"
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            {copied() ? (
+              <path d="M4 8.5l2.5 2.5L12 5" />
+            ) : (
+              <>
+                <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" />
+              </>
+            )}
+          </svg>
+          {copied() ? "Copied!" : "Copy restart command"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // TabShell: manages sessions, tab bar, terminal rendering
 // ---------------------------------------------------------------------------
 
@@ -393,7 +460,22 @@ function TabShell(props: {
     onCleanup(() => window.removeEventListener("keydown", handler, true));
   });
 
-  // Connection status text
+  // Connection status
+  const isDisconnected = createMemo(
+    () => state().connections[0]?.status === "disconnected",
+  );
+
+  // Reconnect on window focus when disconnected
+  onMount(() => {
+    const handler = () => {
+      if (document.visibilityState === "visible" && isDisconnected()) {
+        workspace.reconnectConnection(CONNECTION_ID);
+      }
+    };
+    document.addEventListener("visibilitychange", handler);
+    onCleanup(() => document.removeEventListener("visibilitychange", handler));
+  });
+
   const statusText = createMemo(() => {
     const conn = state().connections[0];
     if (!conn) return "Connecting...";
@@ -405,7 +487,7 @@ function TabShell(props: {
     if (conn.status === "connecting")
       return "Connecting \u2014 waiting for blit share...";
     if (conn.status === "error") return `Error: ${conn.error ?? "unknown"}`;
-    if (conn.status === "disconnected") return "Disconnected";
+    if (conn.status === "disconnected") return null; // handled by DisconnectedOverlay
     return "Connecting...";
   });
 
@@ -434,14 +516,20 @@ function TabShell(props: {
               focusedSessionId={focusedId()}
               onSelect={handleSelectTab}
               onClose={handleCloseTab}
+              disabled={isDisconnected()}
             />
           </div>
           {/* New tab button */}
           <button
             type="button"
             onClick={handleNewTab}
-            class="flex w-9 shrink-0 cursor-pointer items-center justify-center border-none bg-transparent text-[var(--dim)] transition-colors hover:text-[var(--fg)]"
+            class={`flex w-9 shrink-0 items-center justify-center border-none bg-transparent text-[var(--dim)] transition-colors ${
+              isDisconnected()
+                ? "opacity-50 pointer-events-none"
+                : "cursor-pointer hover:text-[var(--fg)]"
+            }`}
             title="New tab"
+            disabled={isDisconnected()}
           >
             <svg
               class="block"
@@ -516,7 +604,10 @@ function TabShell(props: {
             style={{ width: "100%", height: "100%" }}
           />
         </Show>
-        <Show when={focusedExited()}>
+        <Show when={isDisconnected()}>
+          <DisconnectedOverlay passphrase={props.passphrase} />
+        </Show>
+        <Show when={focusedExited() && !isDisconnected()}>
           <div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 z-[2] px-4 py-2 bg-[var(--bg)]/90 backdrop-blur-sm border border-[var(--border)] rounded-xl font-mono text-[13px] text-[var(--dim)] whitespace-nowrap">
             <span>Exited</span>
             <span

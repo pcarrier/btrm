@@ -52,7 +52,7 @@ function resolvePassphrase(): PassphraseResult {
   }
   // Not a valid ciphertext — treat as a raw passphrase, encrypt and replace URL
   const encrypted = encryptPassphrase(raw);
-  history.replaceState(null, "", `/s#${encodeURIComponent(encrypted)}`);
+  history.replaceState(null, "", `${location.pathname}#${encodeURIComponent(encrypted)}`);
   return { ok: true, passphrase: raw };
 }
 

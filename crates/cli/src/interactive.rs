@@ -698,20 +698,20 @@ pub async fn run_browser(
 
     let mut remote_host: Option<String> = None;
 
-    let connector = if let Some(addr) = tcp {
-        remote_host = Some(addr.split(':').next().unwrap_or(addr).to_string());
-        BrowserConnector::Tcp(addr.clone())
-    } else if let Some(_host) = ssh {
+    let connector = if let Some(_host) = ssh {
         #[cfg(unix)]
         {
             remote_host = Some(_host.clone());
-            setup_ssh_forward(std::slice::from_ref(_host)).await
+            setup_ssh_forward(std::slice::from_ref(_host), socket.as_deref()).await
         }
         #[cfg(not(unix))]
         {
             eprintln!("blit: --ssh is not supported on this platform");
             std::process::exit(1);
         }
+    } else if let Some(addr) = tcp {
+        remote_host = Some(addr.split(':').next().unwrap_or(addr).to_string());
+        BrowserConnector::Tcp(addr.clone())
     } else if let Some(path) = socket {
         BrowserConnector::Ipc(path.clone())
     } else {
@@ -811,13 +811,56 @@ pub async fn run_browser(
 }
 
 #[cfg(unix)]
-async fn setup_ssh_forward(ssh_args: &[String]) -> BrowserConnector {
+async fn setup_ssh_forward(ssh_args: &[String], remote_socket: Option<&str>) -> BrowserConnector {
     if ssh_args.is_empty() {
         eprintln!("blit: ssh requires a host argument");
         std::process::exit(1);
     }
 
-    let resolve = tokio::process::Command::new("ssh")
+    let remote_sock = if let Some(path) = remote_socket {
+        path.to_owned()
+    } else {
+        let resolve_script = format!("sh -c '{}; echo \"$S\"'", crate::transport::SSH_SOCK_SEARCH);
+        let resolve = tokio::process::Command::new("ssh")
+            .arg("-T")
+            .arg("-o")
+            .arg("ControlMaster=auto")
+            .arg("-o")
+            .arg("ControlPath=/tmp/blit-ssh-%r@%h:%p")
+            .arg("-o")
+            .arg("ControlPersist=300")
+            .args(ssh_args)
+            .arg("--")
+            .arg(resolve_script)
+            .output()
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("blit: ssh: {e}");
+                std::process::exit(1);
+            });
+
+        if !resolve.status.success() {
+            let stderr = String::from_utf8_lossy(&resolve.stderr);
+            eprintln!(
+                "blit: ssh failed to resolve remote socket path: {}",
+                stderr.trim()
+            );
+            std::process::exit(1);
+        }
+
+        let path = String::from_utf8_lossy(&resolve.stdout).trim().to_owned();
+        if path.is_empty() {
+            eprintln!("blit: could not determine remote blit socket path");
+            std::process::exit(1);
+        }
+        path
+    };
+
+    let autostart_script = format!(
+        "sh -c 'S='\"'\"'{remote_sock}'\"'\"'; {}; echo ok'",
+        crate::transport::SSH_AUTOSTART
+    );
+    let autostart = tokio::process::Command::new("ssh")
         .arg("-T")
         .arg("-o")
         .arg("ControlMaster=auto")
@@ -827,7 +870,7 @@ async fn setup_ssh_forward(ssh_args: &[String]) -> BrowserConnector {
         .arg("ControlPersist=300")
         .args(ssh_args)
         .arg("--")
-        .arg(r#"sh -c 'if [ -n "$BLIT_SOCK" ]; then echo "$BLIT_SOCK"; elif [ -n "$TMPDIR" ] && [ -S "$TMPDIR/blit.sock" ]; then echo "$TMPDIR/blit.sock"; elif [ -S "/tmp/blit-$(id -un).sock" ]; then echo "/tmp/blit-$(id -un).sock"; elif [ -S "/run/blit/$(id -un).sock" ]; then echo "/run/blit/$(id -un).sock"; elif [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/blit.sock" ]; then echo "$XDG_RUNTIME_DIR/blit.sock"; else echo /tmp/blit.sock; fi'"#)
+        .arg(autostart_script)
         .output()
         .await
         .unwrap_or_else(|e| {
@@ -835,18 +878,9 @@ async fn setup_ssh_forward(ssh_args: &[String]) -> BrowserConnector {
             std::process::exit(1);
         });
 
-    if !resolve.status.success() {
-        let stderr = String::from_utf8_lossy(&resolve.stderr);
-        eprintln!(
-            "blit: ssh failed to resolve remote socket path: {}",
-            stderr.trim()
-        );
-        std::process::exit(1);
-    }
-
-    let remote_sock = String::from_utf8_lossy(&resolve.stdout).trim().to_owned();
-    if remote_sock.is_empty() {
-        eprintln!("blit: could not determine remote blit socket path");
+    if !autostart.status.success() {
+        let stderr = String::from_utf8_lossy(&autostart.stderr);
+        eprintln!("blit: ssh autostart failed: {}", stderr.trim());
         std::process::exit(1);
     }
 

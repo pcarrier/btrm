@@ -117,9 +117,28 @@ blit --ssh dev-server start bash
 blit --passphrase mypassphrase list
 ```
 
-`--ssh` tunnels the blit protocol over SSH: it spawns `ssh -T HOST` with an inline script that connects to the remote blit Unix socket via `nc -U` (falling back to `socat`). SSH connection multiplexing is enabled (`ControlMaster=auto`, `ControlPersist=300s`) so subsequent commands reuse the same SSH connection. The remote host must have a running blit daemon.
+`--ssh` tunnels the blit protocol over SSH: it spawns `ssh -T HOST` with an inline script that connects to the remote blit Unix socket via `nc -U` (falling back to `socat`). SSH connection multiplexing is enabled (`ControlMaster=auto`, `ControlPersist=300s`) so subsequent commands reuse the same SSH connection. If no blit daemon is running on the remote host, `--ssh` will attempt to autostart one by running `blit server` (or `blit-server`) in the background.
+
+Combine `--ssh` with `--socket` to connect to a specific socket path on the remote host instead of the default search order:
+
+```bash
+blit --ssh dev-server --socket /tmp/custom.sock list
+```
 
 `--passphrase` connects via WebRTC using a passphrase for peer-to-peer session sharing. Both sides must use the same passphrase and signaling hub (set via `--hub` or `BLIT_HUB`).
+
+## Remote installation
+
+`blit install --ssh HOST` installs blit on a remote host. It detects the remote OS via `uname`, then runs the appropriate installer interactively over SSH:
+
+- **Linux / macOS** — `curl -sf https://install.blit.sh | sh` (falls back to `wget`)
+- **Windows** — `irm https://install.blit.sh/install.ps1 | iex` via PowerShell
+
+The installer's stdin/stdout are connected to your terminal, so password prompts and other interactions work normally. Only `--ssh` is supported — other transports (`--tcp`, `--socket`, `--passphrase`) will fail with an error.
+
+```bash
+blit install --ssh dev-server
+```
 
 ## Output conventions
 

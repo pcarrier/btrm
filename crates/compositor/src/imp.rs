@@ -32,7 +32,7 @@ use smithay::utils::{Serial, Transform, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     self, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
-    with_states,
+    with_states, with_surface_tree_downward, TraversalAction,
 };
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::selection::data_device::{
@@ -452,6 +452,25 @@ impl CompositorHandler for Compositor {
                 });
             }
         }
+
+        let time = elapsed_ms();
+        with_surface_tree_downward(
+            surface,
+            (),
+            |_, _, &()| TraversalAction::DoChildren(()),
+            |_, states, &()| {
+                for callback in states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .frame_callbacks
+                    .drain(..)
+                {
+                    callback.done(time);
+                }
+            },
+            |_, _, &()| true,
+        );
     }
 }
 

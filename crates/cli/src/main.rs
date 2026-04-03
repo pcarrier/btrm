@@ -234,6 +234,9 @@ enum Command {
     /// Print the full CLI reference (usage guide for scripts and LLM agents)
     Learn,
 
+    /// Install blit on a remote host via SSH
+    Install,
+
     /// Upgrade blit to the latest version
     Upgrade,
 }
@@ -290,6 +293,12 @@ async fn main() {
                 verbose: false,
             };
             blit_server::run(config).await;
+        }
+        Command::Install => {
+            if let Err(e) = cmd_install(&cli.connect).await {
+                eprintln!("blit: {e}");
+                std::process::exit(1);
+            }
         }
         Command::Upgrade => {
             if let Err(e) = cmd_upgrade().await {
@@ -475,6 +484,78 @@ async fn main() {
             print!("{}", include_str!("learn.md"));
         }
     }
+}
+
+async fn cmd_install(opts: &ConnectOpts) -> Result<(), Box<dyn std::error::Error>> {
+    let host = match &opts.ssh {
+        Some(h) => h,
+        None => {
+            if opts.tcp.is_some() {
+                return Err("install requires --ssh (got --tcp)".into());
+            }
+            if opts.passphrase.is_some() {
+                return Err("install requires --ssh (got --passphrase)".into());
+            }
+            if opts.socket.is_some() {
+                return Err("install requires --ssh".into());
+            }
+            return Err("install requires --ssh <HOST>".into());
+        }
+    };
+
+    let ssh_base = |host: &str| {
+        let mut cmd = std::process::Command::new("ssh");
+        cmd.arg("-T")
+            .arg("-o")
+            .arg("ControlMaster=auto")
+            .arg("-o")
+            .arg("ControlPath=/tmp/blit-ssh-%r@%h:%p")
+            .arg("-o")
+            .arg("ControlPersist=300")
+            .arg(host);
+        cmd
+    };
+
+    let detect = ssh_base(host)
+        .arg("--")
+        .arg("uname -s 2>/dev/null || echo WINDOWS")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .output()?;
+
+    if !detect.status.success() {
+        return Err("ssh failed to detect remote OS".into());
+    }
+
+    let os = String::from_utf8_lossy(&detect.stdout)
+        .trim()
+        .to_uppercase();
+
+    let install_cmd = if os.contains("WINDOWS")
+        || os.contains("MINGW")
+        || os.contains("MSYS")
+        || os.contains("CYGWIN")
+    {
+        r#"powershell -ExecutionPolicy Bypass -Command "irm https://install.blit.sh/install.ps1 | iex""#.to_string()
+    } else {
+        r#"sh -c 'if command -v curl >/dev/null 2>&1; then curl -sf https://install.blit.sh | sh; elif command -v wget >/dev/null 2>&1; then wget -qO- https://install.blit.sh | sh; else echo "error: neither curl nor wget found" >&2; exit 1; fi'"#.to_string()
+    };
+
+    eprintln!("installing blit on {host} ({os})...");
+
+    let status = ssh_base(host)
+        .arg("--")
+        .arg(&install_cmd)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("remote install exited with {status}").into());
+    }
+
+    Ok(())
 }
 
 async fn cmd_upgrade() -> Result<(), Box<dyn std::error::Error>> {

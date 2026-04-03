@@ -13,8 +13,6 @@ import {
   decryptPassphrase,
 } from "./passphrase-crypto";
 
-const DEFAULT_HUB = "wss://hub.blit.sh";
-
 let _cachedPassphrase: string | null | undefined;
 
 function initPassphrase(): string | null {
@@ -76,11 +74,7 @@ function ConnectedApp({
     if (hubInjected) {
       return createShareTransport(hubInjected, passphrase);
     }
-    const certHash = wtCertHash();
-    if (certHash) {
-      return createGatewayTransport(passphrase);
-    }
-    return createShareTransport(DEFAULT_HUB, passphrase);
+    return createGatewayTransport(passphrase);
   });
 
   return (

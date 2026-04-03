@@ -52,11 +52,27 @@ processes:
         condition: process_healthy
     availability:
       restart: always
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 3265
+        path: /
+      initial_delay_seconds: 5
+      period_seconds: 2
+      failure_threshold: 300
 
   website:
-    command: cd js && pnpm install --frozen-lockfile && cd website && pnpm exec astro dev
+    command: cd js && pnpm install --frozen-lockfile && cd website && pnpm exec astro dev --host
     depends_on:
       browser-wasm:
         condition: process_healthy
     availability:
       restart: always
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 4321
+        path: /
+      initial_delay_seconds: 5
+      period_seconds: 2
+      failure_threshold: 300

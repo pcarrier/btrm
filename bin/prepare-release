@@ -6,7 +6,7 @@ cd "$script_dir/.."
 
 usage() {
     cat <<'EOF'
-Usage: ./bin/release <version>
+Usage: ./bin/prepare-release <version>
 
 Bumps the repo release version, prints the changes since the latest v* tag,
 runs the server verification suite, and commits the result as:
@@ -16,7 +16,7 @@ EOF
 }
 
 die() {
-    echo "release: $*" >&2
+    echo "prepare-release: $*" >&2
     exit 1
 }
 

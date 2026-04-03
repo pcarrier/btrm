@@ -212,6 +212,7 @@ pub fn spawn_pty(
     dir: Option<&str>,
     scrollback: usize,
     state: AppState,
+    wayland_display: Option<&str>,
 ) -> Option<crate::Pty> {
     let mut master: libc::c_int = 0;
     let mut slave: libc::c_int = 0;
@@ -278,6 +279,12 @@ pub fn spawn_pty(
                 }
             }
         }
+        if let Some(wd) = wayland_display {
+            unsafe {
+                std::env::set_var("WAYLAND_DISPLAY", wd);
+                std::env::remove_var("DISPLAY");
+            }
+        }
         if let Some(command) = command {
             let shell_c = CString::new(shell).unwrap();
             let command_c = CString::new(command).unwrap();
@@ -330,10 +337,10 @@ pub fn spawn_pty(
         libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK);
     }
 
-    state.2.write().unwrap().insert(id, master);
+    state.pty_fds.write().unwrap().insert(id, master);
     let (byte_tx, byte_rx) = mpsc::channel(PTY_CHANNEL_CAPACITY);
     let reader_handle = std::thread::spawn({
-        let notify = state.3.clone();
+        let notify = state.notify.clone();
         move || pty_reader(master, byte_tx, notify)
     });
     let handle = PtyHandle {
@@ -360,6 +367,7 @@ pub fn spawn_pty(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn respawn_child(
     shell: &str,
     shell_flags: &str,
@@ -368,6 +376,7 @@ pub fn respawn_child(
     pty_id: u16,
     command: Option<&str>,
     state: AppState,
+    wayland_display: Option<&str>,
 ) -> Option<(
     PtyHandle,
     std::thread::JoinHandle<()>,
@@ -427,6 +436,12 @@ pub fn respawn_child(
                 }
             }
         }
+        if let Some(wd) = wayland_display {
+            unsafe {
+                std::env::set_var("WAYLAND_DISPLAY", wd);
+                std::env::remove_var("DISPLAY");
+            }
+        }
         if let Some(cmd) = command {
             let shell_c = CString::new(shell).unwrap();
             let flag = CString::new(if shell_flags.is_empty() {
@@ -471,10 +486,10 @@ pub fn respawn_child(
         libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK);
     }
 
-    state.2.write().unwrap().insert(pty_id, master);
+    state.pty_fds.write().unwrap().insert(pty_id, master);
     let (byte_tx, byte_rx) = mpsc::channel(PTY_CHANNEL_CAPACITY);
     let reader_handle = std::thread::spawn({
-        let notify = state.3.clone();
+        let notify = state.notify.clone();
         move || pty_reader(master, byte_tx, notify)
     });
     let handle = PtyHandle {

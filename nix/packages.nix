@@ -1,16 +1,53 @@
-{ inputs, ... }: {
-  perSystem = { system, ... }:
+{ inputs, ... }:
+{
+  perSystem =
+    { system, ... }:
     let
       common = import ./common.nix { inherit inputs system; };
-      inherit (common) pkgs version cargoLockConfig rustToolchain rustPlatform;
+      inherit (common)
+        pkgs
+        version
+        cargoLockConfig
+        rustToolchain
+        rustPlatform
+        ;
+      serverVaapiEnabled = pkgs.stdenv.isLinux;
+      bindgenClangArgs = pkgs.lib.optionalString pkgs.stdenv.isLinux "-isystem ${pkgs.lib.getDev pkgs.stdenv.cc.libc}/include";
+      blitServerCargoBuildFlags = [
+        "-p"
+        "blit-server"
+      ]
+      ++ pkgs.lib.optionals serverVaapiEnabled [
+        "--features"
+        "vaapi"
+      ];
+      blitServerNativeBuildInputs = [
+        pkgs.pkg-config
+      ]
+      ++ pkgs.lib.optionals serverVaapiEnabled [ pkgs.llvmPackages.libclang ];
+      blitServerBuildInputs = [
+        pkgs.libxkbcommon
+        pkgs.pixman
+      ]
+      ++ pkgs.lib.optionals serverVaapiEnabled [
+        pkgs.ffmpeg
+        pkgs.libva
+      ];
 
       browserWasm = rustPlatform.buildRustPackage {
         pname = "blit-browser";
         inherit version;
         src = ../.;
-        cargoBuildFlags = [ "-p" "blit-browser" ];
+        cargoBuildFlags = [
+          "-p"
+          "blit-browser"
+        ];
         cargoLock = cargoLockConfig;
-        nativeBuildInputs = [ pkgs.wasm-pack pkgs.wasm-bindgen-cli pkgs.binaryen ];
+        nativeBuildInputs = [
+          pkgs.wasm-pack
+          pkgs.wasm-bindgen-cli
+          pkgs.binaryen
+        ];
         buildPhase = ''
           cd crates/browser
           HOME=$TMPDIR wasm-pack build --target web --release --out-dir $out
@@ -30,8 +67,16 @@
         pname = "blit-server";
         inherit version;
         src = ../.;
-        cargoBuildFlags = [ "-p" "blit-server" ];
+        cargoBuildFlags = blitServerCargoBuildFlags;
         cargoLock = cargoLockConfig;
+        nativeBuildInputs = blitServerNativeBuildInputs;
+        buildInputs = blitServerBuildInputs;
+        env = pkgs.lib.optionalAttrs serverVaapiEnabled {
+          # buildRustPackage only forwards custom environment variables from the
+          # nested `env` attr; top-level attrs are ignored.
+          BINDGEN_EXTRA_CLANG_ARGS = bindgenClangArgs;
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+        };
         postInstall = installManPages;
         doCheck = false;
       };
@@ -40,8 +85,16 @@
         pname = "blit-cli";
         inherit version;
         src = ../.;
-        cargoBuildFlags = [ "-p" "blit-cli" ];
+        cargoBuildFlags = [
+          "-p"
+          "blit-cli"
+        ];
         cargoLock = cargoLockConfig;
+        nativeBuildInputs = [ pkgs.pkg-config ];
+        buildInputs = [
+          pkgs.libxkbcommon
+          pkgs.pixman
+        ];
         preBuild = copyWebAppDist;
         postInstall = installManPages;
         doCheck = false;
@@ -52,7 +105,10 @@
         pname = "blit-gateway";
         inherit version;
         src = ../.;
-        cargoBuildFlags = [ "-p" "blit-gateway" ];
+        cargoBuildFlags = [
+          "-p"
+          "blit-gateway"
+        ];
         cargoLock = cargoLockConfig;
         preBuild = copyWebAppDist;
         postInstall = installManPages;
@@ -64,54 +120,79 @@
         rustc = rustToolchain;
       };
 
-      mkStaticBin = { pname, cargoPkg, extraArgs ? {} }: rustPlatformStatic.buildRustPackage ({
-        inherit pname version;
-        src = ../.;
-        cargoBuildFlags = [ "-p" cargoPkg ];
-        cargoLock = cargoLockConfig;
-        doCheck = false;
-      } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-        postUnpack = "export NIX_CFLAGS_LINK=''";
-        postFixup = ''
-          for bin in $out/bin/*; do
-            if ! file "$bin" | grep -qE "static(ally|-pie) linked"; then
-              echo "FATAL: $bin is not statically linked:"
-              file "$bin"
-              exit 1
-            fi
-          done
-        '';
-      } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-        postFixup = ''
-          for bin in $out/bin/*; do
-            for lib in $(otool -L "$bin" | tail -n +2 | awk '/\/nix\/store\//{print $1}'); do
-              base=$(basename "$lib")
-              case "$base" in
-                libiconv.*|libiconv-*) sys="/usr/lib/libiconv.2.dylib" ;;
-                libz.*|libz-*) sys="/usr/lib/libz.1.dylib" ;;
-                libc++.*) sys="/usr/lib/libc++.1.dylib" ;;
-                libc++abi.*) sys="/usr/lib/libc++abi.dylib" ;;
-                libresolv.*) sys="/usr/lib/libresolv.9.dylib" ;;
-                libSystem.*) sys="/usr/lib/libSystem.B.dylib" ;;
-                *) echo "FATAL: unknown nix-store dylib: $lib"; exit 1 ;;
-              esac
-              echo "rewriting $lib -> $sys"
-              install_name_tool -change "$lib" "$sys" "$bin"
-            done
-          done
-        '';
-      } // extraArgs);
+      mkStaticBin =
+        {
+          pname,
+          cargoPkg,
+          extraArgs ? { },
+        }:
+        rustPlatformStatic.buildRustPackage (
+          {
+            inherit pname version;
+            src = ../.;
+            cargoBuildFlags = [
+              "-p"
+              cargoPkg
+            ];
+            cargoLock = cargoLockConfig;
+            doCheck = false;
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            postUnpack = "export NIX_CFLAGS_LINK=''";
+            postFixup = ''
+              for bin in $out/bin/*; do
+                if ! file "$bin" | grep -qE "static(ally|-pie) linked"; then
+                  echo "FATAL: $bin is not statically linked:"
+                  file "$bin"
+                  exit 1
+                fi
+              done
+            '';
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            postFixup = ''
+              for bin in $out/bin/*; do
+                for lib in $(otool -L "$bin" | tail -n +2 | awk '/\/nix\/store\//{print $1}'); do
+                  base=$(basename "$lib")
+                  case "$base" in
+                    libiconv.*|libiconv-*) sys="/usr/lib/libiconv.2.dylib" ;;
+                    libz.*|libz-*) sys="/usr/lib/libz.1.dylib" ;;
+                    libc++.*) sys="/usr/lib/libc++.1.dylib" ;;
+                    libc++abi.*) sys="/usr/lib/libc++abi.dylib" ;;
+                    libresolv.*) sys="/usr/lib/libresolv.9.dylib" ;;
+                    libSystem.*) sys="/usr/lib/libSystem.B.dylib" ;;
+                    *) echo "FATAL: unknown nix-store dylib: $lib"; exit 1 ;;
+                  esac
+                  echo "rewriting $lib -> $sys"
+                  install_name_tool -change "$lib" "$sys" "$bin"
+                done
+              done
+            '';
+          }
+          // extraArgs
+        );
 
       blit-server-static = mkStaticBin {
         pname = "blit-server";
         cargoPkg = "blit-server";
+        extraArgs = {
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [
+            pkgs.pkgsStatic.libxkbcommon
+            pkgs.pkgsStatic.pixman
+          ];
+          RUSTFLAGS = "-C relocation-model=static";
+        };
       };
 
       blit-webrtc-forwarder = rustPlatform.buildRustPackage {
         pname = "blit-webrtc-forwarder";
         inherit version;
         src = ../.;
-        cargoBuildFlags = [ "-p" "blit-webrtc-forwarder" ];
+        cargoBuildFlags = [
+          "-p"
+          "blit-webrtc-forwarder"
+        ];
         cargoLock = cargoLockConfig;
         doCheck = false;
       };
@@ -154,7 +235,11 @@
         inherit version;
         src = ../.;
         inherit pnpmDeps;
-        nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
+        nativeBuildInputs = [
+          pkgs.nodejs
+          pkgs.pnpm
+          pkgs.pnpmConfigHook
+        ];
         pnpmRoot = "js";
         postPatch = setupBrowserPkg;
         buildPhase = ''
@@ -175,7 +260,11 @@
         inherit version;
         src = ../.;
         inherit pnpmDeps;
-        nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
+        nativeBuildInputs = [
+          pkgs.nodejs
+          pkgs.pnpm
+          pkgs.pnpmConfigHook
+        ];
         pnpmRoot = "js";
         postPatch = setupBrowserPkg;
         buildPhase = ''
@@ -197,13 +286,23 @@
       blit-cli-static = mkStaticBin {
         pname = "blit-cli";
         cargoPkg = "blit-cli";
-        extraArgs = { preBuild = copyWebAppDist; };
+        extraArgs = {
+          preBuild = copyWebAppDist;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [
+            pkgs.pkgsStatic.libxkbcommon
+            pkgs.pkgsStatic.pixman
+          ];
+          RUSTFLAGS = "-C relocation-model=static";
+        };
       };
 
       blit-gateway-static = mkStaticBin {
         pname = "blit-gateway";
         cargoPkg = "blit-gateway";
-        extraArgs = { preBuild = copyWebAppDist; };
+        extraArgs = {
+          preBuild = copyWebAppDist;
+        };
       };
 
       manPages = pkgs.stdenv.mkDerivation {
@@ -220,66 +319,81 @@
       };
 
       tasks = import ./tasks.nix {
-        inherit pkgs version browserWasm blit-server blit-gateway
-                blit-server-static blit-cli-static blit-gateway-static
-                blit-webrtc-forwarder-static
-                manPages webAppDist websiteDist rustToolchain;
+        inherit
+          pkgs
+          version
+          browserWasm
+          blit-server
+          blit-gateway
+          blit-server-static
+          blit-cli-static
+          blit-gateway-static
+          blit-webrtc-forwarder-static
+          manPages
+          webAppDist
+          websiteDist
+          rustToolchain
+          ;
       };
 
-      demoImage = let
-        fishConfig = pkgs.writeTextDir "home/blit/.config/fish/config.fish" ''
-          function fish_greeting
-              cat /etc/blit-welcome 2>/dev/null
-          end
-        '';
-        welcomeFile = pkgs.writeTextDir "etc/blit-welcome" (
-          if builtins.pathExists ../welcome
-          then builtins.readFile ../welcome
-          else ""
-        );
-        passwd = pkgs.writeTextDir "etc/passwd" "blit:x:1000:1000:blit:/home/blit:/bin/fish\n";
-        group = pkgs.writeTextDir "etc/group" "blit:x:1000:\n";
-      in
-      pkgs.dockerTools.buildLayeredImage {
-        name = "grab/blit-demo";
-        tag = "latest";
-        maxLayers = 2;
-        contents = [
-          pkgs.dockerTools.caCertificates
-          pkgs.dockerTools.binSh
-          pkgs.busybox
-          pkgs.fish
-          pkgs.htop
-          pkgs.neovim
-          pkgs.git
-          pkgs.curl
-          pkgs.jq
-          pkgs.tree
-          pkgs.ncdu
-          blit-cli
-          fishConfig
-          welcomeFile
-          passwd
-          group
-        ];
-        fakeRootCommands = ''
-          mkdir -p ./home/blit ./tmp
-          chown -R 1000:1000 ./home/blit
-          chmod 1777 ./tmp
-        '';
-        config = {
-          Env = [
-            "SHELL=/bin/fish"
-            "USER=blit"
-            "HOME=/home/blit"
-            "TERM=xterm-256color"
+      demoImage =
+        let
+          fishConfig = pkgs.writeTextDir "home/blit/.config/fish/config.fish" ''
+            function fish_greeting
+                cat /etc/blit-welcome 2>/dev/null
+            end
+          '';
+          welcomeFile = pkgs.writeTextDir "etc/blit-welcome" (
+            if builtins.pathExists ../welcome then builtins.readFile ../welcome else ""
+          );
+          passwd = pkgs.writeTextDir "etc/passwd" "blit:x:1000:1000:blit:/home/blit:/bin/fish\n";
+          group = pkgs.writeTextDir "etc/group" "blit:x:1000:\n";
+        in
+        pkgs.dockerTools.buildLayeredImage {
+          name = "grab/blit-demo";
+          tag = "latest";
+          maxLayers = 2;
+          contents = [
+            pkgs.dockerTools.caCertificates
+            pkgs.dockerTools.binSh
+            pkgs.busybox
+            pkgs.fish
+            pkgs.htop
+            pkgs.neovim
+            pkgs.git
+            pkgs.curl
+            pkgs.jq
+            pkgs.tree
+            pkgs.ncdu
+            blit-cli
+            fishConfig
+            welcomeFile
+            passwd
+            group
           ];
-          User = "1000:1000";
-          WorkingDir = "/home/blit";
-          ExposedPorts = { "3264/tcp" = {}; };
-          Entrypoint = [ "blit" "share" ];
+          fakeRootCommands = ''
+            mkdir -p ./home/blit ./tmp
+            chown -R 1000:1000 ./home/blit
+            chmod 1777 ./tmp
+          '';
+          config = {
+            Env = [
+              "SHELL=/bin/fish"
+              "USER=blit"
+              "HOME=/home/blit"
+              "TERM=xterm-256color"
+            ];
+            User = "1000:1000";
+            WorkingDir = "/home/blit";
+            ExposedPorts = {
+              "3264/tcp" = { };
+            };
+            Entrypoint = [
+              "blit"
+              "share"
+            ];
+          };
         };
-      };
 
       skopeoPolicy = pkgs.writeText "containers-policy.json" ''{"default":[{"type":"insecureAcceptAnything"}]}'';
 
@@ -319,13 +433,24 @@
     {
       packages = {
         blit = blit-cli;
-        inherit blit-server blit-cli blit-gateway blit-webrtc-forwarder;
-        inherit blit-server-static blit-cli-static blit-gateway-static blit-webrtc-forwarder-static;
+        inherit
+          blit-server
+          blit-cli
+          blit-gateway
+          blit-webrtc-forwarder
+          ;
+        inherit
+          blit-server-static
+          blit-cli-static
+          blit-gateway-static
+          blit-webrtc-forwarder-static
+          ;
         demo-image = demoImage;
         push-demo = pushDemo;
         publish-demo = publishDemo;
         default = blit-cli;
-      } // tasks;
+      }
+      // tasks;
 
       devShells.default = pkgs.mkShell {
         buildInputs = [
@@ -338,7 +463,10 @@
           pkgs.cargo-watch
           pkgs.curl
           pkgs.flyctl
+          pkgs.libxkbcommon
           pkgs.nodejs
+          pkgs.pixman
+          pkgs.pkg-config
           pkgs.pkgsStatic.stdenv.cc
           pkgs.pnpm
           pkgs.process-compose
@@ -346,12 +474,24 @@
           pkgs.scdoc
           pkgs.wasm-bindgen-cli
           pkgs.wasm-pack
+        ]
+        ++ pkgs.lib.optionals serverVaapiEnabled [
+          pkgs.ffmpeg
+          pkgs.libva
+          pkgs.llvmPackages.libclang
         ];
+
+        env = {
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+          PKG_CONFIG_PATH = "${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.pixman}/lib/pkgconfig";
+          LIBRARY_PATH = "${pkgs.libxkbcommon}/lib:${pkgs.pixman}/lib";
+        };
 
         shellHook = ''
           if [ -z "''${LANG-}" ]; then
             export LANG="$(defaults read -g AppleLocale 2>/dev/null | sed 's/@.*//' || echo en_US).UTF-8"
           fi
+          export BINDGEN_EXTRA_CLANG_ARGS="${bindgenClangArgs}''${NIX_CFLAGS_COMPILE:+ $NIX_CFLAGS_COMPILE}"
           export PATH="$PWD/bin:$PATH"
         '';
       };

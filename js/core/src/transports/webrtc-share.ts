@@ -92,6 +92,10 @@ async function fetchIceServers(hubWsUrl: string): Promise<RTCIceServer[]> {
  *
  * The transport handles all signaling internally: hub WebSocket connection,
  * Ed25519-signed message exchange, SDP offer/answer, and ICE candidate relay.
+ *
+ * Supports reconnection: calling `connect()` when the transport is in a
+ * `"disconnected"` or `"error"` state tears down old resources and re-runs
+ * the full signaling + WebRTC handshake.
  */
 const noopDebug: BlitDebug = { log() {}, warn() {}, error() {} };
 
@@ -108,6 +112,8 @@ export function createShareTransport(
   let pc: RTCPeerConnection | null = null;
   let disposed = false;
   let started = false;
+  let connectGeneration = 0;
+  let cachedKeypair: nacl.SignKeyPair | null = null;
   const earlyMessages: ArrayBuffer[] = [];
   const messageListeners = new Set<(data: ArrayBuffer) => void>();
   const statusListeners = new Set<(status: ConnectionStatus) => void>();
@@ -127,11 +133,38 @@ export function createShareTransport(
     }
   }
 
-  // Run the signaling + WebRTC setup asynchronously
-  (async () => {
+  /** Tear down the current signaling WS, peer connection, and inner transport. */
+  function teardown() {
+    if (inner) {
+      inner.close();
+      inner = null;
+    }
+    if (pc) {
+      try {
+        pc.close();
+      } catch {
+        // Ignore.
+      }
+      pc = null;
+    }
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        // Ignore.
+      }
+      ws = null;
+    }
+  }
+
+  /** Run the full signaling + WebRTC setup. */
+  async function doConnect(generation: number) {
     try {
-      dbg.log("deriving keypair from passphrase");
-      const keypair = await deriveKeypair(passphrase);
+      if (!cachedKeypair) {
+        dbg.log("deriving keypair from passphrase");
+        cachedKeypair = await deriveKeypair(passphrase);
+      }
+      const keypair = cachedKeypair;
       const pubHex = hexEncode(keypair.publicKey);
       dbg.log("pubkey: %s", pubHex);
       const iceHttpUrl = hubWsUrl
@@ -142,8 +175,8 @@ export function createShareTransport(
       const iceServers = await fetchIceServers(hubWsUrl);
       dbg.log("ICE servers: %o", iceServers);
 
-      if (disposed) {
-        dbg.warn("disposed before WS connect");
+      if (disposed || generation !== connectGeneration) {
+        dbg.warn("stale connect attempt, aborting");
         return;
       }
 
@@ -163,9 +196,9 @@ export function createShareTransport(
         if (disposed) reject(new Error("disposed"));
       });
 
-      if (disposed) {
-        dbg.warn("disposed after WS open");
-        ws.close();
+      if (disposed || generation !== connectGeneration) {
+        dbg.warn("stale after WS open, aborting");
+        ws?.close();
         return;
       }
 
@@ -193,9 +226,9 @@ export function createShareTransport(
         };
       });
 
-      if (disposed) {
-        dbg.warn("disposed after peer joined");
-        ws.close();
+      if (disposed || generation !== connectGeneration) {
+        dbg.warn("stale after peer joined, aborting");
+        ws?.close();
         return;
       }
 
@@ -215,15 +248,15 @@ export function createShareTransport(
       pc.onsignalingstatechange = () =>
         dbg.log("pc.signalingState = %s", pc!.signalingState);
 
-      const transport = createWebRtcDataChannelTransport(pc);
-      inner = transport;
+      const dcTransport = createWebRtcDataChannelTransport(pc);
+      inner = dcTransport;
 
       // Forward inner transport events
-      transport.addEventListener("message", (data: ArrayBuffer) =>
+      dcTransport.addEventListener("message", (data: ArrayBuffer) =>
         dispatch(data),
       );
-      transport.addEventListener("statuschange", (s: ConnectionStatus) => {
-        if (disposed) return;
+      dcTransport.addEventListener("statuschange", (s: ConnectionStatus) => {
+        if (disposed || generation !== connectGeneration) return;
         setStatus(s);
       });
 
@@ -246,7 +279,8 @@ export function createShareTransport(
 
       // Send our ICE candidates to the producer
       pc.onicecandidate = (e) => {
-        if (!e.candidate || disposed) return;
+        if (!e.candidate || disposed || generation !== connectGeneration)
+          return;
         dbg.log("local ICE candidate: %s", e.candidate.candidate);
         const candidateData = { candidate: e.candidate.toJSON() };
         ws!.send(
@@ -291,7 +325,7 @@ export function createShareTransport(
             })
             .catch((err) => {
               dbg.error("setRemoteDescription failed: %o", err);
-              if (disposed) return;
+              if (disposed || generation !== connectGeneration) return;
               _lastError = err instanceof Error ? err.message : String(err);
               setStatus("error");
             });
@@ -319,27 +353,47 @@ export function createShareTransport(
 
       if (started) {
         dbg.log("calling inner transport.connect()");
-        transport.connect();
+        dcTransport.connect();
       } else {
         dbg.log("inner transport created but start() not yet called");
       }
     } catch (err) {
       dbg.error("share transport error: %o", err);
-      if (disposed) return;
+      if (disposed || generation !== connectGeneration) return;
       _lastError = err instanceof Error ? err.message : String(err);
-      setStatus("error");
+      setStatus("disconnected");
     }
-  })();
+  }
+
+  // Start the initial connection
+  doConnect(connectGeneration);
 
   const transport: BlitTransport = {
     connect() {
-      if (started) return;
-      started = true;
-      for (const msg of earlyMessages) {
-        for (const l of messageListeners) l(msg);
+      if (disposed) return;
+
+      // First call: mark as started and flush early messages.
+      if (!started) {
+        started = true;
+        for (const msg of earlyMessages) {
+          for (const l of messageListeners) l(msg);
+        }
+        earlyMessages.length = 0;
+        inner?.connect();
+        return;
       }
-      earlyMessages.length = 0;
-      inner?.connect();
+
+      // Subsequent calls: reconnect if currently disconnected or errored.
+      if (_status === "disconnected" || _status === "error") {
+        dbg.log(
+          "reconnect requested (status=%s), tearing down and retrying",
+          _status,
+        );
+        teardown();
+        connectGeneration++;
+        setStatus("connecting");
+        doConnect(connectGeneration);
+      }
     },
 
     get status() {
@@ -382,9 +436,7 @@ export function createShareTransport(
 
     close() {
       disposed = true;
-      ws?.close();
-      pc?.close();
-      inner?.close();
+      teardown();
       setStatus("closed");
     },
   };

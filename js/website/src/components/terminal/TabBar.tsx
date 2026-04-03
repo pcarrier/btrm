@@ -220,13 +220,18 @@ export default function TabBar(props: {
   focusedSessionId: SessionId | null;
   onSelect: (id: SessionId) => void;
   onClose: (id: SessionId) => void;
+  disabled?: boolean;
 }) {
   const { displayTabs, gridTemplateColumns } = createAnimatedTabs(
     () => props.sessions,
   );
 
   return (
-    <div class="flex h-9 min-h-9 select-none items-stretch overflow-hidden bg-[var(--surface)]">
+    <div
+      class={`flex h-9 min-h-9 select-none items-stretch overflow-hidden bg-[var(--surface)] transition-opacity ${
+        props.disabled ? "opacity-50 pointer-events-none" : ""
+      }`}
+    >
       <div
         class="grid min-w-0 flex-1 items-stretch transition-[grid-template-columns] duration-200 ease-out"
         style={{ "grid-template-columns": gridTemplateColumns() }}

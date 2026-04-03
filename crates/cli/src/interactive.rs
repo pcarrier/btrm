@@ -947,7 +947,7 @@ pub async fn run_browser_share(passphrase: &str, hub: &str, port: Option<u16>) {
             std::process::exit(1);
         });
     let addr = listener.local_addr().unwrap();
-    let url = format!("http://{addr}/s#{passphrase}");
+    let url = format!("http://{addr}/#{passphrase}");
     eprintln!("blit: serving browser UI at {url}");
 
     let app =

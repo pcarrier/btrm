@@ -14,6 +14,11 @@ import { themeFor } from "./theme";
 import { t as i18n } from "./i18n";
 import { Workspace } from "./Workspace";
 import { createShareTransport } from "@blit-sh/core";
+import {
+  encryptPassphrase,
+  isEncrypted,
+  decryptPassphrase,
+} from "./passphrase-crypto";
 
 const DEFAULT_HUB = "wss://hub.blit.sh";
 
@@ -24,13 +29,24 @@ function hubUrl(): string {
 
 /**
  * Detect share mode from the URL hash. Layout state hashes start with
- * a known key (`l=`, `p=`, or `a=`). Anything else is a share passphrase.
+ * a known key (`l=`, `p=`, or `a=`). Anything else is a share passphrase,
+ * which we encrypt in-place so the raw secret doesn't stay in the URL.
  */
 function getSharePassphrase(): string | null {
   const hash = location.hash.slice(1);
   if (!hash) return null;
   if (/^[lpa]=/.test(hash)) return null;
-  return decodeURIComponent(hash);
+  const decoded = decodeURIComponent(hash);
+  if (isEncrypted(decoded)) {
+    return decryptPassphrase(decoded);
+  }
+  const encrypted = encryptPassphrase(decoded);
+  history.replaceState(
+    null,
+    "",
+    `${location.pathname}#${encodeURIComponent(encrypted)}`,
+  );
+  return decoded;
 }
 
 function createGatewayTransport(pass: string): BlitTransport {

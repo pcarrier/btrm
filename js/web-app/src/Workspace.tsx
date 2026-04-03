@@ -677,11 +677,9 @@ function WorkspaceScreen({
         .join(",");
       if (a) parts.push(`a=${a}`);
     }
-    history.replaceState(
-      null,
-      "",
-      parts.length > 0 ? `#${parts.join("&")}` : location.pathname,
-    );
+    if (parts.length > 0) {
+      history.replaceState(null, "", `#${parts.join("&")}`);
+    }
   }, [activeLayout, bspFocusedPaneId, connection?.status, layoutAssignments]);
 
   const debugStats = workspace.getConnectionDebugStats(

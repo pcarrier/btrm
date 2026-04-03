@@ -62,7 +62,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
-use smithay::wayland::xdg_toplevel_icon::{XdgToplevelIconHandler, XdgToplevelIconManager};
+use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub enum CompositorEvent {
@@ -524,6 +524,7 @@ impl XdgShellHandler for Compositor {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        eprintln!("[compositor] new_toplevel");
         let window = Window::new_wayland_window(surface.clone());
         let wl_surface = surface.wl_surface().clone();
         let key = wl_surface.id().protocol_id() as u64;
@@ -977,7 +978,19 @@ pub fn spawn_compositor() -> CompositorHandle {
     let runtime_dir_clone = runtime_dir.clone();
     let thread = std::thread::spawn(move || {
         unsafe { std::env::set_var("XDG_RUNTIME_DIR", &runtime_dir_clone) };
-        run_compositor(event_tx, command_rx, socket_tx, shutdown_clone);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_compositor(event_tx, command_rx, socket_tx, shutdown_clone);
+        }));
+        if let Err(e) = result {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            eprintln!("[compositor] PANIC: {msg}");
+        }
     });
 
     let socket_name = socket_rx.recv().expect("compositor failed to start");
@@ -1016,7 +1029,9 @@ fn run_compositor(
     let activation_state = XdgActivationState::new::<Compositor>(&dh);
     FractionalScaleManagerState::new::<Compositor>(&dh);
     CursorShapeManagerState::new::<Compositor>(&dh);
-    XdgToplevelIconManager::new::<Compositor>(&dh);
+    // Disabled: smithay 0.7 has a bug in ShmBufferUserData::remove_destruction_hook
+    // (uses != instead of ==) that causes a protocol error when clients destroy icon
+    // buffers, killing Chromium-based browsers.
     TextInputManagerState::new::<Compositor>(&dh);
 
     let mut dmabuf_state = DmabufState::new();
@@ -1117,15 +1132,13 @@ fn run_compositor(
 
     handle
         .insert_source(listening_socket, |client_stream, _, state| {
-            eprintln!("[compositor] client connected");
-            match state.display_handle.insert_client(
+            if let Err(e) = state.display_handle.insert_client(
                 client_stream,
                 Arc::new(ClientData {
                     compositor_state: CompositorClientState::default(),
                 }),
             ) {
-                Ok(_) => eprintln!("[compositor] client inserted"),
-                Err(e) => eprintln!("[compositor] insert_client error: {e}"),
+                eprintln!("[compositor] insert_client error: {e}");
             }
         })
         .expect("failed to insert listening socket");
@@ -1159,7 +1172,6 @@ fn run_compositor(
     let display_source = Generic::new(display, Interest::READ, calloop::Mode::Level);
     handle
         .insert_source(display_source, |_, display, state| {
-            eprintln!("[compositor] dispatch_clients");
             let d = unsafe { display.get_mut() };
             if let Err(e) = d.dispatch_clients(state) {
                 eprintln!("[compositor] dispatch_clients error: {e}");
@@ -1189,9 +1201,11 @@ fn run_compositor(
             eprintln!("[compositor] event loop error: {e}");
         }
         if let Err(e) = compositor.display_handle.flush_clients() {
-            eprintln!("[compositor] flush_clients error: {e}");
+            eprintln!("[compositor] flush error: {e}");
         }
+
     }
+    eprintln!("[compositor] event loop exited");
 }
 
 #[cfg(test)]

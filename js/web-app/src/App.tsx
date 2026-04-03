@@ -1,15 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { WebSocketTransport, WebTransportTransport } from "@blit-sh/core";
 import type { BlitTransport } from "@blit-sh/core";
 import type { BlitWasmModule } from "@blit-sh/core";
-import {
-  PASS_KEY,
-  readStorage,
-  writeStorage,
-  wsUrl,
-  wtUrl,
-  wtCertHash,
-} from "./storage";
+import { wsUrl, wtUrl, wtCertHash } from "./storage";
 import { themeFor } from "./theme";
 import { t as i18n } from "./i18n";
 import { Workspace } from "./Workspace";
@@ -28,11 +21,11 @@ function hubUrl(): string {
 }
 
 /**
- * Detect share mode from the URL hash. Layout state hashes start with
- * a known key (`l=`, `p=`, or `a=`). Anything else is a share passphrase,
- * which we encrypt in-place so the raw secret doesn't stay in the URL.
+ * Read the passphrase from the URL hash. Layout state hashes (`l=`,
+ * `p=`, `a=`) are skipped. Raw passphrases are encrypted in-place
+ * so the plaintext doesn't stay in the URL bar.
  */
-function getSharePassphrase(): string | null {
+function getPassphrase(): string | null {
   const hash = location.hash.slice(1);
   if (!hash) return null;
   if (/^[lpa]=/.test(hash)) return null;
@@ -60,48 +53,62 @@ function createGatewayTransport(pass: string): BlitTransport {
 }
 
 export function App({ wasm }: { wasm: BlitWasmModule }) {
-  const sharePassphrase = getSharePassphrase();
+  const passphrase = getPassphrase();
 
-  // Share mode: bypass auth, connect via WebRTC
-  if (sharePassphrase) {
-    return <ShareApp wasm={wasm} passphrase={sharePassphrase} />;
+  if (passphrase) {
+    return <ConnectedApp wasm={wasm} passphrase={passphrase} />;
   }
 
-  // Gateway mode: auth screen + WebSocket/WebTransport
-  return <GatewayApp wasm={wasm} />;
+  return <AuthApp wasm={wasm} />;
 }
 
-function ShareApp({
+function ConnectedApp({
   wasm,
   passphrase,
 }: {
   wasm: BlitWasmModule;
   passphrase: string;
 }) {
-  const [transport] = useState<BlitTransport>(() =>
-    createShareTransport(hubUrl(), passphrase),
-  );
+  const [transport] = useState<BlitTransport>(() => {
+    const hubInjected = (window as unknown as { __blitHub?: string }).__blitHub;
+    if (hubInjected) {
+      return createShareTransport(hubInjected, passphrase);
+    }
+    const certHash = wtCertHash();
+    if (certHash) {
+      return createGatewayTransport(passphrase);
+    }
+    return createShareTransport(DEFAULT_HUB, passphrase);
+  });
 
-  return <Workspace transport={transport} wasm={wasm} onAuthError={() => {}} />;
+  return (
+    <Workspace
+      transport={transport}
+      wasm={wasm}
+      onAuthError={() => {
+        history.replaceState(null, "", location.pathname);
+        window.location.reload();
+      }}
+    />
+  );
 }
 
-function GatewayApp({ wasm }: { wasm: BlitWasmModule }) {
-  const savedPass = readStorage(PASS_KEY);
+function AuthApp({ wasm }: { wasm: BlitWasmModule }) {
   const [transport, setTransport] = useState<BlitTransport | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const passRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!savedPass || transport) return;
-    setTransport(createGatewayTransport(savedPass));
-  }, [savedPass, transport]);
 
   const connect = useCallback((pass: string) => {
     setAuthError(null);
     const t = createGatewayTransport(pass);
     const onStatus = (status: string) => {
       if (status === "connected") {
-        writeStorage(PASS_KEY, pass);
+        const encrypted = encryptPassphrase(pass);
+        history.replaceState(
+          null,
+          "",
+          `${location.pathname}#${encodeURIComponent(encrypted)}`,
+        );
         t.removeEventListener("statuschange", onStatus);
       } else if (status === "error") {
         setAuthError(t.lastError ?? i18n("auth.failed"));
@@ -128,7 +135,6 @@ function GatewayApp({ wasm }: { wasm: BlitWasmModule }) {
       transport={transport}
       wasm={wasm}
       onAuthError={() => {
-        writeStorage(PASS_KEY, "");
         setTransport(null);
         setAuthError(i18n("auth.failed"));
       }}

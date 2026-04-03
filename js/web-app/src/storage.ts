@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { PALETTES, DEFAULT_FONT } from "@blit-sh/core";
 import type { TerminalPalette } from "@blit-sh/core";
+import { isEncrypted, decryptPassphrase } from "./passphrase-crypto";
 
-export const PASS_KEY = "blit.passphrase";
 export const HOST_KEY = "blit.host";
 export const PALETTE_KEY = "blit.palette";
 export const FONT_KEY = "blit.fontFamily";
@@ -49,9 +49,17 @@ function configWsUrl(): string {
 let configUnavailable = false;
 const pendingWrites = new Map<string, string>();
 
+function getPassphraseFromHash(): string | null {
+  const hash = location.hash.slice(1);
+  if (!hash || /^[lpa]=/.test(hash)) return null;
+  const decoded = decodeURIComponent(hash);
+  if (isEncrypted(decoded)) return decryptPassphrase(decoded);
+  return decoded;
+}
+
 export function connectConfigWs(): void {
   if (configWs || configUnavailable) return;
-  const pass = readLocal(PASS_KEY);
+  const pass = getPassphraseFromHash();
   if (!pass) return;
 
   const ws = new WebSocket(configWsUrl());

@@ -34,7 +34,7 @@ import {
 import type { UIScale } from "./theme";
 import { themeFor, layout, ui, uiScale, z } from "./theme";
 import { t } from "./i18n";
-import { StatusBar } from "./StatusBar";
+import { StatusBar, statusBarBg, statusBarFg } from "./StatusBar";
 import { SwitcherOverlay } from "./SwitcherOverlay";
 import { PaletteOverlay } from "./PaletteOverlay";
 import { FontOverlay } from "./FontOverlay";
@@ -890,7 +890,11 @@ function WorkspaceScreen({
           style={{
             ...layout.statusBar,
             padding: "0 1em",
-            backgroundColor: theme.bg,
+            backgroundColor: statusBarBg(
+              connection?.status ?? "disconnected",
+              theme,
+            ),
+            color: statusBarFg(connection?.status ?? "disconnected", theme),
             borderTopColor: theme.subtleBorder,
             height: chromeScale.md + chromeScale.controlY * 2,
             fontSize: chromeScale.sm,

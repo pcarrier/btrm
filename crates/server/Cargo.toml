@@ -18,6 +18,7 @@ blit-compositor = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 memchr = "2"
 openh264 = "0.6"
+png = "0.17"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

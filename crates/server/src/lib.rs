@@ -4,11 +4,12 @@ use blit_remote::{
     C2S_ACK, C2S_CLIENT_METRICS, C2S_CLIPBOARD, C2S_CLOSE, C2S_COPY_RANGE, C2S_CREATE,
     C2S_CREATE_AT, C2S_CREATE_N, C2S_CREATE2, C2S_DISPLAY_RATE, C2S_FOCUS, C2S_INPUT, C2S_KILL,
     C2S_MOUSE, C2S_READ, C2S_RESIZE, C2S_RESTART, C2S_SCROLL, C2S_SEARCH, C2S_SUBSCRIBE,
-    C2S_SURFACE_FOCUS, C2S_SURFACE_INPUT, C2S_SURFACE_POINTER, C2S_SURFACE_POINTER_AXIS,
-    C2S_SURFACE_RESIZE, C2S_UNSUBSCRIBE, CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY,
-    FEATURE_COMPOSITOR, FEATURE_COPY_RANGE, FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH,
-    FEATURE_RESTART, FrameState, READ_ANSI, READ_TAIL, S2C_CLOSED, S2C_CREATED, S2C_CREATED_N,
-    S2C_LIST, S2C_READY, S2C_SEARCH_RESULTS, S2C_TEXT, S2C_TITLE, SURFACE_FRAME_FLAG_KEYFRAME,
+    C2S_SURFACE_CAPTURE, C2S_SURFACE_FOCUS, C2S_SURFACE_INPUT, C2S_SURFACE_LIST,
+    C2S_SURFACE_POINTER, C2S_SURFACE_POINTER_AXIS, C2S_SURFACE_RESIZE, C2S_UNSUBSCRIBE,
+    CREATE2_HAS_COMMAND, CREATE2_HAS_SRC_PTY, FEATURE_COMPOSITOR, FEATURE_COPY_RANGE,
+    FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH, FEATURE_RESTART, FrameState, READ_ANSI, READ_TAIL,
+    S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_LIST, S2C_READY, S2C_SEARCH_RESULTS,
+    S2C_SURFACE_CAPTURE, S2C_SURFACE_LIST, S2C_TEXT, S2C_TITLE, SURFACE_FRAME_FLAG_KEYFRAME,
     build_update_msg, msg_hello, msg_s2c_clipboard, msg_surface_created, msg_surface_destroyed,
     msg_surface_frame, msg_surface_resized, msg_surface_title,
 };
@@ -246,9 +247,19 @@ struct SurfaceEncoder {
     frame_count: u64,
 }
 
+struct CachedSurfaceInfo {
+    surface_id: u16,
+    parent_id: u16,
+    width: u16,
+    height: u16,
+    title: String,
+    app_id: String,
+}
+
 struct SharedCompositor {
     handle: CompositorHandle,
     encoders: HashMap<u16, SurfaceEncoder>,
+    surfaces: HashMap<u16, CachedSurfaceInfo>,
     created_at: Instant,
 }
 
@@ -300,6 +311,18 @@ fn encode_surface_frame(
         return None;
     }
     Some((nal_data, is_keyframe))
+}
+
+fn encode_rgba_to_png(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut buf = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut buf, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(pixels).unwrap();
+    }
+    buf
 }
 
 struct ClientState {
@@ -978,6 +1001,7 @@ impl Session {
             self.compositor = Some(SharedCompositor {
                 handle,
                 encoders: HashMap::new(),
+                surfaces: HashMap::new(),
                 created_at: Instant::now(),
             });
         }
@@ -1067,6 +1091,36 @@ impl Session {
             let cmd = pty.command.as_deref().unwrap_or("").as_bytes();
             msg.extend_from_slice(&(cmd.len() as u16).to_le_bytes());
             msg.extend_from_slice(cmd);
+        }
+        msg
+    }
+
+    fn surface_list_msg(&self) -> Vec<u8> {
+        let cs = match self.compositor.as_ref() {
+            Some(cs) => cs,
+            None => {
+                let mut msg = vec![S2C_SURFACE_LIST];
+                msg.extend_from_slice(&0u16.to_le_bytes());
+                return msg;
+            }
+        };
+        let mut msg = vec![S2C_SURFACE_LIST];
+        let count = cs.surfaces.len() as u16;
+        msg.extend_from_slice(&count.to_le_bytes());
+        let mut ids: Vec<u16> = cs.surfaces.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            let info = &cs.surfaces[&id];
+            let title = info.title.as_bytes();
+            let app_id = info.app_id.as_bytes();
+            msg.extend_from_slice(&info.surface_id.to_le_bytes());
+            msg.extend_from_slice(&info.parent_id.to_le_bytes());
+            msg.extend_from_slice(&info.width.to_le_bytes());
+            msg.extend_from_slice(&info.height.to_le_bytes());
+            msg.extend_from_slice(&(title.len() as u16).to_le_bytes());
+            msg.extend_from_slice(title);
+            msg.extend_from_slice(&(app_id.len() as u16).to_le_bytes());
+            msg.extend_from_slice(app_id);
         }
         msg
     }
@@ -1747,6 +1801,17 @@ async fn tick(state: &AppState) -> TickOutcome {
                     outgoing.push(msg_surface_created(
                         0, surface_id, parent_id, width, height, &title, &app_id,
                     ));
+                    cs.surfaces.insert(
+                        surface_id,
+                        CachedSurfaceInfo {
+                            surface_id,
+                            parent_id,
+                            width,
+                            height,
+                            title,
+                            app_id,
+                        },
+                    );
                     if let Ok(enc) = openh264::encoder::Encoder::new() {
                         cs.encoders.insert(
                             surface_id,
@@ -1759,6 +1824,7 @@ async fn tick(state: &AppState) -> TickOutcome {
                 }
                 CompositorEvent::SurfaceDestroyed { surface_id } => {
                     cs.encoders.remove(&surface_id);
+                    cs.surfaces.remove(&surface_id);
                     outgoing.push(msg_surface_destroyed(0, surface_id));
                 }
                 CompositorEvent::SurfaceCommit {
@@ -1789,6 +1855,9 @@ async fn tick(state: &AppState) -> TickOutcome {
                     }
                 }
                 CompositorEvent::SurfaceTitle { surface_id, title } => {
+                    if let Some(info) = cs.surfaces.get_mut(&surface_id) {
+                        info.title = title.clone();
+                    }
                     outgoing.push(msg_surface_title(0, surface_id, &title));
                 }
                 CompositorEvent::SurfaceResized {
@@ -1796,6 +1865,10 @@ async fn tick(state: &AppState) -> TickOutcome {
                     width,
                     height,
                 } => {
+                    if let Some(info) = cs.surfaces.get_mut(&surface_id) {
+                        info.width = width;
+                        info.height = height;
+                    }
                     outgoing.push(msg_surface_resized(0, surface_id, width, height));
                 }
                 CompositorEvent::ClipboardContent {
@@ -2497,7 +2570,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                             });
                             let _ = cs.handle.command_tx.send(CompositorCommand::PointerButton {
                                 surface_id,
-                                button: button as u32,
+                                button: match button {
+                                    1 => 0x112,
+                                    2 => 0x111,
+                                    _ => 0x110,
+                                },
                                 pressed: ptype == 0,
                             });
                         }
@@ -2577,6 +2654,42 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                                 });
                         }
                     }
+                }
+            }
+            C2S_SURFACE_LIST if data.len() >= 3 => {
+                let msg = sess.surface_list_msg();
+                if let Some(c) = sess.clients.get(&client_id) {
+                    let _ = c.tx.try_send(msg);
+                }
+            }
+            C2S_SURFACE_CAPTURE if data.len() >= 5 => {
+                let surface_id = u16::from_le_bytes([data[3], data[4]]);
+                let mut reply_msg = vec![S2C_SURFACE_CAPTURE];
+                reply_msg.extend_from_slice(&surface_id.to_le_bytes());
+                if let Some(cs) = sess.compositor.as_ref() {
+                    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                    let _ = cs.handle.command_tx.send(CompositorCommand::Capture {
+                        surface_id,
+                        reply: tx,
+                    });
+                    match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                        Ok(Some((w, h, pixels))) => {
+                            let png_data = encode_rgba_to_png(&pixels, w, h);
+                            reply_msg.extend_from_slice(&w.to_le_bytes());
+                            reply_msg.extend_from_slice(&h.to_le_bytes());
+                            reply_msg.extend_from_slice(&png_data);
+                        }
+                        _ => {
+                            reply_msg.extend_from_slice(&0u32.to_le_bytes());
+                            reply_msg.extend_from_slice(&0u32.to_le_bytes());
+                        }
+                    }
+                } else {
+                    reply_msg.extend_from_slice(&0u32.to_le_bytes());
+                    reply_msg.extend_from_slice(&0u32.to_le_bytes());
+                }
+                if let Some(c) = sess.clients.get(&client_id) {
+                    let _ = c.tx.try_send(reply_msg);
                 }
             }
             C2S_FOCUS if data.len() >= 3 => {

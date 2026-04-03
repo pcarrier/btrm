@@ -96,6 +96,10 @@ pub const C2S_SURFACE_FOCUS: u8 = 0x24;
 /// Send clipboard content to a Wayland surface:
 /// [0x25][session_id:2][surface_id:2][mime_len:2][mime:N][data_len:4][data:N]
 pub const C2S_CLIPBOARD: u8 = 0x25;
+/// Request a list of all compositor surfaces: [0x26][session_id:2]
+pub const C2S_SURFACE_LIST: u8 = 0x26;
+/// Request a PNG screenshot of a surface: [0x27][session_id:2][surface_id:2]
+pub const C2S_SURFACE_CAPTURE: u8 = 0x27;
 
 pub const S2C_UPDATE: u8 = 0x00;
 pub const S2C_CREATED: u8 = 0x01;
@@ -140,6 +144,12 @@ pub const S2C_SURFACE_RESIZED: u8 = 0x24;
 /// Clipboard content from a Wayland surface:
 /// [0x25][session_id:2][surface_id:2][mime_len:2][mime:N][data_len:4][data:N]
 pub const S2C_CLIPBOARD: u8 = 0x25;
+/// List of all compositor surfaces:
+/// [0x26][count:2] repeated{ [surface_id:2][parent_id:2][width:2][height:2][title_len:2][title:N][app_id_len:2][app_id:N] }
+pub const S2C_SURFACE_LIST: u8 = 0x26;
+/// PNG screenshot of a surface: [0x27][surface_id:2][width:4][height:4][png_data:N]
+/// If the surface was not found or has no buffer, width=0 and height=0 with empty data.
+pub const S2C_SURFACE_CAPTURE: u8 = 0x27;
 
 pub const SURFACE_FRAME_FLAG_KEYFRAME: u8 = 1 << 0;
 
@@ -1281,6 +1291,15 @@ pub enum ServerMsg<'a> {
         mime_type: &'a str,
         data: &'a [u8],
     },
+    SurfaceList {
+        entries: Vec<SurfaceListEntry>,
+    },
+    SurfaceCapture {
+        surface_id: u16,
+        width: u32,
+        height: u32,
+        png_data: &'a [u8],
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1288,6 +1307,16 @@ pub struct PtyListEntry<'a> {
     pub pty_id: u16,
     pub tag: &'a str,
     pub command: &'a str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SurfaceListEntry {
+    pub surface_id: u16,
+    pub parent_id: u16,
+    pub width: u16,
+    pub height: u16,
+    pub title: String,
+    pub app_id: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1579,6 +1608,70 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
                 surface_id,
                 mime_type,
                 data: &data[off..off + data_len],
+            })
+        }
+        S2C_SURFACE_LIST => {
+            if data.len() < 3 {
+                return None;
+            }
+            let count = u16::from_le_bytes([data[1], data[2]]) as usize;
+            let mut entries = Vec::with_capacity(count);
+            let mut offset = 3;
+            for _ in 0..count {
+                if offset + 8 > data.len() {
+                    break;
+                }
+                let surface_id = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                let parent_id = u16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+                let width = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
+                let height = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
+                offset += 8;
+                if offset + 2 > data.len() {
+                    break;
+                }
+                let title_len = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
+                offset += 2;
+                if offset + title_len > data.len() {
+                    break;
+                }
+                let title =
+                    std::str::from_utf8(&data[offset..offset + title_len]).unwrap_or_default();
+                offset += title_len;
+                if offset + 2 > data.len() {
+                    break;
+                }
+                let app_id_len = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
+                offset += 2;
+                if offset + app_id_len > data.len() {
+                    break;
+                }
+                let app_id =
+                    std::str::from_utf8(&data[offset..offset + app_id_len]).unwrap_or_default();
+                offset += app_id_len;
+                entries.push(SurfaceListEntry {
+                    surface_id,
+                    parent_id,
+                    width,
+                    height,
+                    title: title.to_string(),
+                    app_id: app_id.to_string(),
+                });
+            }
+            Some(ServerMsg::SurfaceList { entries })
+        }
+        S2C_SURFACE_CAPTURE => {
+            if data.len() < 11 {
+                return None;
+            }
+            let surface_id = u16::from_le_bytes([data[1], data[2]]);
+            let width = u32::from_le_bytes([data[3], data[4], data[5], data[6]]);
+            let height = u32::from_le_bytes([data[7], data[8], data[9], data[10]]);
+            let png_data = data.get(11..).unwrap_or_default();
+            Some(ServerMsg::SurfaceCapture {
+                surface_id,
+                width,
+                height,
+                png_data,
             })
         }
         _ => None,

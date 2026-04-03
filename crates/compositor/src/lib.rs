@@ -77,6 +77,10 @@ mod stub {
             mime_type: String,
             data: Vec<u8>,
         },
+        Capture {
+            surface_id: u16,
+            reply: mpsc::SyncSender<Option<(u32, u32, Vec<u8>)>>,
+        },
         Shutdown,
     }
 

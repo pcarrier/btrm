@@ -118,6 +118,10 @@ pub enum CompositorCommand {
         mime_type: String,
         data: Vec<u8>,
     },
+    Capture {
+        surface_id: u16,
+        reply: mpsc::SyncSender<Option<(u32, u32, Vec<u8>)>>,
+    },
     Shutdown,
 }
 
@@ -305,10 +309,53 @@ impl Compositor {
                 }
             }
             CompositorCommand::ClipboardOffer { .. } => {}
+            CompositorCommand::Capture { surface_id, reply } => {
+                let result = if let Some(&obj_id) = self.surface_lookup.get(&surface_id)
+                    && let Some(info) = self.surfaces.get(&obj_id)
+                {
+                    let wl_surface = info.window.toplevel().unwrap().wl_surface().clone();
+                    self.read_surface_pixels(&wl_surface)
+                } else {
+                    None
+                };
+                let _ = reply.send(result);
+            }
             CompositorCommand::Shutdown => {
                 self.loop_signal.stop();
             }
         }
+    }
+
+    fn read_surface_pixels(&mut self, surface: &WlSurface) -> Option<(u32, u32, Vec<u8>)> {
+        let mut result = None;
+        with_states(surface, |states| {
+            let mut guard = states.cached_state.get::<SurfaceAttributes>();
+            let attrs = guard.current();
+            if let Some(compositor::BufferAssignment::NewBuffer(buffer)) = attrs.buffer.as_ref() {
+                let shm_ok = with_buffer_contents(buffer, |ptr, len, data: BufferData| {
+                    let width = data.width as u32;
+                    let height = data.height as u32;
+                    let stride = data.stride as usize;
+                    let offset = data.offset as usize;
+                    let pixel_data = unsafe { std::slice::from_raw_parts(ptr, len) };
+                    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+                    for row in 0..height as usize {
+                        let row_start = offset + row * stride;
+                        let row_end = row_start + (width as usize * 4);
+                        if row_end <= pixel_data.len() {
+                            rgba.extend_from_slice(&pixel_data[row_start..row_end]);
+                        }
+                    }
+                    result = Some((width, height, rgba));
+                })
+                .is_ok();
+
+                if !shm_ok && let Ok(dmabuf) = get_dmabuf(buffer) {
+                    result = read_dmabuf_pixels(dmabuf);
+                }
+            }
+        });
+        result
     }
 }
 

@@ -15,32 +15,34 @@ import {
 
 const DEFAULT_HUB = "wss://hub.blit.sh";
 
-/** Read hub URL injected by CLI, or fall back to the default. */
-function hubUrl(): string {
-  return (window as unknown as { __blitHub?: string }).__blitHub ?? DEFAULT_HUB;
-}
+let _cachedPassphrase: string | null | undefined;
 
-/**
- * Read the passphrase from the URL hash. Layout state hashes (`l=`,
- * `p=`, `a=`) are skipped. Raw passphrases are encrypted in-place
- * so the plaintext doesn't stay in the URL bar.
- */
-function getPassphrase(): string | null {
-  const hash = location.hash.slice(1);
-  if (!hash) return null;
-  if (/^[lpa]=/.test(hash)) return null;
-  const decoded = decodeURIComponent(hash);
-  if (isEncrypted(decoded)) {
-    return decryptPassphrase(decoded);
+function initPassphrase(): string | null {
+  if (_cachedPassphrase !== undefined) return _cachedPassphrase;
+  const raw = location.hash.slice(1);
+  if (!raw) {
+    _cachedPassphrase = null;
+    return null;
   }
+  const first = raw.split("&")[0];
+  if (/^[lpa]=/.test(first)) {
+    _cachedPassphrase = null;
+    return null;
+  }
+  const decoded = decodeURIComponent(first);
+  if (isEncrypted(decoded)) {
+    _cachedPassphrase = decryptPassphrase(decoded);
+    return _cachedPassphrase;
+  }
+  _cachedPassphrase = decoded;
   const encrypted = encryptPassphrase(decoded);
-  history.replaceState(
-    null,
-    "",
-    `${location.pathname}#${encodeURIComponent(encrypted)}`,
-  );
+  const rest = raw.split("&").slice(1);
+  const parts = [encodeURIComponent(encrypted), ...rest].filter(Boolean);
+  history.replaceState(null, "", `${location.pathname}#${parts.join("&")}`);
   return decoded;
 }
+
+initPassphrase();
 
 function createGatewayTransport(pass: string): BlitTransport {
   const certHash = wtCertHash();
@@ -53,7 +55,7 @@ function createGatewayTransport(pass: string): BlitTransport {
 }
 
 export function App({ wasm }: { wasm: BlitWasmModule }) {
-  const passphrase = getPassphrase();
+  const [passphrase] = useState(initPassphrase);
 
   if (passphrase) {
     return <ConnectedApp wasm={wasm} passphrase={passphrase} />;

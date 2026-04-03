@@ -50,9 +50,11 @@ let configUnavailable = false;
 const pendingWrites = new Map<string, string>();
 
 function getPassphraseFromHash(): string | null {
-  const hash = location.hash.slice(1);
-  if (!hash || /^[lpa]=/.test(hash)) return null;
-  const decoded = decodeURIComponent(hash);
+  const raw = location.hash.slice(1);
+  if (!raw) return null;
+  const first = raw.split("&")[0];
+  if (/^[lpa]=/.test(first)) return null;
+  const decoded = decodeURIComponent(first);
   if (isEncrypted(decoded)) return decryptPassphrase(decoded);
   return decoded;
 }

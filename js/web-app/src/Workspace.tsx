@@ -682,11 +682,9 @@ function WorkspaceScreen({
       .split("&")
       .filter((s) => s && !/^[lpa]=/.test(s));
     const merged = [...kept, ...parts];
-    history.replaceState(
-      null,
-      "",
-      merged.length > 0 ? `#${merged.join("&")}` : location.pathname,
-    );
+    if (merged.length > 0) {
+      history.replaceState(null, "", `#${merged.join("&")}`);
+    }
   }, [activeLayout, bspFocusedPaneId, connection?.status, layoutAssignments]);
 
   const debugStats = workspace.getConnectionDebugStats(

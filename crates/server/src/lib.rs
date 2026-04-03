@@ -1882,6 +1882,11 @@ async fn tick(state: &AppState) -> TickOutcome {
                     }
                     broadcast.push(msg_surface_title(0, surface_id, &title));
                 }
+                CompositorEvent::SurfaceAppId { surface_id, app_id } => {
+                    if let Some(info) = cs.surfaces.get_mut(&surface_id) {
+                        info.app_id = app_id;
+                    }
+                }
                 CompositorEvent::SurfaceResized {
                     surface_id,
                     width,

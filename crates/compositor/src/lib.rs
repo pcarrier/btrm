@@ -31,6 +31,10 @@ mod stub {
             surface_id: u16,
             title: String,
         },
+        SurfaceAppId {
+            surface_id: u16,
+            app_id: String,
+        },
         SurfaceResized {
             surface_id: u16,
             width: u16,

@@ -87,6 +87,10 @@ pub enum CompositorEvent {
         surface_id: u16,
         title: String,
     },
+    SurfaceAppId {
+        surface_id: u16,
+        app_id: String,
+    },
     SurfaceResized {
         surface_id: u16,
         width: u16,
@@ -146,6 +150,7 @@ struct SurfaceInfo {
     last_width: u32,
     last_height: u32,
     last_title: String,
+    last_app_id: String,
 }
 
 struct ClientData {
@@ -402,6 +407,7 @@ impl CompositorHandler for Compositor {
 
         let mut committed_buffer = None;
         let mut new_title = String::new();
+        let mut new_app_id = String::new();
 
         with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
@@ -435,6 +441,7 @@ impl CompositorHandler for Compositor {
             if let Some(data) = states.data_map.get::<XdgToplevelSurfaceData>() {
                 let lock = data.lock().unwrap();
                 new_title = lock.title.clone().unwrap_or_default();
+                new_app_id = lock.app_id.clone().unwrap_or_default();
             }
         });
 
@@ -445,6 +452,16 @@ impl CompositorHandler for Compositor {
             let _ = self.event_tx.send(CompositorEvent::SurfaceTitle {
                 surface_id,
                 title: new_title,
+            });
+        }
+
+        if let Some(info) = self.surfaces.get_mut(&key)
+            && new_app_id != info.last_app_id
+        {
+            info.last_app_id = new_app_id.clone();
+            let _ = self.event_tx.send(CompositorEvent::SurfaceAppId {
+                surface_id,
+                app_id: new_app_id,
             });
         }
 
@@ -520,6 +537,7 @@ impl XdgShellHandler for Compositor {
             last_width: 0,
             last_height: 0,
             last_title: String::new(),
+            last_app_id: String::new(),
         };
         self.surfaces.insert(key, info);
         self.surface_lookup.insert(surface_id, key);

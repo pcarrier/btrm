@@ -137,6 +137,8 @@ function WorkspaceScreen({
   const [fontSize, setFontSize] = useState(preferredFontSize);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [debugPanel, setDebugPanel] = useState(false);
+  const [previewPanelOpen, setPreviewPanelOpen] = useState(true);
+  const [previewPanelWidth, setPreviewPanelWidth] = useState(SURFACE_PANEL_WIDTH);
   const [serverFonts, setServerFonts] = useState<string[]>([]);
   const [offlineVisible, setOfflineVisible] = useState(false);
   const [fontLoading, setFontLoading] = useState(false);
@@ -174,6 +176,7 @@ function WorkspaceScreen({
   ]);
 
   const toggleDebug = useCallback(() => setDebugPanel((value) => !value), []);
+  const togglePreviewPanel = useCallback(() => setPreviewPanelOpen((v) => !v), []);
   const fontRequestVersionRef = useRef(0);
   const paletteOverlayOriginRef = useRef<TerminalPalette | null>(null);
   const fontOverlayOriginRef = useRef<{ family: string; size: number } | null>(
@@ -610,6 +613,11 @@ function WorkspaceScreen({
         toggleDebug();
         return;
       }
+      if (e.ctrlKey && e.shiftKey && e.key === "B") {
+        e.preventDefault();
+        togglePreviewPanel();
+        return;
+      }
       if (mod && e.shiftKey && e.key === "Enter") {
         e.preventDefault();
         if (activeLayoutRef.current && bspFocusedPaneId) {
@@ -687,6 +695,7 @@ function WorkspaceScreen({
     handleRestartOrClose,
     toggleDebug,
     toggleOverlay,
+    togglePreviewPanel,
     workspace,
   ]);
 
@@ -852,7 +861,8 @@ function WorkspaceScreen({
               />
             )}
           </div>
-          {(offScreenSessions.length > 0 || surfaces.length > 0) && (
+          {previewPanelOpen &&
+            (offScreenSessions.length > 0 || surfaces.length > 0) && (
             <PreviewPanel
               offScreenSessions={offScreenSessions}
               surfaces={surfaces}
@@ -863,6 +873,9 @@ function WorkspaceScreen({
               fontFamily={resolvedFontWithFallback}
               fontSize={fontSize}
               onFocusSession={switchSession}
+              width={previewPanelWidth}
+              onResize={setPreviewPanelWidth}
+              onClose={togglePreviewPanel}
             />
           )}
         </section>
@@ -1052,6 +1065,8 @@ function EmptyState({
 }
 
 const SURFACE_PANEL_WIDTH = 280;
+const MIN_PANEL_WIDTH = 160;
+const MAX_PANEL_WIDTH = 600;
 
 function PreviewPanel({
   offScreenSessions,
@@ -1063,6 +1078,9 @@ function PreviewPanel({
   fontFamily,
   fontSize,
   onFocusSession,
+  width,
+  onResize,
+  onClose,
 }: {
   offScreenSessions: BlitSession[];
   surfaces: BlitSurface[];
@@ -1073,22 +1091,101 @@ function PreviewPanel({
   fontFamily: string;
   fontSize: number;
   onFocusSession: (id: SessionId) => void;
+  width: number;
+  onResize: (width: number) => void;
+  onClose: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [resizeHover, setResizeHover] = useState(false);
+  const [resizeActive, setResizeActive] = useState(false);
+
+  const handleResizePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      setResizeActive(true);
+      const startX = e.clientX;
+      const startWidth = width;
+
+      const onMove = (me: PointerEvent) => {
+        const delta = startX - me.clientX;
+        onResize(Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, startWidth + delta)));
+      };
+
+      const onUp = () => {
+        setResizeActive(false);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+      };
+
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    },
+    [width, onResize],
+  );
+
+  const resizeBg = resizeActive
+    ? "rgba(128,128,128,0.5)"
+    : resizeHover
+      ? "rgba(128,128,128,0.3)"
+      : "transparent";
 
   return (
     <div
       style={{
-        width: SURFACE_PANEL_WIDTH,
+        width,
         flexShrink: 0,
-        borderLeft: `1px solid ${theme.subtleBorder}`,
-        backgroundColor: theme.solidPanelBg,
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         overflow: "hidden",
       }}
     >
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div
+        onPointerDown={handleResizePointerDown}
+        onPointerEnter={() => setResizeHover(true)}
+        onPointerLeave={() => setResizeHover(false)}
+        style={{
+          width: 3,
+          flexShrink: 0,
+          cursor: "col-resize",
+          background: resizeBg,
+          borderLeft: `1px solid ${theme.subtleBorder}`,
+          transition: "background 0.1s",
+          touchAction: "none",
+        }}
+      />
+      <div
+        style={{
+          flex: 1,
+          backgroundColor: theme.solidPanelBg,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            padding: `${scale.controlY}px ${scale.tightGap}px`,
+            borderBottom: `1px solid ${theme.subtleBorder}`,
+          }}
+        >
+          <button
+            onClick={onClose}
+            title="Close panel (Ctrl+Shift+B)"
+            style={{
+              ...ui.btn,
+              fontSize: scale.xs,
+              padding: `0 ${scale.tightGap}px`,
+              opacity: 0.5,
+            }}
+          >
+            &times;
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
         {offScreenSessions.length > 0 && (
           <>
             <div
@@ -1144,6 +1241,7 @@ function PreviewPanel({
             ))}
           </>
         )}
+        </div>
       </div>
     </div>
   );

@@ -72,10 +72,3 @@ export function decryptPassphrase(ciphertext: string): string | null {
     return null;
   }
 }
-
-/** Check if a hash looks like a raw UUID passphrase. */
-export function isRawPassphrase(hash: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    hash,
-  );
-}

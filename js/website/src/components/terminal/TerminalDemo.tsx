@@ -16,7 +16,6 @@ import { BlitWorkspace, PALETTES } from "@blit-sh/core";
 import type { BlitSession, BlitWasmModule, SessionId } from "@blit-sh/core";
 import { initWasm } from "../../lib/wasm";
 import {
-  isRawPassphrase,
   encryptPassphrase,
   decryptPassphrase,
 } from "../../lib/passphrase-crypto";
@@ -47,22 +46,14 @@ function resolvePassphrase(): PassphraseResult {
   if (!raw) {
     return { ok: false, error: "No session specified." };
   }
-  if (isRawPassphrase(raw)) {
-    // Raw UUID — encrypt and replace URL
-    const encrypted = encryptPassphrase(raw);
-    history.replaceState(null, "", `/s#${encodeURIComponent(encrypted)}`);
-    return { ok: true, passphrase: raw };
-  }
-  // Try to decrypt
   const decrypted = decryptPassphrase(raw);
-  if (decrypted === null) {
-    return {
-      ok: false,
-      error:
-        "Cannot decrypt session link. This link was created on a different device.",
-    };
+  if (decrypted !== null) {
+    return { ok: true, passphrase: decrypted };
   }
-  return { ok: true, passphrase: decrypted };
+  // Not a valid ciphertext — treat as a raw passphrase, encrypt and replace URL
+  const encrypted = encryptPassphrase(raw);
+  history.replaceState(null, "", `/s#${encodeURIComponent(encrypted)}`);
+  return { ok: true, passphrase: raw };
 }
 
 // ---------------------------------------------------------------------------
@@ -480,8 +471,7 @@ function TabShell(props: {
             <Show when={menuOpen()}>
               <ToolbarMenu
                 onCopyLink={() => {
-                  const url = `${location.origin}/s#${encodeURIComponent(props.passphrase)}`;
-                  navigator.clipboard.writeText(url);
+                  navigator.clipboard.writeText(location.href);
                   setCopied(true);
                   clearTimeout(copyTimeout);
                   copyTimeout = setTimeout(() => setCopied(false), 2000);

@@ -814,7 +814,9 @@ fn run_compositor(
             }
         }
 
-        if let Err(e) = event_loop.dispatch(Some(std::time::Duration::from_millis(16)), &mut compositor) {
+        if let Err(e) =
+            event_loop.dispatch(Some(std::time::Duration::from_millis(16)), &mut compositor)
+        {
             eprintln!("[compositor] event loop error: {e}");
         }
     }

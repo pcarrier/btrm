@@ -183,7 +183,7 @@ Most Rust crates are one or two source files. `blit-cli` is split into five and 
 | `nix/`         | Nix packaging: `common.nix` (toolchain), `packages.nix` (build defs), `tasks.nix` (CI tasks), NixOS/Darwin modules              |
 | `systemd/`     | Socket-activated unit files (user-level and system-level templates) and service units                                           |
 | `man/`         | scdoc man pages for `blit`, `blit-server`, `blit-gateway`, `blit-webrtc-forwarder`                                              |
-| `bin/`         | Shell scripts wrapping `nix run` tasks plus release scripts (`release-prepare`, `release-tag`, `prepare-release`)                |
+| `bin/`         | Shell scripts wrapping `nix run` tasks plus release scripts (`release-prepare`, `release-tag`, `prepare-release`)               |
 
 ## Code conventions
 

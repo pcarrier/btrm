@@ -1,5 +1,6 @@
 use blit_webrtc_forwarder::{Config, DEFAULT_HUB_URL};
 use clap::Parser;
+use rustls;
 
 #[derive(Parser)]
 #[command(
@@ -35,6 +36,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
     let cli = Cli::parse();
     blit_webrtc_forwarder::run(Config {
         sock_path: cli.socket,

@@ -10,16 +10,19 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'release ')
+    if: contains(github.event.head_commit.message, 'release ')
     steps:
       - uses: actions/checkout@v4
 
       - name: Extract version and create tag
         run: |
-          version="${COMMIT_MSG#release }"
-          version="${version%%$'\n'*}"
+          version=$(perl -ne 'if (/^\s*version = "([^"]+)";$/) { print "$1\n"; exit 0 }' nix/common.nix)
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Not a release commit, skipping"
+            echo "Could not read version from nix/common.nix, skipping"
+            exit 0
+          fi
+          if ! echo "$COMMIT_MSG" | grep -qF "release $version"; then
+            echo "Commit message does not mention release $version, skipping"
             exit 0
           fi
           tag="v${version}"

@@ -385,11 +385,29 @@ function TabShell(props: {
     });
   });
 
-  // Keyboard open detection: visualViewport shrinks >150px from full height
+  // Capture the full viewport height at mount and on orientation change only.
+  // We can't use window.innerHeight live because on Chrome Android with
+  // interactive-widget=resizes-content, innerHeight shrinks with the keyboard,
+  // making the difference vs visualViewport always ~0.
+  const [fullHeight, setFullHeight] = createSignal(0);
+  onMount(() => {
+    setFullHeight(window.innerHeight);
+    const onOrientationChange = () => {
+      // Small delay: orientation change fires before dimensions update
+      setTimeout(() => setFullHeight(window.innerHeight), 150);
+    };
+    screen.orientation?.addEventListener("change", onOrientationChange);
+    onCleanup(() =>
+      screen.orientation?.removeEventListener("change", onOrientationChange),
+    );
+  });
+
+  // Keyboard open detection: visualViewport shrinks >150px from captured full height
   const keyboardOpen = createMemo(() => {
     const h = vpHeight();
-    if (h === null) return false;
-    return window.innerHeight - h > 150;
+    const full = fullHeight();
+    if (h === null || full === 0) return false;
+    return full - h > 150;
   });
 
   const visibleSessions = createMemo(() =>

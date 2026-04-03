@@ -16,6 +16,12 @@ processes:
     command: cargo watch -w crates/server/src -w crates/remote/src -w crates/alacritty-driver/src -x "run -p blit-server --release -- --verbose --socket /tmp/blit-dev.sock"
     availability:
       restart: always
+    readiness_probe:
+      exec:
+        command: test -S /tmp/blit-dev.sock
+      initial_delay_seconds: 5
+      period_seconds: 2
+      failure_threshold: 300
 
   gateway:
     command: cargo watch -w crates/gateway/src -w crates/webserver/src -x "run -p blit-gateway --release"
@@ -26,9 +32,6 @@ processes:
       - BLIT_QUIC=1
       - BLIT_SOCK=/tmp/blit-dev.sock
       - BLIT_STORE_CONFIG=1
-    depends_on:
-      server:
-        condition: process_started
     availability:
       restart: always
     readiness_probe:
@@ -41,21 +44,35 @@ processes:
       failure_threshold: 300
 
   web-app:
-    command: cd js/web-app && pnpm exec vite --host
+    command: cd js && pnpm install --frozen-lockfile && cd web-app && pnpm exec vite --host
     environment:
       - VITE_BLIT_GATEWAY=localhost:3266
     depends_on:
       browser-wasm:
         condition: process_healthy
-      gateway:
-        condition: process_healthy
     availability:
       restart: always
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 3265
+        path: /
+      initial_delay_seconds: 5
+      period_seconds: 2
+      failure_threshold: 300
 
   website:
-    command: cd js/website && pnpm exec vite
+    command: cd js && pnpm install --frozen-lockfile && cd website && pnpm exec astro dev
     depends_on:
       browser-wasm:
         condition: process_healthy
     availability:
       restart: always
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 4321
+        path: /
+      initial_delay_seconds: 5
+      period_seconds: 2
+      failure_threshold: 300

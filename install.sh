@@ -4,7 +4,14 @@
 set -eu
 
 REPO="https://install.blit.sh"
-INSTALL_DIR="${BLIT_INSTALL_DIR:-/usr/local/bin}"
+pick_install_dir() {
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) echo "$HOME/.local/bin" ;;
+    *":$HOME/bin:"*) echo "$HOME/bin" ;;
+    *) echo "/usr/local/bin" ;;
+  esac
+}
+INSTALL_DIR="${BLIT_INSTALL_DIR:-$(pick_install_dir)}"
 
 main() {
   os=$(uname -s | tr '[:upper:]' '[:lower:]')

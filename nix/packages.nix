@@ -10,29 +10,67 @@
         cargoLockConfig
         rustToolchain
         rustPlatform
+        craneLib
+        src
+        commonArgs
+        cargoArtifacts
         ;
       serverVaapiEnabled = pkgs.stdenv.isLinux;
       bindgenClangArgs = pkgs.lib.optionalString pkgs.stdenv.isLinux "-isystem ${pkgs.lib.getDev pkgs.stdenv.cc.libc}/include";
-      blitServerCargoBuildFlags = [
-        "-p"
-        "blit-server"
-      ]
-      ++ pkgs.lib.optionals serverVaapiEnabled [
-        "--features"
-        "vaapi"
-      ];
-      blitServerNativeBuildInputs = [
-        pkgs.pkg-config
-      ]
-      ++ pkgs.lib.optionals serverVaapiEnabled [ pkgs.llvmPackages.libclang ];
-      blitServerBuildInputs = [
-        pkgs.libxkbcommon
-        pkgs.pixman
-      ]
-      ++ pkgs.lib.optionals serverVaapiEnabled [
-        pkgs.ffmpeg
-        pkgs.libva
-      ];
+
+      # ------------------------------------------------------------------
+      # Crane-based crate builds (share cargoArtifacts)
+      # ------------------------------------------------------------------
+
+      blit-server = craneLib.buildPackage (
+        commonArgs
+        // {
+          pname = "blit-server";
+          inherit cargoArtifacts;
+          cargoExtraArgs = "-p blit-server" + pkgs.lib.optionalString serverVaapiEnabled " --features vaapi";
+          doCheck = false;
+          postInstall = installManPages;
+        }
+      );
+
+      blit-cli = craneLib.buildPackage (
+        commonArgs
+        // {
+          pname = "blit-cli";
+          inherit cargoArtifacts;
+          cargoExtraArgs = "-p blit-cli";
+          doCheck = false;
+          preBuild = copyWebAppDist;
+          postInstall = installManPages;
+          meta.mainProgram = "blit";
+        }
+      );
+
+      blit-gateway = craneLib.buildPackage (
+        commonArgs
+        // {
+          pname = "blit-gateway";
+          inherit cargoArtifacts;
+          cargoExtraArgs = "-p blit-gateway";
+          doCheck = false;
+          preBuild = copyWebAppDist;
+          postInstall = installManPages;
+        }
+      );
+
+      blit-webrtc-forwarder = craneLib.buildPackage (
+        commonArgs
+        // {
+          pname = "blit-webrtc-forwarder";
+          inherit cargoArtifacts;
+          cargoExtraArgs = "-p blit-webrtc-forwarder";
+          doCheck = false;
+        }
+      );
+
+      # ------------------------------------------------------------------
+      # WASM (still uses wasm-pack, not crane)
+      # ------------------------------------------------------------------
 
       browserWasm = rustPlatform.buildRustPackage {
         pname = "blit-browser";
@@ -56,64 +94,9 @@
         doCheck = false;
       };
 
-      installManPages = ''
-        mkdir -p $out/share/man/man1
-        for f in ${manPages}/share/man/man1/*.1; do
-          install -m 644 "$f" $out/share/man/man1/
-        done
-      '';
-
-      blit-server = rustPlatform.buildRustPackage {
-        pname = "blit-server";
-        inherit version;
-        src = ../.;
-        cargoBuildFlags = blitServerCargoBuildFlags;
-        cargoLock = cargoLockConfig;
-        nativeBuildInputs = blitServerNativeBuildInputs;
-        buildInputs = blitServerBuildInputs;
-        env = pkgs.lib.optionalAttrs serverVaapiEnabled {
-          # buildRustPackage only forwards custom environment variables from the
-          # nested `env` attr; top-level attrs are ignored.
-          BINDGEN_EXTRA_CLANG_ARGS = bindgenClangArgs;
-          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-        };
-        postInstall = installManPages;
-        doCheck = false;
-      };
-
-      blit-cli = rustPlatform.buildRustPackage {
-        pname = "blit-cli";
-        inherit version;
-        src = ../.;
-        cargoBuildFlags = [
-          "-p"
-          "blit-cli"
-        ];
-        cargoLock = cargoLockConfig;
-        nativeBuildInputs = [ pkgs.pkg-config ];
-        buildInputs = [
-          pkgs.libxkbcommon
-          pkgs.pixman
-        ];
-        preBuild = copyWebAppDist;
-        postInstall = installManPages;
-        doCheck = false;
-        meta.mainProgram = "blit";
-      };
-
-      blit-gateway = rustPlatform.buildRustPackage {
-        pname = "blit-gateway";
-        inherit version;
-        src = ../.;
-        cargoBuildFlags = [
-          "-p"
-          "blit-gateway"
-        ];
-        cargoLock = cargoLockConfig;
-        preBuild = copyWebAppDist;
-        postInstall = installManPages;
-        doCheck = false;
-      };
+      # ------------------------------------------------------------------
+      # Static binaries (musl, for release tarballs)
+      # ------------------------------------------------------------------
 
       rustPlatformStatic = pkgs.pkgsStatic.makeRustPlatform {
         cargo = rustToolchain;
@@ -185,16 +168,26 @@
         };
       };
 
-      blit-webrtc-forwarder = rustPlatform.buildRustPackage {
-        pname = "blit-webrtc-forwarder";
-        inherit version;
-        src = ../.;
-        cargoBuildFlags = [
-          "-p"
-          "blit-webrtc-forwarder"
-        ];
-        cargoLock = cargoLockConfig;
-        doCheck = false;
+      blit-cli-static = mkStaticBin {
+        pname = "blit-cli";
+        cargoPkg = "blit-cli";
+        extraArgs = {
+          preBuild = copyWebAppDist;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [
+            pkgs.pkgsStatic.libxkbcommon
+            pkgs.pkgsStatic.pixman
+          ];
+          RUSTFLAGS = "-C relocation-model=static";
+        };
+      };
+
+      blit-gateway-static = mkStaticBin {
+        pname = "blit-gateway";
+        cargoPkg = "blit-gateway";
+        extraArgs = {
+          preBuild = copyWebAppDist;
+        };
       };
 
       blit-webrtc-forwarder-static = mkStaticBin {
@@ -202,7 +195,10 @@
         cargoPkg = "blit-webrtc-forwarder";
       };
 
-      # Helper to set up WASM browser pkg for JS builds.
+      # ------------------------------------------------------------------
+      # JS / Web assets
+      # ------------------------------------------------------------------
+
       setupBrowserPkg = ''
         mkdir -p crates/browser/pkg/snippets
         cp ${browserWasm}/blit_browser.js crates/browser/pkg/
@@ -217,8 +213,6 @@
         done
       '';
 
-      # Pre-fetch pnpm dependencies in a fixed-output derivation (has network
-      # access). The resulting store is used offline by webAppDist/websiteDist.
       pnpmDeps = pkgs.fetchPnpmDeps {
         pname = "blit-js";
         inherit version;
@@ -283,27 +277,16 @@
         cp ${webAppDist}/index.html ${webAppDist}/index.html.br js/ui/dist/
       '';
 
-      blit-cli-static = mkStaticBin {
-        pname = "blit-cli";
-        cargoPkg = "blit-cli";
-        extraArgs = {
-          preBuild = copyWebAppDist;
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [
-            pkgs.pkgsStatic.libxkbcommon
-            pkgs.pkgsStatic.pixman
-          ];
-          RUSTFLAGS = "-C relocation-model=static";
-        };
-      };
+      # ------------------------------------------------------------------
+      # Man pages
+      # ------------------------------------------------------------------
 
-      blit-gateway-static = mkStaticBin {
-        pname = "blit-gateway";
-        cargoPkg = "blit-gateway";
-        extraArgs = {
-          preBuild = copyWebAppDist;
-        };
-      };
+      installManPages = ''
+        mkdir -p $out/share/man/man1
+        for f in ${manPages}/share/man/man1/*.1; do
+          install -m 644 "$f" $out/share/man/man1/
+        done
+      '';
 
       manPages = pkgs.stdenv.mkDerivation {
         name = "blit-man-${version}";
@@ -317,6 +300,10 @@
         '';
         installPhase = "true";
       };
+
+      # ------------------------------------------------------------------
+      # Docker / tasks
+      # ------------------------------------------------------------------
 
       tasks = import ./tasks.nix {
         inherit
@@ -493,8 +480,15 @@
           fi
           export BINDGEN_EXTRA_CLANG_ARGS="${bindgenClangArgs}''${NIX_CFLAGS_COMPILE:+ $NIX_CFLAGS_COMPILE}"
           export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
-          export PKG_CONFIG_PATH="${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.pixman}/lib/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-          export LIBRARY_PATH="${pkgs.libxkbcommon}/lib:${pkgs.pixman}/lib''${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          export PKG_CONFIG_PATH="${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.pixman}/lib/pkgconfig${
+            if serverVaapiEnabled then
+              ":${pkgs.ffmpeg.dev}/lib/pkgconfig:${pkgs.libva.dev}/lib/pkgconfig"
+            else
+              ""
+          }''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          export LIBRARY_PATH="${pkgs.libxkbcommon}/lib:${pkgs.pixman}/lib${
+            if serverVaapiEnabled then ":${pkgs.ffmpeg.lib}/lib:${pkgs.libva}/lib" else ""
+          }''${LIBRARY_PATH:+:$LIBRARY_PATH}"
           export PATH="$PWD/bin:$PATH"
         '';
       };

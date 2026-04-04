@@ -113,8 +113,38 @@ For wire protocol details, frame encoding, and transport internals, see [ARCHITE
 | `BLIT_SCROLLBACK`      | `10000`                                                                                                                | Scrollback rows per PTY                                             |
 | `BLIT_HUB`             | `hub.blit.sh`                                                                                                          | Signaling hub URL for WebRTC sharing                                |
 | `BLIT_INSTALL_DIR`     | `%LOCALAPPDATA%\blit\bin` (Windows)                                                                                    | Override install location (Windows PowerShell installer)            |
-| `BLIT_SURFACE_ENCODER` | `auto`                                                                                                                 | Surface video encoder: `auto`, `av1`, `h264-software`, `h264-vaapi` |
-| `BLIT_VAAPI_DEVICE`    | `/dev/dri/renderD128`                                                                                                  | VA-API render node for hardware-accelerated encoding                |
+| `BLIT_SURFACE_ENCODERS`| see below                                                                                                              | Comma-separated encoder priority list (see below)                   |
+| `BLIT_VAAPI_DEVICE`    | `/dev/dri/renderD128`                                                                                                  | VA-API / NVENC render node for hardware-accelerated encoding        |
+
+### Surface video encoders
+
+Set `BLIT_SURFACE_ENCODERS` to a comma-separated priority list of encoders.
+The server tries each in order and uses the first that works.
+
+```bash
+# Default priority (AV1 > H.265 > H.264, hardware before software):
+# nvenc-av1,nvenc-h265,h265-vaapi,av1,nvenc-h264,h264-vaapi,h264-software
+
+# Force software AV1 only:
+BLIT_SURFACE_ENCODERS=av1
+
+# Prefer NVENC, fall back to software:
+BLIT_SURFACE_ENCODERS=nvenc-av1,nvenc-h265,h264-software
+```
+
+| Value            | Codec | Backend          | Notes                                           |
+| ---------------- | ----- | ---------------- | ----------------------------------------------- |
+| `nvenc-av1`      | AV1   | NVIDIA NVENC     | RTX 40+ series; fastest AV1 encode              |
+| `nvenc-h265`     | H.265 | NVIDIA NVENC     | Requires proprietary NVIDIA driver              |
+| `nvenc-h264`     | H.264 | NVIDIA NVENC     | Requires proprietary NVIDIA driver              |
+| `h265-vaapi`     | H.265 | VA-API           | Intel/AMD GPU; better compression than H.264    |
+| `h264-vaapi`     | H.264 | VA-API           | Intel/AMD GPU; max 3840×2160                    |
+| `av1`            | AV1   | rav1e (software) | No resolution limit; CPU-heavy at high res      |
+| `h264-software`  | H.264 | openh264         | Max 3840×2160; lowest CPU but worst compression |
+
+The browser automatically detects the codec from each frame and configures
+its WebCodecs decoder accordingly. Clients can also advertise which codecs
+they support; the server skips encoders the client can't decode.
 
 For `blit-gateway` configuration, running as a systemd/launchd service, and Nix module setup, see [SERVICES.md](SERVICES.md) and [`nix/README.md`](nix/README.md).
 
@@ -132,7 +162,7 @@ For `blit-gateway` configuration, running as a systemd/launchd service, and Nix 
 | Transport                | WS, WebTransport, WebRTC, Unix | WebSocket           | WebSocket           | TCP                   | UDP                   | WebSocket            |
 | Embeddable (React/Solid) | ✅                             | ❌                  | ❌                  | ❌                    | ❌                    | ✅                   |
 | Wayland compositor       | ✅ Built-in headless           | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
-| GUI app streaming        | ✅ H.264 / AV1                 | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
+| GUI app streaming        | ✅ H.264 / H.265 / AV1        | ❌                  | ❌                  | ❌                  | ❌                  | ❌                   |
 | Agent / CLI subcommands  | ✅                             | ❌                  | ❌                  | ❌                    | ❌                    | ❌                   |
 | SSH tunneling built-in   | ✅                             | ❌                  | ❌                  | ✅                    | ✅                    | ❌                   |
 

@@ -236,10 +236,10 @@ pub async fn ensure_local_server(socket_path: &str) -> Result<(), String> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(10_000),
         ipc_path: socket_path.to_string(),
-        surface_h264_encoder: std::env::var("BLIT_SURFACE_H264_ENCODER")
+        surface_encoders: std::env::var("BLIT_SURFACE_ENCODERS")
             .ok()
-            .and_then(|value| blit_server::SurfaceH264EncoderPreference::parse(&value))
-            .unwrap_or_default(),
+            .and_then(|v| blit_server::SurfaceEncoderPreference::parse_list(&v).ok())
+            .unwrap_or_else(blit_server::SurfaceEncoderPreference::defaults),
         surface_quality: std::env::var("BLIT_SURFACE_QUALITY")
             .ok()
             .and_then(|v| blit_server::SurfaceQuality::parse(&v))
@@ -273,10 +273,10 @@ pub async fn ensure_local_server(pipe_path: &str) -> Result<(), String> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(10_000),
         ipc_path: pipe_path.to_string(),
-        surface_h264_encoder: std::env::var("BLIT_SURFACE_H264_ENCODER")
+        surface_encoders: std::env::var("BLIT_SURFACE_ENCODERS")
             .ok()
-            .and_then(|value| blit_server::SurfaceH264EncoderPreference::parse(&value))
-            .unwrap_or_default(),
+            .and_then(|v| blit_server::SurfaceEncoderPreference::parse_list(&v).ok())
+            .unwrap_or_else(blit_server::SurfaceEncoderPreference::defaults),
         surface_quality: std::env::var("BLIT_SURFACE_QUALITY")
             .ok()
             .and_then(|v| blit_server::SurfaceQuality::parse(&v))

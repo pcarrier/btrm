@@ -239,6 +239,66 @@ enum Command {
 
     /// Upgrade blit to the latest version
     Upgrade,
+
+    /// List all compositor surfaces (TSV: ID, TITLE, SIZE, APP_ID)
+    Surfaces,
+
+    /// Capture a screenshot of a surface
+    Capture {
+        /// Surface ID
+        id: u16,
+
+        /// Output file path (default: surface-<id>.png). Format is inferred
+        /// from the extension (.png or .avif) unless --format is given.
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Image format: png or avif (default: inferred from --output, else png)
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Quality: 0 = lossless, 1–100 = lossy (applies to AVIF only)
+        #[arg(short, long, default_value_t = 0)]
+        quality: u8,
+
+        /// Resize the surface to this width (pixels) before capturing
+        #[arg(long)]
+        width: Option<u16>,
+
+        /// Resize the surface to this height (pixels) before capturing
+        #[arg(long)]
+        height: Option<u16>,
+    },
+
+    /// Click at coordinates on a surface
+    Click {
+        /// Surface ID
+        id: u16,
+
+        /// X coordinate (pixels)
+        x: u16,
+
+        /// Y coordinate (pixels)
+        y: u16,
+    },
+
+    /// Send a key press to a surface (e.g. Return, Escape, a, ctrl+a)
+    Key {
+        /// Surface ID
+        id: u16,
+
+        /// Key name (e.g. a, Return, Escape, F1, ctrl+a, shift+Tab)
+        key: String,
+    },
+
+    /// Type text into a surface (xdotool-style: {Return}, {ctrl+a} for special keys)
+    Type {
+        /// Surface ID
+        id: u16,
+
+        /// Text to type
+        text: String,
+    },
 }
 
 #[tokio::main]
@@ -284,6 +344,16 @@ async fn main() {
                     })
                     .unwrap_or(10_000),
                 ipc_path,
+                surface_encoders: std::env::var("BLIT_SURFACE_ENCODERS")
+                    .ok()
+                    .and_then(|v| blit_server::SurfaceEncoderPreference::parse_list(&v).ok())
+                    .unwrap_or_else(blit_server::SurfaceEncoderPreference::defaults),
+                surface_quality: std::env::var("BLIT_SURFACE_QUALITY")
+                    .ok()
+                    .and_then(|v| blit_server::SurfaceQuality::parse(&v))
+                    .unwrap_or_default(),
+                vaapi_device: std::env::var("BLIT_VAAPI_DEVICE")
+                    .unwrap_or_else(|_| "/dev/dri/renderD128".into()),
                 #[cfg(unix)]
                 fd_channel: fd_channel.or_else(|| {
                     std::env::var("BLIT_FD_CHANNEL")
@@ -351,7 +421,12 @@ async fn main() {
         | Command::Restart { .. }
         | Command::Kill { .. }
         | Command::Close { .. }
-        | Command::Wait { .. }) => {
+        | Command::Wait { .. }
+        | Command::Surfaces
+        | Command::Capture { .. }
+        | Command::Click { .. }
+        | Command::Key { .. }
+        | Command::Type { .. }) => {
             let conn = &cli.connect;
             let transport = match transport::connect(
                 &conn.socket,
@@ -455,6 +530,18 @@ async fn main() {
                         std::process::exit(1);
                     }
                 },
+                Command::Surfaces => agent::cmd_surfaces(transport).await,
+                Command::Capture {
+                    id,
+                    output,
+                    format,
+                    quality,
+                    width,
+                    height,
+                } => agent::cmd_capture(transport, id, output, format, quality, width, height).await,
+                Command::Click { id, x, y } => agent::cmd_click(transport, id, x, y).await,
+                Command::Key { id, key } => agent::cmd_key(transport, id, &key).await,
+                Command::Type { id, text } => agent::cmd_type(transport, id, &text).await,
                 _ => unreachable!(),
             };
             if let Err(e) = result {
@@ -564,13 +651,19 @@ async fn cmd_upgrade() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .ok_or("cannot determine binary directory")?;
 
-    let script = reqwest::get("https://install.blit.sh")
+    let install_url = if cfg!(windows) {
+        "https://install.blit.sh/install.ps1"
+    } else {
+        "https://install.blit.sh"
+    };
+    let script = reqwest::get(install_url)
         .await?
         .error_for_status()?
         .text()
         .await?;
 
-    let tmp = std::env::temp_dir().join(format!("blit-install-{}.sh", std::process::id()));
+    let ext = if cfg!(windows) { "ps1" } else { "sh" };
+    let tmp = std::env::temp_dir().join(format!("blit-install-{}.{}", std::process::id(), ext));
     std::fs::write(&tmp, &script)?;
 
     #[cfg(unix)]

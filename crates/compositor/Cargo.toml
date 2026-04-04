@@ -1,6 +1,6 @@
 [package]
 name = "blit-compositor"
-version = "0.18.0"
+version = "0.20.0"
 edition = "2024"
 license.workspace = true
 repository.workspace = true

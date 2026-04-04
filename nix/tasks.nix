@@ -224,7 +224,7 @@ let
       if [ -n "''${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
         echo "=== Exchanging OIDC token for crates.io publish token ==="
         oidc_response=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://crates.io")
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=crates.io")
         oidc=$(echo "$oidc_response" | jq -r '.value // empty')
         if [ -z "''${oidc:-}" ]; then
           echo "FATAL: failed to get OIDC token from GitHub"

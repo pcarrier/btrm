@@ -11,62 +11,65 @@
         rustToolchain
         rustPlatform
         craneLib
+        craneLibStatic
         src
         commonArgs
+        commonArgsStatic
         cargoArtifacts
+        cargoArtifactsStatic
         ;
       serverVaapiEnabled = pkgs.stdenv.isLinux;
       bindgenClangArgs = pkgs.lib.optionalString pkgs.stdenv.isLinux "-isystem ${pkgs.lib.getDev pkgs.stdenv.cc.libc}/include";
 
       # ------------------------------------------------------------------
-      # Crane-based crate builds (share cargoArtifacts)
+      # Crane workspace build (every workspace crate compiles once)
       # ------------------------------------------------------------------
 
-      blit-server = craneLib.buildPackage (
+      blit-workspace = craneLib.buildPackage (
         commonArgs
         // {
-          pname = "blit-server";
+          pname = "blit-workspace";
           inherit cargoArtifacts;
-          cargoExtraArgs = "-p blit-server" + pkgs.lib.optionalString serverVaapiEnabled " --features vaapi";
-          doCheck = false;
-          postInstall = installManPages;
-        }
-      );
-
-      blit-cli = craneLib.buildPackage (
-        commonArgs
-        // {
-          pname = "blit-cli";
-          inherit cargoArtifacts;
-          cargoExtraArgs = "-p blit-cli";
-          doCheck = false;
-          preBuild = copyWebAppDist;
-          postInstall = installManPages;
-          meta.mainProgram = "blit";
-        }
-      );
-
-      blit-gateway = craneLib.buildPackage (
-        commonArgs
-        // {
-          pname = "blit-gateway";
-          inherit cargoArtifacts;
-          cargoExtraArgs = "-p blit-gateway";
+          cargoExtraArgs =
+            "--workspace --exclude blit-browser"
+            + pkgs.lib.optionalString serverVaapiEnabled " --features blit-server/vaapi";
           doCheck = false;
           preBuild = copyWebAppDist;
           postInstall = installManPages;
         }
       );
 
-      blit-webrtc-forwarder = craneLib.buildPackage (
-        commonArgs
-        // {
-          pname = "blit-webrtc-forwarder";
-          inherit cargoArtifacts;
-          cargoExtraArgs = "-p blit-webrtc-forwarder";
-          doCheck = false;
-        }
-      );
+      # Split individual binaries out of the workspace build.
+      mkBin =
+        {
+          pname,
+          binName ? pname,
+          mainProgram ? binName,
+          withMan ? true,
+        }:
+        pkgs.runCommand "${pname}-${version}" { meta = { inherit mainProgram; }; } (
+          ''
+            mkdir -p $out/bin
+            cp ${blit-workspace}/bin/${binName} $out/bin/
+          ''
+          + pkgs.lib.optionalString withMan ''
+            if [ -d "${blit-workspace}/share/man" ]; then
+              mkdir -p $out/share
+              ln -s ${blit-workspace}/share/man $out/share/man
+            fi
+          ''
+        );
+
+      blit-server = mkBin { pname = "blit-server"; };
+      blit-cli = mkBin {
+        pname = "blit-cli";
+        binName = "blit";
+      };
+      blit-gateway = mkBin { pname = "blit-gateway"; };
+      blit-webrtc-forwarder = mkBin {
+        pname = "blit-webrtc-forwarder";
+        withMan = false;
+      };
 
       # ------------------------------------------------------------------
       # WASM (still uses wasm-pack, not crane)
@@ -95,105 +98,68 @@
       };
 
       # ------------------------------------------------------------------
-      # Static binaries (musl, for release tarballs)
+      # Static binaries (musl on Linux, for release tarballs)
       # ------------------------------------------------------------------
 
-      rustPlatformStatic = pkgs.pkgsStatic.makeRustPlatform {
-        cargo = rustToolchain;
-        rustc = rustToolchain;
-      };
+      blit-workspace-static = craneLibStatic.buildPackage (
+        commonArgsStatic
+        // {
+          pname = "blit-workspace-static";
+          cargoArtifacts = cargoArtifactsStatic;
+          cargoExtraArgs = "--workspace --exclude blit-browser";
+          doCheck = false;
+          preBuild = copyWebAppDist;
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          postFixup = ''
+            for bin in $out/bin/*; do
+              if ! file "$bin" | grep -qE "static(ally|-pie) linked"; then
+                echo "FATAL: $bin is not statically linked:"
+                file "$bin"
+                exit 1
+              fi
+            done
+          '';
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          postFixup = ''
+            for bin in $out/bin/*; do
+              for lib in $(otool -L "$bin" | tail -n +2 | awk '/\/nix\/store\//{print $1}'); do
+                base=$(basename "$lib")
+                case "$base" in
+                  libiconv.*|libiconv-*) sys="/usr/lib/libiconv.2.dylib" ;;
+                  libz.*|libz-*) sys="/usr/lib/libz.1.dylib" ;;
+                  libc++.*) sys="/usr/lib/libc++.1.dylib" ;;
+                  libc++abi.*) sys="/usr/lib/libc++abi.dylib" ;;
+                  libresolv.*) sys="/usr/lib/libresolv.9.dylib" ;;
+                  libSystem.*) sys="/usr/lib/libSystem.B.dylib" ;;
+                  *) echo "FATAL: unknown nix-store dylib: $lib"; exit 1 ;;
+                esac
+                echo "rewriting $lib -> $sys"
+                install_name_tool -change "$lib" "$sys" "$bin"
+              done
+            done
+          '';
+        }
+      );
 
       mkStaticBin =
         {
           pname,
-          cargoPkg,
-          extraArgs ? { },
+          binName ? pname,
         }:
-        rustPlatformStatic.buildRustPackage (
-          {
-            inherit pname version;
-            src = ../.;
-            cargoBuildFlags = [
-              "-p"
-              cargoPkg
-            ];
-            cargoLock = cargoLockConfig;
-            doCheck = false;
-          }
-          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-            postUnpack = "export NIX_CFLAGS_LINK=''";
-            postFixup = ''
-              for bin in $out/bin/*; do
-                if ! file "$bin" | grep -qE "static(ally|-pie) linked"; then
-                  echo "FATAL: $bin is not statically linked:"
-                  file "$bin"
-                  exit 1
-                fi
-              done
-            '';
-          }
-          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-            postFixup = ''
-              for bin in $out/bin/*; do
-                for lib in $(otool -L "$bin" | tail -n +2 | awk '/\/nix\/store\//{print $1}'); do
-                  base=$(basename "$lib")
-                  case "$base" in
-                    libiconv.*|libiconv-*) sys="/usr/lib/libiconv.2.dylib" ;;
-                    libz.*|libz-*) sys="/usr/lib/libz.1.dylib" ;;
-                    libc++.*) sys="/usr/lib/libc++.1.dylib" ;;
-                    libc++abi.*) sys="/usr/lib/libc++abi.dylib" ;;
-                    libresolv.*) sys="/usr/lib/libresolv.9.dylib" ;;
-                    libSystem.*) sys="/usr/lib/libSystem.B.dylib" ;;
-                    *) echo "FATAL: unknown nix-store dylib: $lib"; exit 1 ;;
-                  esac
-                  echo "rewriting $lib -> $sys"
-                  install_name_tool -change "$lib" "$sys" "$bin"
-                done
-              done
-            '';
-          }
-          // extraArgs
-        );
+        pkgs.runCommand "${pname}-static-${version}" { } ''
+          mkdir -p $out/bin
+          cp ${blit-workspace-static}/bin/${binName} $out/bin/
+        '';
 
-      blit-server-static = mkStaticBin {
-        pname = "blit-server";
-        cargoPkg = "blit-server";
-        extraArgs = {
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [
-            pkgs.pkgsStatic.libxkbcommon
-            pkgs.pkgsStatic.pixman
-          ];
-          RUSTFLAGS = "-C relocation-model=static";
-        };
-      };
-
+      blit-server-static = mkStaticBin { pname = "blit-server"; };
       blit-cli-static = mkStaticBin {
         pname = "blit-cli";
-        cargoPkg = "blit-cli";
-        extraArgs = {
-          preBuild = copyWebAppDist;
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [
-            pkgs.pkgsStatic.libxkbcommon
-            pkgs.pkgsStatic.pixman
-          ];
-          RUSTFLAGS = "-C relocation-model=static";
-        };
+        binName = "blit";
       };
-
-      blit-gateway-static = mkStaticBin {
-        pname = "blit-gateway";
-        cargoPkg = "blit-gateway";
-        extraArgs = {
-          preBuild = copyWebAppDist;
-        };
-      };
-
-      blit-webrtc-forwarder-static = mkStaticBin {
-        pname = "blit-webrtc-forwarder";
-        cargoPkg = "blit-webrtc-forwarder";
-      };
+      blit-gateway-static = mkStaticBin { pname = "blit-gateway"; };
+      blit-webrtc-forwarder-static = mkStaticBin { pname = "blit-webrtc-forwarder"; };
 
       # ------------------------------------------------------------------
       # JS / Web assets
@@ -469,7 +435,7 @@
           pkgs.wasm-pack
         ]
         ++ pkgs.lib.optionals serverVaapiEnabled [
-          pkgs.ffmpeg
+          pkgs.ffmpeg-headless
           pkgs.libva
           pkgs.llvmPackages.libclang
         ];
@@ -482,12 +448,12 @@
           export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
           export PKG_CONFIG_PATH="${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.pixman}/lib/pkgconfig${
             if serverVaapiEnabled then
-              ":${pkgs.ffmpeg.dev}/lib/pkgconfig:${pkgs.libva.dev}/lib/pkgconfig"
+              ":${pkgs.ffmpeg-headless.dev}/lib/pkgconfig:${pkgs.libva.dev}/lib/pkgconfig"
             else
               ""
           }''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           export LIBRARY_PATH="${pkgs.libxkbcommon}/lib:${pkgs.pixman}/lib${
-            if serverVaapiEnabled then ":${pkgs.ffmpeg.lib}/lib:${pkgs.libva}/lib" else ""
+            if serverVaapiEnabled then ":${pkgs.ffmpeg-headless.lib}/lib:${pkgs.libva}/lib" else ""
           }''${LIBRARY_PATH:+:$LIBRARY_PATH}"
           export PATH="$PWD/bin:$PATH"
         '';

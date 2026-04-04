@@ -45,7 +45,9 @@ export function getOrCreateKey(): Uint8Array {
   return key;
 }
 
-/** Encrypt a passphrase using nacl.secretbox. Returns base64url of nonce||ciphertext. */
+const ENCRYPTED_PREFIX = "e.";
+
+/** Encrypt a passphrase using nacl.secretbox. Returns `e.` + base64url of nonce||ciphertext. */
 export function encryptPassphrase(passphrase: string): string {
   const key = getOrCreateKey();
   const message = new TextEncoder().encode(passphrase);
@@ -54,14 +56,19 @@ export function encryptPassphrase(passphrase: string): string {
   const combined = new Uint8Array(nonce.length + box.length);
   combined.set(nonce);
   combined.set(box, nonce.length);
-  return base64urlEncode(combined);
+  return ENCRYPTED_PREFIX + base64urlEncode(combined);
+}
+
+/** Check if a hash value is an encrypted passphrase (starts with `e.`). */
+export function isEncrypted(hash: string): boolean {
+  return hash.startsWith(ENCRYPTED_PREFIX);
 }
 
 /** Decrypt a passphrase. Returns null if decryption fails (wrong key or corrupted). */
 export function decryptPassphrase(ciphertext: string): string | null {
   try {
     const key = getOrCreateKey();
-    const combined = base64urlDecode(ciphertext);
+    const combined = base64urlDecode(ciphertext.slice(ENCRYPTED_PREFIX.length));
     if (combined.length < 25) return null; // nonce (24) + at least 1 byte
     const nonce = combined.slice(0, 24);
     const box = combined.slice(24);
@@ -71,11 +78,4 @@ export function decryptPassphrase(ciphertext: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** Check if a hash looks like a raw UUID passphrase. */
-export function isRawPassphrase(hash: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    hash,
-  );
 }

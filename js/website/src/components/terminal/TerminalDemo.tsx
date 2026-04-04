@@ -21,7 +21,7 @@ import type {
 } from "@blit-sh/core";
 import { initWasm } from "../../lib/wasm";
 import {
-  isRawPassphrase,
+  isEncrypted,
   encryptPassphrase,
   decryptPassphrase,
 } from "../../lib/passphrase-crypto";
@@ -53,27 +53,26 @@ function resolvePassphrase(): PassphraseResult {
   if (!raw) {
     return { ok: false, error: "No session specified." };
   }
-  if (isRawPassphrase(raw)) {
-    // Raw UUID — encrypt and replace URL
-    try {
-      const encrypted = encryptPassphrase(raw);
-      history.replaceState(null, "", `/s#${encodeURIComponent(encrypted)}`);
-    } catch (e) {
-      console.error("[blit] encryptPassphrase failed:", e);
-      // Fall through — still return the raw passphrase
+  if (isEncrypted(raw)) {
+    const decrypted = decryptPassphrase(raw);
+    if (decrypted === null) {
+      return {
+        ok: false,
+        error:
+          "Cannot decrypt session link. This link was created on a different device.",
+      };
     }
-    return { ok: true, passphrase: raw };
+    return { ok: true, passphrase: decrypted };
   }
-  // Try to decrypt
-  const decrypted = decryptPassphrase(raw);
-  if (decrypted === null) {
-    return {
-      ok: false,
-      error:
-        "Cannot decrypt session link. This link was created on a different device.",
-    };
+  // Raw passphrase — encrypt and replace URL
+  try {
+    const encrypted = encryptPassphrase(raw);
+    history.replaceState(null, "", `/s#${encodeURIComponent(encrypted)}`);
+  } catch (e) {
+    console.error("[blit] encryptPassphrase failed:", e);
+    // Fall through — still return the raw passphrase
   }
-  return { ok: true, passphrase: decrypted };
+  return { ok: true, passphrase: raw };
 }
 
 // ---------------------------------------------------------------------------

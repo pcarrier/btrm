@@ -1,4 +1,4 @@
-import type React from "react";
+import type { JSX } from "solid-js";
 import type { BlitSession, TerminalPalette } from "@blit-sh/core";
 
 export function sessionName(s: BlitSession): string {
@@ -166,36 +166,36 @@ export const z = {
 } as const;
 
 // Layout styles that don't depend on the theme.
-export const layout: Record<string, React.CSSProperties> = {
+export const layout: Record<string, JSX.CSSProperties> = {
   overlay: {
     position: "fixed",
     inset: 0,
     display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    backdropFilter: "blur(1px)",
-    WebkitBackdropFilter: "blur(1px)",
-    zIndex: z.overlay,
+    "align-items": "center",
+    "justify-content": "center",
+    "background-color": "rgba(0,0,0,0.5)",
+    "backdrop-filter": "blur(1px)",
+    "-webkit-backdrop-filter": "blur(1px)",
+    "z-index": z.overlay,
     width: "100%",
     height: "100%",
-    maxWidth: "100%",
-    maxHeight: "100%",
+    "max-width": "100%",
+    "max-height": "100%",
     padding: 0,
     margin: 0,
   },
   workspace: {
     display: "flex",
-    flexDirection: "column",
+    "flex-direction": "column",
     height: "100%",
     width: "100%",
   },
   statusBar: {
     display: "flex",
-    alignItems: "center",
-    borderTop: "1px solid",
-    flexShrink: 0,
-    userSelect: "none",
+    "align-items": "center",
+    "border-top": "1px solid",
+    "flex-shrink": 0,
+    "user-select": "none",
   },
   termContainer: {
     flex: 1,
@@ -203,66 +203,66 @@ export const layout: Record<string, React.CSSProperties> = {
     position: "relative",
   },
   panel: {
-    padding: 16,
-    maxHeight: "80vh",
+    padding: "16px",
+    "max-height": "80vh",
     overflow: "auto",
   },
 };
 
 // Reusable component styles.
-export const ui: Record<string, React.CSSProperties> = {
+export const ui: Record<string, JSX.CSSProperties> = {
   btn: {
     background: "none",
     border: "none",
     color: "inherit",
     cursor: "pointer",
-    fontSize: 12,
-    fontFamily: "inherit",
+    "font-size": "12px",
+    "font-family": "inherit",
     opacity: 0.7,
     padding: "2px 6px",
   },
   input: {
     flex: 1,
     padding: "6px 10px",
-    fontSize: 14,
+    "font-size": "14px",
     border: "1px solid rgba(128,128,128,0.3)",
     outline: "none",
-    fontFamily: "inherit",
+    "font-family": "inherit",
   },
   badge: {
-    fontSize: 10,
+    "font-size": "10px",
     padding: "1px 6px",
-    backgroundColor: "rgba(88,136,255,0.25)",
+    "background-color": "rgba(88,136,255,0.25)",
     color: "inherit",
-    flexShrink: 0,
-    lineHeight: 1.5,
-  } as React.CSSProperties,
+    "flex-shrink": 0,
+    "line-height": 1.5,
+  } as JSX.CSSProperties,
   swatch: {
     display: "inline-block",
-    width: 14,
-    height: 14,
+    width: "14px",
+    height: "14px",
   },
   kbd: {
     display: "inline-block",
     padding: "2px 6px",
-    fontSize: 12,
-    fontFamily: "inherit",
+    "font-size": "12px",
+    "font-family": "inherit",
     border: "1px solid rgba(128,128,128,0.4)",
-    whiteSpace: "nowrap",
+    "white-space": "nowrap",
   },
 };
 
 export interface OverlayChromeStyles {
-  overlay: React.CSSProperties;
-  panel: React.CSSProperties;
-  header: React.CSSProperties;
-  headerCopy: React.CSSProperties;
-  title: React.CSSProperties;
-  subtitle: React.CSSProperties;
-  headerActions: React.CSSProperties;
-  closeButton: React.CSSProperties;
-  footer: React.CSSProperties;
-  actionButton: React.CSSProperties;
+  overlay: JSX.CSSProperties;
+  panel: JSX.CSSProperties;
+  header: JSX.CSSProperties;
+  headerCopy: JSX.CSSProperties;
+  title: JSX.CSSProperties;
+  subtitle: JSX.CSSProperties;
+  headerActions: JSX.CSSProperties;
+  closeButton: JSX.CSSProperties;
+  footer: JSX.CSSProperties;
+  actionButton: JSX.CSSProperties;
 }
 
 export function overlayChromeStyles(
@@ -272,82 +272,82 @@ export function overlayChromeStyles(
 ): OverlayChromeStyles {
   return {
     overlay: {
-      padding: Math.max(12, scale.panelPadding * 2),
+      padding: `${Math.max(12, scale.panelPadding * 2)}px`,
     },
     panel: {
-      backgroundColor: theme.solidPanelBg,
+      "background-color": theme.solidPanelBg,
       color: theme.fg,
       border: `1px solid ${theme.border}`,
-      boxShadow: dark
+      "box-shadow": dark
         ? "0 18px 60px rgba(0,0,0,0.45)"
         : "0 18px 60px rgba(0,0,0,0.12)",
       outline: "none",
     },
     header: {
       display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      gap: scale.gap,
-      flexWrap: "wrap",
-      marginBottom: scale.gap * 2,
+      "justify-content": "space-between",
+      "align-items": "flex-start",
+      gap: `${scale.gap}px`,
+      "flex-wrap": "wrap",
+      "margin-bottom": `${scale.gap * 2}px`,
     },
     headerCopy: {
       display: "grid",
-      gap: scale.tightGap,
-      minWidth: 0,
+      gap: `${scale.tightGap}px`,
+      "min-width": 0,
     },
     title: {
       margin: 0,
-      fontSize: scale.xl,
-      lineHeight: 1.2,
-      fontWeight: 600,
+      "font-size": `${scale.xl}px`,
+      "line-height": 1.2,
+      "font-weight": 600,
     },
     subtitle: {
       margin: 0,
-      fontSize: scale.sm,
-      lineHeight: 1.4,
+      "font-size": `${scale.sm}px`,
+      "line-height": 1.4,
       color: theme.dimFg,
     },
     headerActions: {
       display: "flex",
-      alignItems: "center",
-      gap: scale.tightGap + 2,
-      marginLeft: "auto",
+      "align-items": "center",
+      gap: `${scale.tightGap + 2}px`,
+      "margin-left": "auto",
     },
     closeButton: {
       ...ui.btn,
       opacity: 0.6,
       padding: `${scale.controlY}px ${scale.controlX}px`,
       border: `1px solid ${theme.subtleBorder}`,
-      backgroundColor: theme.inputBg,
-      fontSize: scale.sm,
-      whiteSpace: "nowrap",
+      "background-color": theme.inputBg,
+      "font-size": `${scale.sm}px`,
+      "white-space": "nowrap",
     },
     footer: {
       display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: scale.gap,
-      flexWrap: "wrap",
+      "justify-content": "space-between",
+      "align-items": "center",
+      gap: `${scale.gap}px`,
+      "flex-wrap": "wrap",
     },
     actionButton: {
       appearance: "none",
       border: `1px solid ${theme.subtleBorder}`,
-      backgroundColor: theme.inputBg,
+      "background-color": theme.inputBg,
       color: theme.fg,
       padding: `${scale.controlY + 2}px ${scale.controlX + 2}px`,
-      fontSize: scale.sm,
-      fontFamily: "inherit",
+      "font-size": `${scale.sm}px`,
+      "font-family": "inherit",
       cursor: "pointer",
     },
   };
 }
 
 export interface DisconnectedStyles extends OverlayChromeStyles {
-  card: React.CSSProperties;
-  content: React.CSSProperties;
-  title: React.CSSProperties;
-  reloadButton: React.CSSProperties;
+  card: JSX.CSSProperties;
+  content: JSX.CSSProperties;
+  title: JSX.CSSProperties;
+  reloadButton: JSX.CSSProperties;
 }
 
 export function disconnectedStyles(
@@ -362,21 +362,21 @@ export function disconnectedStyles(
     card: {
       ...chrome.panel,
       width: "min(24em, calc(100vw - 2em))",
-      maxWidth: "100%",
+      "max-width": "100%",
       background: dark ? theme.solidPanelBg : theme.panelBg,
       padding: 0,
     },
     content: {
       display: "grid",
       gap: "0.75em",
-      justifyItems: "center",
+      "justify-items": "center",
       padding: "1.2em 1.4em 1em",
     },
     title: {
       margin: 0,
-      fontSize: "1.2em",
-      lineHeight: 1.2,
-      fontWeight: 600,
+      "font-size": "1.2em",
+      "line-height": 1.2,
+      "font-weight": 600,
     },
     reloadButton: {
       ...chrome.actionButton,

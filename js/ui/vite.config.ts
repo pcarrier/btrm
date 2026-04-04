@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import solid from "vite-plugin-solid";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -15,7 +15,7 @@ const isDev =
 
 export default defineConfig({
   plugins: [
-    react(),
+    solid(),
     // Only inline everything into a single HTML file for production builds.
     !isDev && viteSingleFile(),
     {
@@ -75,22 +75,22 @@ export default bin.buffer;
         "../../crates/browser/pkg/blit_browser.js",
       ),
     },
-    dedupe: ["react", "react-dom"],
+    dedupe: ["solid-js"],
   },
   server: {
-    port: 3265,
+    port: parseInt(process.env.BLIT_DEV_UI_PORT || "3265"),
     fs: {
-      // Allow serving the WASM file from outside the web-app directory.
+      // Allow serving the WASM file from outside the ui directory.
       allow: [resolve(__dirname, "../..")],
     },
     proxy: isDev
       ? {
           "/config": {
-            target: `http://${process.env.VITE_BLIT_GATEWAY || "localhost:3266"}`,
+            target: `http://${process.env.VITE_BLIT_GATEWAY || `localhost:${process.env.BLIT_DEV_GW_PORT || "3266"}`}`,
             ws: true,
           },
-          "/fonts": `http://${process.env.VITE_BLIT_GATEWAY || "localhost:3266"}`,
-          "/font": `http://${process.env.VITE_BLIT_GATEWAY || "localhost:3266"}`,
+          "/fonts": `http://${process.env.VITE_BLIT_GATEWAY || `localhost:${process.env.BLIT_DEV_GW_PORT || "3266"}`}`,
+          "/font": `http://${process.env.VITE_BLIT_GATEWAY || `localhost:${process.env.BLIT_DEV_GW_PORT || "3266"}`}`,
         }
       : undefined,
   },

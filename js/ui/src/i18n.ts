@@ -43,6 +43,7 @@ const en: Messages = {
   "help.prevNextTerminal": "Prev / Next terminal",
   "help.prevNextPane": "Prev / Next pane",
   "help.debugPanel": "Debug panel",
+  "help.previewPanel": "Preview panel",
   "help.thisHelp": "This help",
   "help.closeOverlay": "Close overlay",
   "help.scroll": "Scroll (even in mouse mode)",
@@ -107,15 +108,21 @@ const en: Messages = {
   "switcher.paneEmpty": "{pane} is empty — Tab+>cmd or Enter for shell",
   "switcher.selectHint": "Select a layout, pane, terminal, or action.",
   "switcher.paneCount": "{count} panes",
+  "switcher.sectionSurfaces": "Surfaces",
+  "switcher.previewSurface": "Surface",
+  "switcher.focusSurface": "Focus Surface",
   "switcher.close": "Close",
   "switcher.runInlineCmd": 'Run "{command}"',
 
   "statusbar.menuTitle": "Menu",
   "statusbar.terminalOne": "{count} terminal",
   "statusbar.terminalMany": "{count} terminals",
+  "statusbar.surfaceOne": "{count} surface",
+  "statusbar.surfaceMany": "{count} surfaces",
   "statusbar.exited": "({count} exited)",
   "statusbar.debugStats": "Debug stats",
   "statusbar.paletteTitle": "Palette: {name}",
+  "statusbar.previewPanel": "Preview panel (Ctrl+Shift+B)",
   "statusbar.fontTitle": "Font",
   "statusbar.loadingFont": "Loading font…",
 
@@ -136,6 +143,8 @@ const en: Messages = {
   "palette.searchPlaceholder": "Search {tone} themes",
 
   "overlay.close": "Esc",
+
+  "previewPanel.terminals": "Terminals",
 
   "workspace.welcome": "Welcome",
   "workspace.newTerminal": "New terminal",
@@ -196,6 +205,7 @@ const es: Messages = {
   "help.prevNextTerminal": "Terminal anterior / siguiente",
   "help.prevNextPane": "Panel anterior / siguiente",
   "help.debugPanel": "Panel de depuración",
+  "help.previewPanel": "Panel de vista previa",
   "help.thisHelp": "Esta ayuda",
   "help.closeOverlay": "Cerrar ventana",
   "help.scroll": "Desplazar (incluso en modo ratón)",
@@ -260,15 +270,21 @@ const es: Messages = {
   "switcher.paneEmpty": "{pane} está vacío — Tab+>cmd o Enter para shell",
   "switcher.selectHint": "Seleccione un diseño, panel, terminal o acción.",
   "switcher.paneCount": "{count} paneles",
+  "switcher.sectionSurfaces": "Superficies",
+  "switcher.previewSurface": "Superficie",
+  "switcher.focusSurface": "Enfocar superficie",
   "switcher.close": "Cerrar",
   "switcher.runInlineCmd": 'Ejecutar "{command}"',
 
   "statusbar.menuTitle": "Menú",
   "statusbar.terminalOne": "{count} terminal",
   "statusbar.terminalMany": "{count} terminales",
+  "statusbar.surfaceOne": "{count} superficie",
+  "statusbar.surfaceMany": "{count} superficies",
   "statusbar.exited": "({count} finalizados)",
   "statusbar.debugStats": "Estadísticas de depuración",
   "statusbar.paletteTitle": "Paleta: {name}",
+  "statusbar.previewPanel": "Panel de vista previa (Ctrl+Shift+B)",
   "statusbar.fontTitle": "Fuente",
   "statusbar.loadingFont": "Cargando fuente…",
 
@@ -289,6 +305,8 @@ const es: Messages = {
   "palette.searchPlaceholder": "Buscar temas {tone}",
 
   "overlay.close": "Esc",
+
+  "previewPanel.terminals": "Terminales",
 
   "workspace.welcome": "Bienvenido",
   "workspace.newTerminal": "Nueva terminal",
@@ -350,6 +368,7 @@ const fr: Messages = {
   "help.prevNextTerminal": "Terminal précédent / suivant",
   "help.prevNextPane": "Panneau précédent / suivant",
   "help.debugPanel": "Panneau de débogage",
+  "help.previewPanel": "Panneau d'aperçu",
   "help.thisHelp": "Cette aide",
   "help.closeOverlay": "Fermer la fenêtre",
   "help.scroll": "Défiler (même en mode souris)",
@@ -415,15 +434,21 @@ const fr: Messages = {
   "switcher.selectHint":
     "Sélectionnez une disposition, un panneau, un terminal ou une action.",
   "switcher.paneCount": "{count} panneaux",
+  "switcher.sectionSurfaces": "Surfaces",
+  "switcher.previewSurface": "Surface",
+  "switcher.focusSurface": "Activer la surface",
   "switcher.close": "Fermer",
   "switcher.runInlineCmd": "Exécuter « {command} »",
 
   "statusbar.menuTitle": "Menu",
   "statusbar.terminalOne": "{count} terminal",
   "statusbar.terminalMany": "{count} terminaux",
+  "statusbar.surfaceOne": "{count} surface",
+  "statusbar.surfaceMany": "{count} surfaces",
   "statusbar.exited": "({count} terminés)",
   "statusbar.debugStats": "Statistiques de débogage",
   "statusbar.paletteTitle": "Palette : {name}",
+  "statusbar.previewPanel": "Panneau d'aperçu (Ctrl+Shift+B)",
   "statusbar.fontTitle": "Police",
   "statusbar.loadingFont": "Chargement de la police…",
 
@@ -444,6 +469,8 @@ const fr: Messages = {
   "palette.searchPlaceholder": "Chercher des thèmes {tone}",
 
   "overlay.close": "Esc",
+
+  "previewPanel.terminals": "Terminaux",
 
   "workspace.welcome": "Bienvenue",
   "workspace.newTerminal": "Nouveau terminal",
@@ -506,6 +533,7 @@ const de: Messages = {
   "help.prevNextTerminal": "Vorheriges / Nächstes Terminal",
   "help.prevNextPane": "Vorheriger / Nächster Bereich",
   "help.debugPanel": "Debug-Bereich",
+  "help.previewPanel": "Vorschau-Bereich",
   "help.thisHelp": "Diese Hilfe",
   "help.closeOverlay": "Fenster schließen",
   "help.scroll": "Scrollen (auch im Mausmodus)",
@@ -572,15 +600,21 @@ const de: Messages = {
   "switcher.selectHint":
     "Wählen Sie ein Layout, einen Bereich, ein Terminal oder eine Aktion.",
   "switcher.paneCount": "{count} Bereiche",
+  "switcher.sectionSurfaces": "Oberflächen",
+  "switcher.previewSurface": "Oberfläche",
+  "switcher.focusSurface": "Oberfläche fokussieren",
   "switcher.close": "Schließen",
   "switcher.runInlineCmd": "„{command}“ ausführen",
 
   "statusbar.menuTitle": "Menü",
   "statusbar.terminalOne": "{count} Terminal",
   "statusbar.terminalMany": "{count} Terminals",
+  "statusbar.surfaceOne": "{count} Oberfläche",
+  "statusbar.surfaceMany": "{count} Oberflächen",
   "statusbar.exited": "({count} beendet)",
   "statusbar.debugStats": "Debug-Statistiken",
   "statusbar.paletteTitle": "Palette: {name}",
+  "statusbar.previewPanel": "Vorschau-Bereich (Ctrl+Shift+B)",
   "statusbar.fontTitle": "Schrift",
   "statusbar.loadingFont": "Schrift wird geladen…",
 
@@ -601,6 +635,8 @@ const de: Messages = {
   "palette.searchPlaceholder": "{tone} Themen suchen",
 
   "overlay.close": "Esc",
+
+  "previewPanel.terminals": "Terminals",
 
   "workspace.welcome": "Willkommen",
   "workspace.newTerminal": "Neues Terminal",
@@ -661,6 +697,7 @@ const ja: Messages = {
   "help.prevNextTerminal": "前 / 次のターミナル",
   "help.prevNextPane": "前 / 次のペイン",
   "help.debugPanel": "デバッグパネル",
+  "help.previewPanel": "プレビューパネル",
   "help.thisHelp": "このヘルプ",
   "help.closeOverlay": "オーバーレイを閉じる",
   "help.scroll": "スクロール（マウスモードでも）",
@@ -725,15 +762,21 @@ const ja: Messages = {
   "switcher.selectHint":
     "レイアウト、ペイン、ターミナル、またはアクションを選択してください。",
   "switcher.paneCount": "{count} ペイン",
+  "switcher.sectionSurfaces": "サーフェス",
+  "switcher.previewSurface": "サーフェス",
+  "switcher.focusSurface": "サーフェスをフォーカス",
   "switcher.close": "閉じる",
   "switcher.runInlineCmd": "「{command}」を実行",
 
   "statusbar.menuTitle": "メニュー",
   "statusbar.terminalOne": "{count} ターミナル",
   "statusbar.terminalMany": "{count} ターミナル",
+  "statusbar.surfaceOne": "{count} サーフェス",
+  "statusbar.surfaceMany": "{count} サーフェス",
   "statusbar.exited": "({count} 終了)",
   "statusbar.debugStats": "デバッグ統計",
   "statusbar.paletteTitle": "パレット: {name}",
+  "statusbar.previewPanel": "プレビューパネル (Ctrl+Shift+B)",
   "statusbar.fontTitle": "フォント",
   "statusbar.loadingFont": "フォントを読み込み中…",
 
@@ -754,6 +797,8 @@ const ja: Messages = {
   "palette.searchPlaceholder": "{tone}テーマを検索",
 
   "overlay.close": "Esc",
+
+  "previewPanel.terminals": "ターミナル",
 
   "workspace.welcome": "ようこそ",
   "workspace.newTerminal": "新規ターミナル",
@@ -814,6 +859,7 @@ const zh: Messages = {
   "help.prevNextTerminal": "上一个 / 下一个终端",
   "help.prevNextPane": "上一个 / 下一个窗格",
   "help.debugPanel": "调试面板",
+  "help.previewPanel": "预览面板",
   "help.thisHelp": "此帮助",
   "help.closeOverlay": "关闭弹窗",
   "help.scroll": "滚动（鼠标模式下也可用）",
@@ -877,15 +923,21 @@ const zh: Messages = {
   "switcher.paneEmpty": "{pane} 为空 — Tab+>命令 或 Enter 打开 shell",
   "switcher.selectHint": "选择布局、窗格、终端或操作。",
   "switcher.paneCount": "{count} 个窗格",
+  "switcher.sectionSurfaces": "界面",
+  "switcher.previewSurface": "界面",
+  "switcher.focusSurface": "聚焦界面",
   "switcher.close": "关闭",
   "switcher.runInlineCmd": "运行“{command}”",
 
   "statusbar.menuTitle": "菜单",
   "statusbar.terminalOne": "{count} 个终端",
   "statusbar.terminalMany": "{count} 个终端",
+  "statusbar.surfaceOne": "{count} 个界面",
+  "statusbar.surfaceMany": "{count} 个界面",
   "statusbar.exited": "（{count} 已结束）",
   "statusbar.debugStats": "调试统计",
   "statusbar.paletteTitle": "调色板: {name}",
+  "statusbar.previewPanel": "预览面板 (Ctrl+Shift+B)",
   "statusbar.fontTitle": "字体",
   "statusbar.loadingFont": "正在加载字体…",
 
@@ -906,6 +958,8 @@ const zh: Messages = {
   "palette.searchPlaceholder": "搜索{tone}主题",
 
   "overlay.close": "Esc",
+
+  "previewPanel.terminals": "终端",
 
   "workspace.welcome": "欢迎",
   "workspace.newTerminal": "新建终端",

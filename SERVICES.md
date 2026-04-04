@@ -224,7 +224,7 @@ flowchart LR
 Runs on every push to `main` and on every pull request. Single job on `ubuntu-latest`:
 
 1. Installs the latest released `blit` CLI via `install.blit.sh`.
-2. Enters the Nix devshell and runs `bin/dev` (process-compose with `cargo watch`, WASM build, gateway, web-app, website).
+2. Enters the Nix devshell and runs `bin/dev` (process-compose with `cargo watch`, WASM build, gateway, ui, website).
 3. Polls `process-compose list` until all five services report Running.
 4. Smoke-tests with the `blit` CLI: starts a session, waits for it, verifies output, lists sessions, closes the session.
 5. Tears down process-compose.

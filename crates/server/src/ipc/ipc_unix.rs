@@ -122,7 +122,7 @@ fn recv_fd(channel: RawFd) -> RecvFdResult {
 
 pub async fn run_fd_channel(channel_fd: RawFd, state: crate::AppState) {
     use std::os::unix::io::FromRawFd;
-    if state.0.verbose {
+    if state.config.verbose {
         eprintln!("accepting clients via fd-channel (fd {channel_fd})");
     }
     let channel = unsafe { std::os::unix::net::UnixStream::from_raw_fd(channel_fd) };
@@ -153,7 +153,7 @@ pub async fn run_fd_channel(channel_fd: RawFd, state: crate::AppState) {
             }
         }
     }
-    if state.0.verbose {
+    if state.config.verbose {
         eprintln!("fd-channel closed, shutting down");
     }
 }

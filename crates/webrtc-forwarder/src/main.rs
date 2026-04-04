@@ -1,5 +1,6 @@
 use blit_webrtc_forwarder::{Config, DEFAULT_HUB_URL};
 use clap::Parser;
+use rustls;
 
 #[derive(Parser)]
 #[command(

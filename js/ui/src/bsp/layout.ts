@@ -11,6 +11,9 @@ export {
   adjustWeights,
   layoutFromDSL,
   PRESETS,
+  surfaceAssignment,
+  isSurfaceAssignment,
+  parseSurfaceAssignment,
 } from "@blit-sh/core/bsp";
 
 import { readStorage, writeStorage } from "../storage";

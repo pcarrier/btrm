@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { createSignal, onCleanup } from "solid-js";
 import { PALETTES, DEFAULT_FONT } from "@blit-sh/core";
 import type { TerminalPalette } from "@blit-sh/core";
 import { isEncrypted, decryptPassphrase } from "./passphrase-crypto";
@@ -141,17 +141,17 @@ export function writeStorage(key: string, value: string) {
 }
 
 // ---------------------------------------------------------------------------
-// React hook — subscribe to a single config key reactively.
+// Solid primitive — subscribe to a single config key reactively.
+// Must be called within a reactive owner (component or createRoot).
 // ---------------------------------------------------------------------------
 
-export function useConfigValue(key: string): string | null {
-  return useSyncExternalStore(
-    (cb) =>
-      onConfigChange((k) => {
-        if (k === key) cb();
-      }),
-    () => readStorage(key),
-  );
+export function useConfigValue(key: string): () => string | null {
+  const [value, setValue] = createSignal(readStorage(key));
+  const unsub = onConfigChange((k) => {
+    if (k === key) setValue(readStorage(key));
+  });
+  onCleanup(unsub);
+  return value;
 }
 
 // ---------------------------------------------------------------------------

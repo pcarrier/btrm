@@ -323,13 +323,13 @@ pub fn spawn_pty(
     };
 
     state
-        .2
+        .pty_fds
         .write()
         .unwrap()
         .insert(id, PtyWriteTarget(handle.input));
     let (byte_tx, byte_rx) = mpsc::channel(PTY_CHANNEL_CAPACITY);
     let reader_output = SendHandle(handle.output);
-    let notify = state.3.clone();
+    let notify = state.notify.clone();
     let reader_handle = std::thread::spawn(move || pty_reader(reader_output, byte_tx, notify));
     let lflag_cache = pty_lflag(&handle);
 
@@ -465,13 +465,13 @@ pub fn respawn_child(
     };
 
     state
-        .2
+        .pty_fds
         .write()
         .unwrap()
         .insert(pty_id, PtyWriteTarget(handle.input));
     let (byte_tx, byte_rx) = mpsc::channel(PTY_CHANNEL_CAPACITY);
     let reader_output = SendHandle(handle.output);
-    let notify = state.3.clone();
+    let notify = state.notify.clone();
     let reader_handle = std::thread::spawn(move || pty_reader(reader_output, byte_tx, notify));
     Some((handle, reader_handle, byte_rx))
 }

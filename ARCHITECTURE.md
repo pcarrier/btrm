@@ -141,6 +141,7 @@ Every message starts with a **1-byte opcode**. Fields are packed in little-endia
 | `0x23` | `SURFACE_TITLE`     | `[pty_id:2][surface_id:2][title:N]`                                                             |
 | `0x24` | `SURFACE_RESIZED`   | `[pty_id:2][surface_id:2][w:2][h:2]`                                                            |
 | `0x25` | `CLIPBOARD`         | `[pty_id:2][surface_id:2][mime_len:2][mime:N][data:M]`                                          |
+| `0x28` | `SURFACE_APP_ID`    | `[pty_id:2][surface_id:2][app_id:N]`                                                            |
 
 ### Feature negotiation
 

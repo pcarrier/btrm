@@ -11,8 +11,8 @@ use blit_remote::{
     FEATURE_CREATE_NONCE, FEATURE_RESIZE_BATCH, FEATURE_RESTART, FrameState, READ_ANSI, READ_TAIL,
     S2C_CLOSED, S2C_CREATED, S2C_CREATED_N, S2C_LIST, S2C_READY, S2C_SEARCH_RESULTS,
     S2C_SURFACE_CAPTURE, S2C_SURFACE_LIST, S2C_TEXT, S2C_TITLE, SURFACE_FRAME_FLAG_KEYFRAME,
-    build_update_msg, msg_hello, msg_s2c_clipboard, msg_surface_created, msg_surface_destroyed,
-    msg_surface_frame, msg_surface_resized, msg_surface_title,
+    build_update_msg, msg_hello, msg_s2c_clipboard, msg_surface_app_id, msg_surface_created,
+    msg_surface_destroyed, msg_surface_frame, msg_surface_resized, msg_surface_title,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -2004,8 +2004,9 @@ async fn tick(state: &AppState) -> TickOutcome {
                 }
                 CompositorEvent::SurfaceAppId { surface_id, app_id } => {
                     if let Some(info) = cs.surfaces.get_mut(&surface_id) {
-                        info.app_id = app_id;
+                        info.app_id = app_id.clone();
                     }
+                    broadcast.push(msg_surface_app_id(cs.session_id, surface_id, &app_id));
                 }
                 CompositorEvent::SurfaceResized {
                     surface_id,

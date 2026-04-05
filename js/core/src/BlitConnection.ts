@@ -23,6 +23,7 @@ import {
   S2C_HELLO,
   S2C_LIST,
   S2C_SEARCH_RESULTS,
+  S2C_SURFACE_APP_ID,
   S2C_SURFACE_CREATED,
   S2C_SURFACE_DESTROYED,
   S2C_SURFACE_FRAME,
@@ -947,6 +948,15 @@ export class BlitConnection {
           const surfaceId = bytes[3] | (bytes[4] << 8);
           const title = textDecoder.decode(bytes.subarray(5));
           this.surfaceStore.handleSurfaceTitle(surfaceId, title);
+        } catch {}
+        return;
+      }
+      case S2C_SURFACE_APP_ID: {
+        try {
+          if (bytes.length < 5) return;
+          const surfaceId = bytes[3] | (bytes[4] << 8);
+          const appId = textDecoder.decode(bytes.subarray(5));
+          this.surfaceStore.handleSurfaceAppId(surfaceId, appId);
         } catch {}
         return;
       }

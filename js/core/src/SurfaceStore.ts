@@ -164,8 +164,7 @@ export class SurfaceStore {
 
     const surface = this.surfaces.get(surfaceId);
     if (surface && (surface.width !== width || surface.height !== height)) {
-      surface.width = width;
-      surface.height = height;
+      this.surfaces.set(surfaceId, { ...surface, width, height });
       this.emitChange();
     }
 
@@ -186,7 +185,15 @@ export class SurfaceStore {
   handleSurfaceTitle(surfaceId: number, title: string): void {
     const surface = this.surfaces.get(surfaceId);
     if (surface) {
-      surface.title = title;
+      this.surfaces.set(surfaceId, { ...surface, title });
+      this.emitChange();
+    }
+  }
+
+  handleSurfaceAppId(surfaceId: number, appId: string): void {
+    const surface = this.surfaces.get(surfaceId);
+    if (surface) {
+      this.surfaces.set(surfaceId, { ...surface, appId });
       this.emitChange();
     }
   }
@@ -194,8 +201,7 @@ export class SurfaceStore {
   handleSurfaceResized(surfaceId: number, width: number, height: number): void {
     const surface = this.surfaces.get(surfaceId);
     if (surface) {
-      surface.width = width;
-      surface.height = height;
+      this.surfaces.set(surfaceId, { ...surface, width, height });
       this.ensureCanvas(surfaceId, width, height);
       this.emitChange();
     }

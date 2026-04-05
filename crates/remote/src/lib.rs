@@ -150,6 +150,8 @@ pub const S2C_SURFACE_FRAME: u8 = 0x22;
 pub const S2C_SURFACE_TITLE: u8 = 0x23;
 /// A Wayland surface was resized by the app: [0x24][session_id:2][surface_id:2][width:2][height:2]
 pub const S2C_SURFACE_RESIZED: u8 = 0x24;
+/// A Wayland surface's app_id changed: [0x28][session_id:2][surface_id:2][app_id:N]
+pub const S2C_SURFACE_APP_ID: u8 = 0x28;
 /// Clipboard content from a Wayland surface:
 /// [0x25][session_id:2][surface_id:2][mime_len:2][mime:N][data_len:4][data:N]
 pub const S2C_CLIPBOARD: u8 = 0x25;
@@ -1300,6 +1302,11 @@ pub enum ServerMsg<'a> {
         surface_id: u16,
         title: &'a str,
     },
+    SurfaceAppId {
+        session_id: u16,
+        surface_id: u16,
+        app_id: &'a str,
+    },
     SurfaceResized {
         session_id: u16,
         surface_id: u16,
@@ -1591,6 +1598,17 @@ pub fn parse_server_msg(data: &[u8]) -> Option<ServerMsg<'_>> {
                 session_id: u16::from_le_bytes([data[1], data[2]]),
                 surface_id: u16::from_le_bytes([data[3], data[4]]),
                 title,
+            })
+        }
+        S2C_SURFACE_APP_ID => {
+            if data.len() < 5 {
+                return None;
+            }
+            let app_id = std::str::from_utf8(data.get(5..).unwrap_or_default()).unwrap_or_default();
+            Some(ServerMsg::SurfaceAppId {
+                session_id: u16::from_le_bytes([data[1], data[2]]),
+                surface_id: u16::from_le_bytes([data[3], data[4]]),
+                app_id,
             })
         }
         S2C_SURFACE_RESIZED => {
@@ -2001,6 +2019,16 @@ pub fn msg_surface_title(session_id: u16, surface_id: u16, title: &str) -> Vec<u
     msg.extend_from_slice(&session_id.to_le_bytes());
     msg.extend_from_slice(&surface_id.to_le_bytes());
     msg.extend_from_slice(title_bytes);
+    msg
+}
+
+pub fn msg_surface_app_id(session_id: u16, surface_id: u16, app_id: &str) -> Vec<u8> {
+    let app_id_bytes = app_id.as_bytes();
+    let mut msg = Vec::with_capacity(5 + app_id_bytes.len());
+    msg.push(S2C_SURFACE_APP_ID);
+    msg.extend_from_slice(&session_id.to_le_bytes());
+    msg.extend_from_slice(&surface_id.to_le_bytes());
+    msg.extend_from_slice(app_id_bytes);
     msg
 }
 

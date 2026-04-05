@@ -197,6 +197,7 @@ export const S2C_SURFACE_FRAME = 0x22;
 export const S2C_SURFACE_TITLE = 0x23;
 export const S2C_SURFACE_RESIZED = 0x24;
 export const S2C_CLIPBOARD_MSG = 0x25;
+export const S2C_SURFACE_APP_ID = 0x28;
 export const SURFACE_FRAME_FLAG_KEYFRAME = 1 << 0;
 export const SURFACE_FRAME_CODEC_MASK = 0b110;
 export const SURFACE_FRAME_CODEC_H264 = 0 << 1;

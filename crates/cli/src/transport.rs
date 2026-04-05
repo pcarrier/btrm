@@ -298,7 +298,6 @@ pub async fn ensure_local_server(pipe_path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::AsyncReadExt;
 
     // ── make_frame ──
 

@@ -24,7 +24,9 @@ import type {
   BlitWasmModule,
   SessionId,
   TerminalPalette,
+  ConnectionId,
 } from "@blit-sh/core";
+import type { ConnectionSpec } from "./App";
 import { createMetrics } from "./createMetrics";
 import { createFontLoader } from "./createFontLoader";
 import { createKeyboardShortcuts } from "./createKeyboardShortcuts";
@@ -62,25 +64,20 @@ import {
 
 export type Overlay = "expose" | "palette" | "font" | "help" | null;
 
-const PRIMARY_CONNECTION_ID = "main";
-
 export function Workspace(props: {
-  transport: BlitTransport;
+  connections: ConnectionSpec[];
   wasm: BlitWasmModule;
   onAuthError: () => void;
 }) {
   const workspace = new BlitWorkspace({ wasm: props.wasm });
-  createBlitWorkspaceConnection(
-    workspace,
-    PRIMARY_CONNECTION_ID,
-    props.transport,
-  );
+  for (const conn of props.connections) {
+    createBlitWorkspaceConnection(workspace, conn.id, conn.transport);
+  }
 
   return (
     <BlitWorkspaceProvider workspace={workspace}>
       <WorkspaceScreen
-        transport={props.transport}
-        primaryConnectionId={PRIMARY_CONNECTION_ID}
+        connectionSpecs={props.connections}
         onAuthError={props.onAuthError}
       />
     </BlitWorkspaceProvider>
@@ -88,13 +85,19 @@ export function Workspace(props: {
 }
 
 function WorkspaceScreen(props: {
-  transport: BlitTransport;
-  primaryConnectionId: string;
+  connectionSpecs: ConnectionSpec[];
   onAuthError: () => void;
 }) {
   const workspace = createBlitWorkspace();
   const wsState = createBlitWorkspaceState(workspace);
   const sessions = createBlitSessions(workspace);
+
+  /** Connection ID labels from the CLI config. */
+  const connectionLabels = new Map<string, string>(
+    props.connectionSpecs.map((c) => [c.id, c.label]),
+  );
+  const multiConnection = props.connectionSpecs.length > 1;
+  const defaultConnectionId = props.connectionSpecs[0]?.id ?? "main";
 
   const focusedSession = () => {
     const snap = wsState();
@@ -102,23 +105,43 @@ function WorkspaceScreen(props: {
     return snap.sessions.find((s) => s.id === snap.focusedSessionId) ?? null;
   };
 
+  /** The connection that owns the currently focused session (or the first). */
+  const activeConnectionId = (): ConnectionId => {
+    const fs = focusedSession();
+    return fs?.connectionId ?? defaultConnectionId;
+  };
+
   const connection = () => {
     const snap = wsState();
-    return (
-      snap.connections.find((c) => c.id === props.primaryConnectionId) ?? null
-    );
+    return snap.connections.find((c) => c.id === activeConnectionId()) ?? null;
   };
+
+  /** All connections from snapshot. */
+  const allConnections = () => wsState().connections;
 
   const [surfaces, setSurfaces] = createSignal<BlitSurface[]>([]);
 
+  // Aggregate surfaces from all connections.
   createEffect(() => {
-    const conn = workspace.getConnection(props.primaryConnectionId);
-    if (!conn) return;
-    const store = conn.surfaceStore;
-    const sync = () => setSurfaces([...store.getSurfaces().values()]);
-    sync();
-    const unsub = store.onChange(sync);
-    onCleanup(unsub);
+    const cleanups: (() => void)[] = [];
+    const syncAll = () => {
+      const all: BlitSurface[] = [];
+      for (const spec of props.connectionSpecs) {
+        const conn = workspace.getConnection(spec.id);
+        if (!conn) continue;
+        for (const s of conn.surfaceStore.getSurfaces().values()) {
+          all.push(s);
+        }
+      }
+      setSurfaces(all);
+    };
+    for (const spec of props.connectionSpecs) {
+      const conn = workspace.getConnection(spec.id);
+      if (!conn) continue;
+      cleanups.push(conn.surfaceStore.onChange(syncAll));
+    }
+    syncAll();
+    onCleanup(() => cleanups.forEach((fn) => fn()));
   });
 
   const [palette, setPalette] =
@@ -313,13 +336,22 @@ function WorkspaceScreen(props: {
     workspace.setVisibleSessions(desired);
   });
 
-  // Auth error
+  // Auth error — trigger if any connection has an auth error.
   createEffect(() => {
-    if (connection()?.error === "auth") props.onAuthError();
+    const conns = allConnections();
+    if (conns.some((c) => c.error === "auth")) props.onAuthError();
   });
 
-  // Debounce connected status
-  const rawStatus = () => connection()?.status ?? "disconnected";
+  // Debounce connected status — worst status across all connections.
+  const rawStatus = () => {
+    const conns = allConnections();
+    if (conns.length === 0) return "disconnected" as const;
+    // If any connection is in error/disconnected, show that.
+    for (const s of ["error", "disconnected", "closed", "connecting", "authenticating"] as const) {
+      if (conns.some((c) => c.status === s)) return s;
+    }
+    return "connected" as const;
+  };
   const [stableStatus, setStableStatus] = createSignal(rawStatus());
   createEffect(() => {
     const rs = rawStatus();
@@ -460,7 +492,7 @@ function WorkspaceScreen(props: {
     try {
       const fid = wsState().focusedSessionId;
       const session = await workspace.createSession({
-        connectionId: props.primaryConnectionId,
+        connectionId: activeConnectionId(),
         rows: termHandle?.rows ?? 24,
         cols: termHandle?.cols ?? 80,
         ...(command ? { command } : {}),
@@ -477,7 +509,7 @@ function WorkspaceScreen(props: {
     try {
       const fid = wsState().focusedSessionId;
       const session = await workspace.createSession({
-        connectionId: props.primaryConnectionId,
+        connectionId: activeConnectionId(),
         rows: termHandle?.rows ?? 24,
         cols: termHandle?.cols ?? 80,
         ...(command ? { command } : {}),
@@ -536,7 +568,7 @@ function WorkspaceScreen(props: {
 
   // Set font defaults on connection
   createEffect(() => {
-    const conn = workspace.getConnection(props.primaryConnectionId);
+    const conn = workspace.getConnection(activeConnectionId());
     if (!conn) return;
     const dpr = window.devicePixelRatio || 1;
     conn.setFontSize(fontSize() * dpr);
@@ -564,7 +596,7 @@ function WorkspaceScreen(props: {
       if (a) parts.push(`a=${a}`);
     }
     const fSurface = focusedSurfaceId();
-    if (fSurface != null) parts.push(`s=${props.primaryConnectionId}:${fSurface}`);
+    if (fSurface != null) parts.push(`s=${activeConnectionId()}:${fSurface}`);
     const fTerminal = wsState().focusedSessionId;
     if (fTerminal && fSurface == null) parts.push(`t=${fTerminal}`);
     const existing = location.hash.slice(1);
@@ -695,7 +727,9 @@ function WorkspaceScreen(props: {
                 >
                   {(sid) => (
                     <BlitSurfaceView
-                      connectionId={props.primaryConnectionId}
+            connectionId={activeConnectionId()}
+            connectionLabels={connectionLabels}
+            multiConnection={multiConnection}
                       surfaceId={sid()}
                       focus
                       resizable
@@ -712,7 +746,7 @@ function WorkspaceScreen(props: {
                 <BSPContainer
                   layout={al()}
                   onLayoutChange={setActiveLayout}
-                  connectionId={props.primaryConnectionId}
+                  connectionId={activeConnectionId()}
                   palette={palette()}
                   fontFamily={resolvedFontWithFallback()}
                   fontSize={fontSize()}
@@ -750,7 +784,7 @@ function WorkspaceScreen(props: {
               offScreenSessions={offScreenSessions()}
               surfaces={offScreenSurfaces()}
               focusedSurfaceId={focusedSurfaceId()}
-              connectionId={props.primaryConnectionId}
+              connectionId={activeConnectionId()}
               theme={theme()}
               scale={chromeScale()}
               palette={palette()}
@@ -803,7 +837,7 @@ function WorkspaceScreen(props: {
             onChangeFont={() => toggleOverlay("font")}
             onChangePalette={() => toggleOverlay("palette")}
             surfaces={surfaces()}
-            connectionId={props.primaryConnectionId}
+            connectionId={activeConnectionId()}
             focusedSurfaceId={focusedSurfaceId()}
             onFocusSurface={focusSurface}
             onMoveSurfaceToPane={(sid, targetPaneId) => {
@@ -862,9 +896,14 @@ function WorkspaceScreen(props: {
             status={stableStatus()}
             retryCount={connection()?.retryCount ?? 0}
             error={connection()?.error ?? null}
-            onReconnect={() =>
-              workspace.reconnectConnection(props.primaryConnectionId)
-            }
+            onReconnect={() => {
+              for (const spec of props.connectionSpecs) {
+                const c = wsState().connections.find((x) => x.id === spec.id);
+                if (c && c.status !== "connected") {
+                  workspace.reconnectConnection(spec.id);
+                }
+              }
+            }}
             metrics={metrics()}
             palette={palette()}
             fontSize={fontSize()}
@@ -875,7 +914,7 @@ function WorkspaceScreen(props: {
             previewPanelOpen={previewPanelOpen()}
             onPreviewPanel={togglePreviewPanel}
             debugStats={workspace.getConnectionDebugStats(
-              props.primaryConnectionId,
+              activeConnectionId(),
               wsState().focusedSessionId,
             )}
             timeline={timeline}

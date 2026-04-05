@@ -470,6 +470,8 @@ export function SwitcherOverlay(props: {
   onChangePalette?: () => void;
   surfaces?: readonly BlitSurface[];
   connectionId?: string;
+  connectionLabels?: Map<string, string>;
+  multiConnection?: boolean;
   focusedSurfaceId?: number | null;
   onFocusSurface?: (surfaceId: number) => void;
   onMoveSurfaceToPane?: (surfaceId: number, targetPaneId: string) => void;
@@ -770,10 +772,28 @@ export function SwitcherOverlay(props: {
       next.push({ title: t("switcher.sectionPanes"), items: paneMatches() });
     }
     if (!layoutMode() && sessionMatches().length > 0) {
-      next.push({
-        title: t("switcher.sectionTerminals"),
-        items: sessionMatches(),
-      });
+      if (props.multiConnection && props.connectionLabels) {
+        // Group sessions by connection.
+        const groups = new Map<string, SessionItem[]>();
+        for (const item of sessionMatches()) {
+          const session = props.sessions.find((s) => s.id === item.sessionId);
+          const connId = session?.connectionId ?? "unknown";
+          if (!groups.has(connId)) groups.set(connId, []);
+          groups.get(connId)!.push(item);
+        }
+        for (const [connId, items] of groups) {
+          const label = props.connectionLabels.get(connId) ?? connId;
+          next.push({
+            title: label,
+            items,
+          });
+        }
+      } else {
+        next.push({
+          title: t("switcher.sectionTerminals"),
+          items: sessionMatches(),
+        });
+      }
     }
     if (!layoutMode() && surfaceMatches().length > 0) {
       next.push({
@@ -795,15 +815,27 @@ export function SwitcherOverlay(props: {
       next.push({ title: t("switcher.sectionLayouts"), items: presets });
     }
 
-    const actions: ActionItem[] = [
-      {
+    const actions: ActionItem[] = [];
+    if (props.multiConnection && props.connectionLabels) {
+      // One "new terminal" action per connection.
+      for (const [connId, label] of props.connectionLabels) {
+        actions.push({
+          type: "action",
+          key: `action:new-terminal:${connId}`,
+          title: `${t("switcher.newTerminal")} (${label})`,
+          subtitle: t("switcher.createInCwd"),
+          action: "new-terminal",
+        });
+      }
+    } else {
+      actions.push({
         type: "action",
         key: "action:new-terminal",
         title: t("switcher.newTerminal"),
         subtitle: t("switcher.createInCwd"),
         action: "new-terminal",
-      },
-    ];
+      });
+    }
     if (props.onChangePalette) {
       actions.push({
         type: "action",

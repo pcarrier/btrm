@@ -15,11 +15,18 @@ import {
   decryptPassphrase,
 } from "./passphrase-crypto";
 
+interface BlitConfigDestination {
+  id: string;
+  type: "gateway";
+  label: string;
+}
+
 interface BlitConfig {
   gateway?: boolean;
   certHash?: string;
   hub?: string;
   host?: string;
+  destinations?: BlitConfigDestination[];
 }
 
 function readPassphrase(): string | null {
@@ -46,6 +53,21 @@ async function fetchConfig(): Promise<BlitConfig> {
   return resp.json();
 }
 
+export interface ConnectionSpec {
+  id: string;
+  label: string;
+  transport: BlitTransport;
+}
+
+/** Build a WebSocket URL for a specific destination. */
+function wsUrlForDest(destId: string): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const base = location.pathname.endsWith("/")
+    ? location.pathname
+    : location.pathname + "/";
+  return proto + "//" + location.host + base + "d/" + encodeURIComponent(destId);
+}
+
 function createTransport(pass: string, config: BlitConfig): BlitTransport {
   if (config.hub) {
     return createShareTransport(config.hub, pass);
@@ -56,6 +78,28 @@ function createTransport(pass: string, config: BlitConfig): BlitTransport {
     });
   }
   return new WebSocketTransport(wsUrl(), pass);
+}
+
+/** Create one transport per destination from the config. */
+function createConnectionSpecs(
+  pass: string,
+  config: BlitConfig,
+): ConnectionSpec[] {
+  if (config.destinations && config.destinations.length > 0) {
+    return config.destinations.map((dest) => ({
+      id: dest.id,
+      label: dest.label,
+      transport: new WebSocketTransport(wsUrlForDest(dest.id), pass),
+    }));
+  }
+  // Fallback: single connection (backward compat with old gateway).
+  return [
+    {
+      id: "main",
+      label: config.host ?? location.hostname,
+      transport: createTransport(pass, config),
+    },
+  ];
 }
 
 export function App(props: { wasm: BlitWasmModule }) {
@@ -95,11 +139,11 @@ function ConnectedApp(props: {
   passphrase: string;
   config: BlitConfig;
 }) {
-  const transport = createTransport(props.passphrase, props.config);
+  const connections = createConnectionSpecs(props.passphrase, props.config);
 
   return (
     <Workspace
-      transport={transport}
+      connections={connections}
       wasm={props.wasm}
       onAuthError={() => {
         history.replaceState(null, "", location.pathname);
@@ -110,13 +154,15 @@ function ConnectedApp(props: {
 }
 
 function AuthApp(props: { wasm: BlitWasmModule; config: BlitConfig }) {
-  const [transport, setTransport] = createSignal<BlitTransport | null>(null);
+  const [transport, setTransport] = createSignal<ConnectionSpec[] | null>(null);
   const [authError, setAuthError] = createSignal<string | null>(null);
   let passRef!: HTMLInputElement;
 
   function connect(pass: string) {
     setAuthError(null);
-    const t = createTransport(pass, props.config);
+    const specs = createConnectionSpecs(pass, props.config);
+    // Use the first transport to detect auth success/failure.
+    const first = specs[0].transport;
     const onStatus = (status: string) => {
       if (status === "connected") {
         const encrypted = encryptPassphrase(pass);
@@ -125,15 +171,15 @@ function AuthApp(props: { wasm: BlitWasmModule; config: BlitConfig }) {
           "",
           `${location.pathname}#${encodeURIComponent(encrypted)}`,
         );
-        t.removeEventListener("statuschange", onStatus);
+        first.removeEventListener("statuschange", onStatus);
       } else if (status === "error") {
-        setAuthError(t.lastError ?? i18n("auth.failed"));
-        t.removeEventListener("statuschange", onStatus);
+        setAuthError(first.lastError ?? i18n("auth.failed"));
+        first.removeEventListener("statuschange", onStatus);
         setTransport(null);
       }
     };
-    t.addEventListener("statuschange", onStatus);
-    setTransport(t);
+    first.addEventListener("statuschange", onStatus);
+    setTransport(specs);
   }
 
   return (
@@ -147,9 +193,9 @@ function AuthApp(props: { wasm: BlitWasmModule; config: BlitConfig }) {
         />
       }
     >
-      {(t) => (
+      {(specs) => (
         <Workspace
-          transport={t()}
+          connections={specs()}
           wasm={props.wasm}
           onAuthError={() => {
             setTransport(null);

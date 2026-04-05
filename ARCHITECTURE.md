@@ -33,7 +33,7 @@ The server is the stateful half. It owns PTYs, scrollback, parsed terminal state
 | `@blit-sh/solid`        | `js/solid/`                | npm           | Thin Solid wrapper: context provider, primitives, and `BlitTerminal` component delegating to core                    |
 | `blit-server`           | `crates/server/`           | bin           | PTY host and frame scheduler. Listens on Unix socket.                                                                |
 | `blit-gateway`          | `crates/gateway/`          | bin           | WebSocket/WebTransport proxy with passphrase auth                                                                    |
-| `blit` (CLI)            | `crates/cli/`              | bin           | Browser/console client, agent subcommands, SSH tunneling, embedded gateway, `server`/`share` subcommands             |
+| `blit` (CLI)            | `crates/cli/`              | bin           | Browser client, agent subcommands, SSH tunneling, embedded gateway, `server`/`share` subcommands             |
 | `blit-webrtc-forwarder` | `crates/webrtc-forwarder/` | lib + bin     | WebRTC bridge: signaling, STUN/TURN NAT traversal, peer-to-peer data channels to blit-server                         |
 | `blit-fonts`            | `crates/fonts/`            | lib           | Font discovery and metadata (TTF/OTF `name`/`post`/`hmtx` table parsing)                                             |
 | `blit-webserver`        | `crates/webserver/`        | lib           | Shared axum HTTP helpers for serving assets and fonts                                                                |
@@ -241,6 +241,27 @@ This is the integration point for embedding `blit-server` inside another process
 
 The gateway opens a new Unix socket connection to `blit-server` for each authenticated browser client and proxies bidirectionally.
 
+#### Multi-destination routing
+
+Both gateways support multiple named destinations (each pointing to a different `blit-server` socket). The browser selects a destination via the WebSocket URL path:
+
+- `/d/{name}` — connect to the named destination
+- `/` (root) — connect to the first destination (sorted by name), for backward compatibility
+
+The CLI creates destinations with `blit open ssh:rabbit ssh:fox` (positional URIs). The standalone gateway uses `BLIT_DESTINATIONS="rabbit=/run/blit/rabbit.sock,fox=/run/blit/fox.sock"`. The `/config` GET endpoint returns a `destinations` array so the browser knows what's available:
+
+```json
+{
+  "gateway": true,
+  "destinations": [
+    {"id": "fox", "type": "gateway", "label": "fox"},
+    {"id": "rabbit", "type": "gateway", "label": "rabbit"}
+  ]
+}
+```
+
+The browser creates one `BlitConnection` (and one WebSocket) per destination. Session IDs are namespaced by connection (`"rabbit:1"`, `"fox:1"`), so they never collide.
+
 ### WebTransport (QUIC/HTTP3)
 
 Enabled with `BLIT_QUIC=1`. The gateway listens for QUIC connections on the same port as HTTP. A single bidirectional QUIC stream carries the session, using the same 4-byte length-prefixed framing as Unix sockets. Auth is a 2-byte-LE-length passphrase followed by a 1-byte response.
@@ -263,12 +284,13 @@ On the browser side, `@blit-sh/core` includes a `WebRtcDataChannelTransport` tha
 
 ### SSH tunneling (CLI)
 
-`blit-cli` can connect to a remote `blit-server` over SSH in two ways:
+`blit-cli` can connect to a remote `blit-server` over SSH.
 
-- **Console mode**: pipes through `ssh -T host 'nc -U $SOCK'` (or `socat`), using the SSH process's stdin/stdout as the byte stream. The remote socket path is resolved on the remote host using the same cascade (`$BLIT_SOCK` → `$TMPDIR/blit.sock` → `/tmp/blit-$USER.sock` → `/run/blit/$USER.sock` → `$XDG_RUNTIME_DIR/blit.sock` → `/tmp/blit.sock`), where `$USER` is the SSH user. When `--socket` is also provided, its value is used as the remote socket path directly, bypassing the cascade.
-- **Browser mode**: uses `ssh -L local.sock:remote.sock` to forward a local Unix socket to the remote server, then starts a local embedded gateway pointing at the forwarded socket. Supports `--socket` to override the remote path.
+`blit open` uses positional destination URIs (`ssh:[user@]host[:/path/to/socket]`). Each SSH destination sets up `ssh -L local.sock:remote.sock` to forward a local Unix socket to the remote server, then the embedded gateway proxies through it. Multiple SSH destinations can be opened in one session (`blit open ssh:rabbit ssh:fox`), each getting its own tunnel and gateway route.
 
-Both modes autostart a remote `blit server` (or `blit-server`) if no socket file exists at the resolved path.
+Agent subcommands use the `--ssh HOST` flag (`blit --ssh host list`, etc.) and pipe through `ssh -T host 'nc -U $SOCK'` (or `socat`), using the SSH process's stdin/stdout as the byte stream. The remote socket path is resolved on the remote host using the same cascade (`$BLIT_SOCK` → `$TMPDIR/blit.sock` → `/tmp/blit-$USER.sock` → `/run/blit/$USER.sock` → `$XDG_RUNTIME_DIR/blit.sock` → `/tmp/blit.sock`), where `$USER` is the SSH user. When `--socket` is also provided, its value is used as the remote socket path directly, bypassing the cascade.
+
+Both paths autostart a remote `blit server` (or `blit-server`) if no socket file exists at the resolved path.
 
 ### Transport abstraction
 
@@ -276,7 +298,7 @@ On the Rust side, `blit-cli` defines a `Transport` enum (in `crates/cli/src/tran
 
 ### Agent subcommands
 
-`blit-cli` includes non-interactive subcommands (`list`, `start`, `show`, `history`, `send`, `close`, `wait`, `restart`) in `crates/cli/src/agent.rs` for programmatic control of PTYs. It also includes `server` (run blit-server in-process), `share` (run blit-webrtc-forwarder in-process, auto-starting a server if needed), and `install` (install blit on a remote host via `--ssh`). These connect, perform a single operation over the binary protocol, and exit. They are designed for LLM agents and scripts: output is plain text (TSV for `list`, raw terminal text for `show`/`history`), errors go to stderr, and exit codes indicate success or failure. All subcommands accept the same transport options (`--socket`, `--tcp`, `--ssh`) as the interactive modes; `--ssh` and `--socket` can be combined to target a specific remote socket path.
+`blit-cli` includes non-interactive subcommands (`list`, `start`, `show`, `history`, `send`, `close`, `wait`, `restart`) in `crates/cli/src/agent.rs` for programmatic control of PTYs. It also includes `server` (run blit-server in-process), `share` (run blit-webrtc-forwarder in-process, auto-starting a server if needed), and `install` (install blit on a remote host via `--ssh`). These connect, perform a single operation over the binary protocol, and exit. They are designed for LLM agents and scripts: output is plain text (TSV for `list`, raw terminal text for `show`/`history`), errors go to stderr, and exit codes indicate success or failure. Agent subcommands accept the transport flags `--socket`, `--tcp`, `--ssh`; `--ssh` and `--socket` can be combined to target a specific remote socket path. `blit open` uses positional destination URIs instead.
 
 On the TypeScript side, the `BlitTransport` interface abstracts over WebSocket, WebTransport, and WebRTC:
 

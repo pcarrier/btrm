@@ -274,7 +274,7 @@ pub fn spawn_pty(
             std::env::remove_var("COLUMNS");
             std::env::remove_var("LINES");
             for (key, _) in std::env::vars() {
-                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" {
                     std::env::remove_var(&key);
                 }
             }
@@ -446,7 +446,7 @@ pub fn respawn_child(
             std::env::remove_var("COLUMNS");
             std::env::remove_var("LINES");
             for (key, _) in std::env::vars() {
-                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" {
                     std::env::remove_var(&key);
                 }
             }

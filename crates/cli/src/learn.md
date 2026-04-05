@@ -127,6 +127,29 @@ blit --ssh dev-server --socket /tmp/custom.sock list
 
 `--passphrase` connects via WebRTC using a passphrase for peer-to-peer session sharing. Both sides must use the same passphrase and signaling hub (set via `--hub` or `BLIT_HUB`).
 
+## Multi-destination browser sessions
+
+`blit open` accepts positional destination URIs to open multiple connections in a single browser session:
+
+```bash
+blit open ssh:rabbit ssh:fox            # two SSH hosts
+blit open ssh:alice@rabbit local        # remote + local
+blit open prod=ssh:prod.example.com     # explicit name
+```
+
+URI formats:
+
+| URI                                     | Description                          |
+| --------------------------------------- | ------------------------------------ |
+| `ssh:[user@]host[:/path/to/socket]`    | SSH tunnel to a remote host          |
+| `tcp:host:port`                         | Raw TCP connection                   |
+| `socket:/path`                          | Explicit Unix socket                 |
+| `local`                                 | Local server (auto-started if needed)|
+
+Names are auto-derived from the URI (e.g. `ssh:rabbit` → `rabbit`). Use `name=uri` to override.
+
+The global flags `--ssh`, `--tcp`, `--socket` are not accepted by `open`; use destination URIs instead. Those flags are for agent subcommands (`list`, `start`, `show`, etc.).
+
 ## Remote installation
 
 `blit install --ssh HOST` installs blit on a remote host. It detects the remote OS via `uname`, then runs the appropriate installer interactively over SSH:

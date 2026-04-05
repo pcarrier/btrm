@@ -23,11 +23,15 @@ Share a terminal over WebRTC:
 blit share # prints a URL anyone can open
 ```
 
-Connect to a remote host over SSH:
+Connect to remote hosts over SSH:
 
 ```bash
-blit open --ssh myhost
-blit --ssh myhost --socket /tmp/custom.sock list   # specific remote socket
+blit open ssh:myhost                               # one SSH destination
+blit open ssh:rabbit ssh:fox                       # two hosts side by side
+blit open ssh:alice@rabbit local                   # remote + local
+blit open ssh:rabbit:/tmp/custom.sock              # explicit remote socket
+blit open prod=ssh:prod.example.com                # explicit name
+blit --ssh myhost list                             # agent subcommands use --ssh
 ```
 
 Install blit on a remote host:
@@ -110,6 +114,7 @@ For wire protocol details, frame encoding, and transport internals, see [ARCHITE
 | Variable               | Default                                                                                                                | Purpose                                                             |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `BLIT_SOCK`            | `$TMPDIR/blit.sock`, `/tmp/blit-$USER.sock`, `/run/blit/$USER.sock`, `$XDG_RUNTIME_DIR/blit.sock`, or `/tmp/blit.sock` | Unix socket path                                                    |
+| `BLIT_DESTINATIONS`    | unset                                                                                                                  | Gateway multi-destination: `name1=/path1,name2=/path2`              |
 | `BLIT_SCROLLBACK`      | `10000`                                                                                                                | Scrollback rows per PTY                                             |
 | `BLIT_HUB`             | `hub.blit.sh`                                                                                                          | Signaling hub URL for WebRTC sharing                                |
 | `BLIT_INSTALL_DIR`     | `%LOCALAPPDATA%\blit\bin` (Windows)                                                                                    | Override install location (Windows PowerShell installer)            |

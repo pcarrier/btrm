@@ -4,6 +4,161 @@ mod transport;
 
 use clap::{Args, Parser, Subcommand};
 
+// ---------------------------------------------------------------------------
+// Destination URI parsing
+// ---------------------------------------------------------------------------
+
+/// A parsed destination: where to connect.
+#[derive(Clone, Debug)]
+pub enum Destination {
+    /// Local blit-server (auto-start if needed).
+    Local,
+    /// SSH to a remote host.
+    Ssh {
+        user: Option<String>,
+        host: String,
+        socket: Option<String>,
+    },
+    /// Raw TCP connection.
+    Tcp(String),
+    /// Explicit Unix socket path.
+    Socket(String),
+}
+
+/// A destination with a display name.
+#[derive(Clone, Debug)]
+pub struct NamedDestination {
+    pub name: String,
+    pub dest: Destination,
+}
+
+/// Parse a single destination URI string.
+///
+/// Grammar:
+///   [name=]uri
+///   uri = "ssh:" [user "@"] host [":" socket_path]
+///       | "tcp:" host ":" port
+///       | "socket:" path
+///       | "local"
+///
+/// Auto-derived names:
+///   ssh:alice@rabbit:/tmp/blit.sock -> "rabbit"
+///   tcp:10.0.0.5:3264              -> "10.0.0.5"
+///   socket:/tmp/blit.sock          -> "blit.sock"
+///   local                          -> "local"
+fn parse_destination(s: &str) -> Result<NamedDestination, String> {
+    // Check for explicit name: "name=uri"
+    let (explicit_name, uri) = if let Some(eq) = s.find('=') {
+        let name = &s[..eq];
+        let rest = &s[eq + 1..];
+        if name.is_empty() {
+            return Err(format!("empty destination name in '{s}'"));
+        }
+        (Some(name.to_string()), rest)
+    } else {
+        (None, s)
+    };
+
+    if uri == "local" {
+        return Ok(NamedDestination {
+            name: explicit_name.unwrap_or_else(|| "local".into()),
+            dest: Destination::Local,
+        });
+    }
+
+    if let Some(rest) = uri.strip_prefix("ssh:") {
+        if rest.is_empty() {
+            return Err("ssh: destination requires a host".into());
+        }
+        // Split off socket path: look for ":/" (colon followed by slash)
+        let (host_part, socket) = if let Some(pos) = rest.find(":/") {
+            (&rest[..pos], Some(rest[pos + 1..].to_string()))
+        } else {
+            (rest, None)
+        };
+        // Split user@host
+        let (user, host) = if let Some(at) = host_part.rfind('@') {
+            (
+                Some(host_part[..at].to_string()),
+                host_part[at + 1..].to_string(),
+            )
+        } else {
+            (None, host_part.to_string())
+        };
+        let auto_name = host.clone();
+        return Ok(NamedDestination {
+            name: explicit_name.unwrap_or(auto_name),
+            dest: Destination::Ssh {
+                user,
+                host,
+                socket,
+            },
+        });
+    }
+
+    if let Some(rest) = uri.strip_prefix("tcp:") {
+        if rest.is_empty() {
+            return Err("tcp: destination requires host:port".into());
+        }
+        let auto_name = rest.split(':').next().unwrap_or(rest).to_string();
+        return Ok(NamedDestination {
+            name: explicit_name.unwrap_or(auto_name),
+            dest: Destination::Tcp(rest.to_string()),
+        });
+    }
+
+    if let Some(rest) = uri.strip_prefix("socket:") {
+        if rest.is_empty() {
+            return Err("socket: destination requires a path".into());
+        }
+        let auto_name = std::path::Path::new(rest)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("socket")
+            .to_string();
+        return Ok(NamedDestination {
+            name: explicit_name.unwrap_or(auto_name),
+            dest: Destination::Socket(rest.to_string()),
+        });
+    }
+
+    Err(format!(
+        "unknown destination URI '{uri}' (expected ssh:, tcp:, socket:, or local)"
+    ))
+}
+
+/// Parse positional destination URIs into a Vec. Deduplicates names.
+/// Returns local as default when no URIs are given.
+fn parse_destinations(uris: &[String]) -> Vec<NamedDestination> {
+    if uris.is_empty() {
+        return vec![NamedDestination {
+            name: "local".into(),
+            dest: Destination::Local,
+        }];
+    }
+    let mut seen_names = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for s in uris {
+        match parse_destination(s) {
+            Ok(mut nd) => {
+                let base = nd.name.clone();
+                let mut suffix = 2;
+                while seen_names.contains(&nd.name) {
+                    nd.name = format!("{base}-{suffix}");
+                    suffix += 1;
+                }
+                seen_names.insert(nd.name.clone());
+                result.push(nd);
+            }
+            Err(e) => {
+                eprintln!("blit: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    result
+}
+
 #[derive(Parser)]
 #[command(
     name = "blit",
@@ -55,15 +210,27 @@ struct ConnectOpts {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the terminal UI in the browser (default) or terminal
+    /// Open the terminal UI in the browser
+    ///
+    /// With no arguments, connects to the local blit-server.
+    /// Pass one or more destination URIs to open multiple connections:
+    ///
+    ///   blit open ssh:rabbit ssh:fox          # two SSH hosts
+    ///   blit open ssh:alice@rabbit local      # SSH + local
+    ///   blit open prod=ssh:prod.example.com   # explicit name
+    ///
+    /// URI formats:
+    ///   ssh:[user@]host[:/socket/path]
+    ///   tcp:host:port
+    ///   socket:/path/to/sock
+    ///   local
     Open {
-        /// Render to terminal instead of opening browser (legacy mode)
-        #[arg(long, conflicts_with = "port")]
-        console: bool,
-
         /// Bind browser UI to a specific port (default: random)
-        #[arg(long, conflicts_with = "console")]
+        #[arg(long)]
         port: Option<u16>,
+
+        /// Destination URIs (e.g. ssh:host, tcp:host:port, socket:/path, local)
+        destinations: Vec<String>,
     },
 
     /// Share a terminal session via WebRTC
@@ -549,22 +716,30 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Command::Open { console, port } => {
+        Command::Open {
+            port,
+            destinations,
+        } => {
             let conn = &cli.connect;
-            if console {
-                interactive::run_console(
-                    &conn.socket,
-                    &conn.tcp,
-                    &conn.ssh,
-                    &conn.passphrase,
-                    &conn.hub,
-                )
-                .await;
-            } else if let Some(passphrase) = &conn.passphrase {
+            if conn.ssh.is_some() || conn.tcp.is_some() || conn.socket.is_some() {
+                eprintln!(
+                    "blit: --ssh/--tcp/--socket are not supported with open; use destination URIs instead\n\
+                     \n  blit open ssh:host\n  blit open tcp:host:port\n  blit open socket:/path"
+                );
+                std::process::exit(1);
+            }
+            if let Some(passphrase) = &conn.passphrase {
+                if !destinations.is_empty() {
+                    eprintln!(
+                        "blit: cannot combine --passphrase with destination URIs"
+                    );
+                    std::process::exit(1);
+                }
                 let hub = blit_webrtc_forwarder::normalize_hub(&conn.hub);
                 interactive::run_browser_share(passphrase, &hub, port).await;
             } else {
-                interactive::run_browser(&conn.socket, &conn.tcp, &conn.ssh, port).await;
+                let dests = parse_destinations(&destinations);
+                interactive::run_browser(dests, port).await;
             }
         }
         Command::Learn => {
@@ -691,5 +866,148 @@ async fn cmd_upgrade() -> Result<(), Box<dyn std::error::Error>> {
             .env("BLIT_INSTALL_DIR", install_dir)
             .status()?;
         std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+#[cfg(test)]
+mod destination_tests {
+    use super::*;
+
+    #[test]
+    fn parse_local() {
+        let nd = parse_destination("local").unwrap();
+        assert_eq!(nd.name, "local");
+        assert!(matches!(nd.dest, Destination::Local));
+    }
+
+    #[test]
+    fn parse_ssh_host_only() {
+        let nd = parse_destination("ssh:rabbit").unwrap();
+        assert_eq!(nd.name, "rabbit");
+        match &nd.dest {
+            Destination::Ssh { user, host, socket } => {
+                assert_eq!(user, &None);
+                assert_eq!(host, "rabbit");
+                assert_eq!(socket, &None);
+            }
+            _ => panic!("expected Ssh"),
+        }
+    }
+
+    #[test]
+    fn parse_ssh_user_host() {
+        let nd = parse_destination("ssh:alice@rabbit").unwrap();
+        assert_eq!(nd.name, "rabbit");
+        match &nd.dest {
+            Destination::Ssh { user, host, socket } => {
+                assert_eq!(user.as_deref(), Some("alice"));
+                assert_eq!(host, "rabbit");
+                assert_eq!(socket, &None);
+            }
+            _ => panic!("expected Ssh"),
+        }
+    }
+
+    #[test]
+    fn parse_ssh_host_socket() {
+        let nd = parse_destination("ssh:rabbit:/tmp/blit.sock").unwrap();
+        assert_eq!(nd.name, "rabbit");
+        match &nd.dest {
+            Destination::Ssh { user, host, socket } => {
+                assert_eq!(user, &None);
+                assert_eq!(host, "rabbit");
+                assert_eq!(socket.as_deref(), Some("/tmp/blit.sock"));
+            }
+            _ => panic!("expected Ssh"),
+        }
+    }
+
+    #[test]
+    fn parse_ssh_user_host_socket() {
+        let nd = parse_destination("ssh:alice@rabbit:/run/blit/alice.sock").unwrap();
+        assert_eq!(nd.name, "rabbit");
+        match &nd.dest {
+            Destination::Ssh { user, host, socket } => {
+                assert_eq!(user.as_deref(), Some("alice"));
+                assert_eq!(host, "rabbit");
+                assert_eq!(socket.as_deref(), Some("/run/blit/alice.sock"));
+            }
+            _ => panic!("expected Ssh"),
+        }
+    }
+
+    #[test]
+    fn parse_tcp() {
+        let nd = parse_destination("tcp:10.0.0.5:3264").unwrap();
+        assert_eq!(nd.name, "10.0.0.5");
+        match &nd.dest {
+            Destination::Tcp(addr) => assert_eq!(addr, "10.0.0.5:3264"),
+            _ => panic!("expected Tcp"),
+        }
+    }
+
+    #[test]
+    fn parse_socket() {
+        let nd = parse_destination("socket:/tmp/blit.sock").unwrap();
+        assert_eq!(nd.name, "blit.sock");
+        match &nd.dest {
+            Destination::Socket(p) => assert_eq!(p, "/tmp/blit.sock"),
+            _ => panic!("expected Socket"),
+        }
+    }
+
+    #[test]
+    fn parse_explicit_name() {
+        let nd = parse_destination("prod=ssh:prod-server.example.com").unwrap();
+        assert_eq!(nd.name, "prod");
+        match &nd.dest {
+            Destination::Ssh { host, .. } => assert_eq!(host, "prod-server.example.com"),
+            _ => panic!("expected Ssh"),
+        }
+    }
+
+    #[test]
+    fn parse_explicit_name_local() {
+        let nd = parse_destination("mybox=local").unwrap();
+        assert_eq!(nd.name, "mybox");
+        assert!(matches!(nd.dest, Destination::Local));
+    }
+
+    #[test]
+    fn parse_unknown_scheme() {
+        assert!(parse_destination("ftp:host").is_err());
+    }
+
+    #[test]
+    fn parse_empty_ssh() {
+        assert!(parse_destination("ssh:").is_err());
+    }
+
+    #[test]
+    fn parse_destinations_default_local() {
+        let dests = parse_destinations(&[]);
+        assert_eq!(dests.len(), 1);
+        assert_eq!(dests[0].name, "local");
+        assert!(matches!(dests[0].dest, Destination::Local));
+    }
+
+    #[test]
+    fn parse_destinations_multiple() {
+        let dests = parse_destinations(
+            &["ssh:rabbit".into(), "local".into()],
+        );
+        assert_eq!(dests.len(), 2);
+        assert_eq!(dests[0].name, "rabbit");
+        assert_eq!(dests[1].name, "local");
+    }
+
+    #[test]
+    fn parse_destinations_deduplicates_names() {
+        let dests = parse_destinations(
+            &["ssh:rabbit".into(), "ssh:rabbit".into()],
+        );
+        assert_eq!(dests.len(), 2);
+        assert_eq!(dests[0].name, "rabbit");
+        assert_eq!(dests[1].name, "rabbit-2");
     }
 }

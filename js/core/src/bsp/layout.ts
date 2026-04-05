@@ -31,6 +31,29 @@ function preset(name: string, dsl: string): BSPLayout {
   return { name, dsl, ...parseDSL(dsl) };
 }
 
+// ---------------------------------------------------------------------------
+// Surface assignment helpers
+// ---------------------------------------------------------------------------
+
+const SURFACE_PREFIX = "surface:";
+
+/** Create a BSP assignment value representing a compositor surface. */
+export function surfaceAssignment(surfaceId: number): string {
+  return `${SURFACE_PREFIX}${surfaceId}`;
+}
+
+/** Check whether a BSP assignment value represents a surface. */
+export function isSurfaceAssignment(value: string | null): boolean {
+  return value != null && value.startsWith(SURFACE_PREFIX);
+}
+
+/** Extract the numeric surface ID from a surface assignment string, or null. */
+export function parseSurfaceAssignment(value: string | null): number | null {
+  if (value == null || !value.startsWith(SURFACE_PREFIX)) return null;
+  const n = parseInt(value.slice(SURFACE_PREFIX.length), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function enumeratePanes(
   node: BSPNode,
   path: readonly number[] = [],
@@ -109,10 +132,14 @@ export function reconcileAssignments({
   const assignments: Record<string, string | null> = {};
 
   for (const pane of panes) {
-    const sessionId = previous.assignments[pane.id];
-    const keep =
-      sessionId != null && (live.has(sessionId) || !known.has(sessionId));
-    assignments[pane.id] = keep ? sessionId : null;
+    const value = previous.assignments[pane.id];
+    // Surface assignments are never reconciled against session liveness.
+    if (isSurfaceAssignment(value)) {
+      assignments[pane.id] = value;
+      continue;
+    }
+    const keep = value != null && (live.has(value) || !known.has(value));
+    assignments[pane.id] = keep ? value : null;
   }
 
   return { assignments };

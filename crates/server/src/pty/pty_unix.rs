@@ -212,6 +212,7 @@ pub fn spawn_pty(
     dir: Option<&str>,
     scrollback: usize,
     state: AppState,
+    wayland_display: Option<&str>,
 ) -> Option<crate::Pty> {
     let mut master: libc::c_int = 0;
     let mut slave: libc::c_int = 0;
@@ -273,9 +274,30 @@ pub fn spawn_pty(
             std::env::remove_var("COLUMNS");
             std::env::remove_var("LINES");
             for (key, _) in std::env::vars() {
-                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" {
                     std::env::remove_var(&key);
                 }
+            }
+        }
+        if let Some(wd) = wayland_display {
+            unsafe {
+                let wd_path = std::path::Path::new(wd);
+                let socket_dir = wd_path.parent();
+                // When XDG_RUNTIME_DIR doesn't contain the compositor socket
+                // (e.g. it points to a non-existent directory), update it so
+                // Chromium-based browsers can resolve the bare socket name.
+                if let Some(dir) = socket_dir {
+                    let xdg = std::env::var_os("XDG_RUNTIME_DIR");
+                    let needs_update = match &xdg {
+                        Some(x) => std::path::Path::new(x) != dir,
+                        None => true,
+                    };
+                    if needs_update {
+                        std::env::set_var("XDG_RUNTIME_DIR", dir);
+                    }
+                }
+                std::env::set_var("WAYLAND_DISPLAY", wd);
+                std::env::remove_var("DISPLAY");
             }
         }
         if let Some(command) = command {
@@ -330,10 +352,10 @@ pub fn spawn_pty(
         libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK);
     }
 
-    state.2.write().unwrap().insert(id, master);
+    state.pty_fds.write().unwrap().insert(id, master);
     let (byte_tx, byte_rx) = mpsc::channel(PTY_CHANNEL_CAPACITY);
     let reader_handle = std::thread::spawn({
-        let notify = state.3.clone();
+        let notify = state.delivery_notify.clone();
         move || pty_reader(master, byte_tx, notify)
     });
     let handle = PtyHandle {
@@ -360,6 +382,7 @@ pub fn spawn_pty(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn respawn_child(
     shell: &str,
     shell_flags: &str,
@@ -368,6 +391,7 @@ pub fn respawn_child(
     pty_id: u16,
     command: Option<&str>,
     state: AppState,
+    wayland_display: Option<&str>,
 ) -> Option<(
     PtyHandle,
     std::thread::JoinHandle<()>,
@@ -422,9 +446,27 @@ pub fn respawn_child(
             std::env::remove_var("COLUMNS");
             std::env::remove_var("LINES");
             for (key, _) in std::env::vars() {
-                if key.starts_with("BLIT_") && key != "BLIT_HUB" && key != "BLIT_DISPLAY_FPS" {
+                if key.starts_with("BLIT_") && key != "BLIT_HUB" {
                     std::env::remove_var(&key);
                 }
+            }
+        }
+        if let Some(wd) = wayland_display {
+            unsafe {
+                let wd_path = std::path::Path::new(wd);
+                let socket_dir = wd_path.parent();
+                if let Some(dir) = socket_dir {
+                    let xdg = std::env::var_os("XDG_RUNTIME_DIR");
+                    let needs_update = match &xdg {
+                        Some(x) => std::path::Path::new(x) != dir,
+                        None => true,
+                    };
+                    if needs_update {
+                        std::env::set_var("XDG_RUNTIME_DIR", dir);
+                    }
+                }
+                std::env::set_var("WAYLAND_DISPLAY", wd);
+                std::env::remove_var("DISPLAY");
             }
         }
         if let Some(cmd) = command {
@@ -471,10 +513,10 @@ pub fn respawn_child(
         libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK);
     }
 
-    state.2.write().unwrap().insert(pty_id, master);
+    state.pty_fds.write().unwrap().insert(pty_id, master);
     let (byte_tx, byte_rx) = mpsc::channel(PTY_CHANNEL_CAPACITY);
     let reader_handle = std::thread::spawn({
-        let notify = state.3.clone();
+        let notify = state.delivery_notify.clone();
         move || pty_reader(master, byte_tx, notify)
     });
     let handle = PtyHandle {
